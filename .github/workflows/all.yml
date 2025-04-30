@@ -1,0 +1,33 @@
+name: All
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: "all"
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions: write-all
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Install packages
+        run: cd info && pip install -r requirements.txt && cd ..
+      - name: Create documents
+        run: cd info && mkdocs build && cd ..
+      - name: Upload documents artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './info/site/'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
