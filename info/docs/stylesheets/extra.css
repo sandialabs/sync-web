@@ -1,0 +1,53 @@
+/* SNL colors */
+/* #00add0 - light blue */
+/* #002b4c - dark blue */
+/* #3d3d3d - dark gray */
+/* #008e74 - teal green */
+/* #6cb312 - green */
+/* #ff9900 - orange */
+/* #a92c00 - red */
+/* #8d2a6b - purple */
+
+:root {
+    --md-primary-fg-color: #3d3d3d;
+    /* --md-primary-bg-color: #ffffff; */
+    /* --md-default-fg-color: #00add0; */
+    /* --md-default-bg-color: #ffffff; */
+    /* --md-footer-fg-color: #00add0; */
+    /* --md-footer-bg-color: #3d3d3d; */
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #002b4c;
+}
+
+.md-nav__title {
+    display: none;
+}
+
+.md-grid {
+    max-width: 1080px;
+}
+
+.md-typeset a {
+    color: #00add0;
+}
+
+.md-typeset abbr {
+    color: #008e74;
+    border: none;
+}
+
+.md-typeset a>abbr {
+    color: #00add0;
+    border: none;
+}
+
+.md-typeset__table {
+    min-width: 100%;
+    display: flex;
+}
+
+.md-typeset table:not([class]) {
+    display: table;
+}

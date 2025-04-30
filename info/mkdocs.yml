@@ -1,0 +1,57 @@
+site_name: Synchronic Web
+
+theme:
+  name: material
+  logo: images/logo.png
+  favicon: images/favicon.ico
+  font:
+    text: Roboto
+    code: Roboto Mono
+  palette:
+    primary: custom
+    scheme: custom
+  features:
+    - toc.follow
+    - toc.integrate
+    - content.code.copy
+    - content.tooltips
+
+extra:
+  generator: false
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - abbr
+  - attr_list
+  - pymdownx.snippets:
+      auto_append:
+        - docs/glossary.md
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      linenums: true
+  - md_in_html
+  - attr_list
+  - footnotes
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+plugins:
+  - git-revision-date-localized
+  - search
+
+nav:
+  - General Information:
+    - Overview: index.md
+  - Publications:
+    - Whitepaper: whitepaper.md
+    - JCDL Poster: jcdl.md
+  - Links:
+    - Journal SDK : http://github.com/sandialabs/sync-journal
+    - Record Logic: http://github.com/sandialabs/sync-records
+    - Service Deployments: http://github.com/sandialabs/sync-services
