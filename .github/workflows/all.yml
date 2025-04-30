@@ -23,7 +23,7 @@ jobs:
       - name: Install packages
         run: cd info && pip install -r requirements.txt && cd ..
       - name: Create documents
-        run: cd info && mkdocks build && cd ..
+        run: cd info && mkdocs build && cd ..
       - name: Upload documents artifact
         uses: actions/upload-pages-artifact@v3
         with:
