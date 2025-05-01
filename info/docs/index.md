@@ -1,7 +1,7 @@
 # Welcome to the Synchronic Web!
 
 The Synchronic Web is a network of information that is locked into a single global view of history.
-When clients notarize their data to the Synchronic Web, they gain the ability to irrefutably prove the following statement to the rest of the world: "I commit to this information---and only this information---at this moment in time."
+When nodes publish their data to the Synchronic Web, they gain the ability to irrefutably prove the following statement to the rest of the world: "I commit to this information---and only this information---at this moment in time."
 Much like encryption or digital signatures, this capability has the potential to bolster the integrity of public cyberspace at a foundational level and scale.
 
 ## Use Cases
@@ -23,14 +23,10 @@ Together, these cryptographic primitives constrain the space of disinformation t
 
 ## Architecture
 
-The core of the Synchronic Web is a small, simple blockchain used to synchronize the state of the web.
-A consortium of well-known organizations publish new blocks by operating nodes in a fault-tolerant consensus protocol.
-Any client in the world can send notarization requests in the form of a key/value pair.
-The key is linked to their cryptographic identity and the value is a confidential fingerprint of their data.
-Using a simple but novel encoding technique, the blockchain network processes these requests and returns proofs to each client showing that they committed to one string of data---and only one string---at that moment in time.
-
-Clients, which can be implemented as plugins or microservices, must conform to a basic set of semantic specifications.
-They can support a wide variety of applications including centralize databases, nodes in another decentralized blockchain, browser extensions to verify web content, or graphical interfaces for committing user-uploaded files.
+The core mechanism that enables access the Synchronic Web is a program called a _journal_.
+Other applications can directly read and write data to their local journals to create immutable, version-controlled logs of history called _records_.
+Journals continuously exchange cryptographic metadata, mainly hashes, with other journals to maintain global notions of consensus over local state.
+By systematically decouple data from its hashes, the Synchronic Web allows entities to decouple the cost of storage from the value of data integrity, enabling new secure ways to share stateful data across network and organizational boundaries.
 
 ## Related Work
 
@@ -38,9 +34,9 @@ The Synchronic Web provides a subset of features enabled by conventional public 
 Whereas conventional blockchains provide storage and tamper-evidence for application data, the Synchronic Web blockchain only provides tamper-evidence.
 However, unlike conventional blockchains, it provides this feature at arbitrary scales and minimal complexity to enable a global network of immutable data.
 
-The Synchronic Web also offers a more secure and trustworthy alternative to the existing timestamping authority infrastructure.
-Today, centralized timestamping authorities provide adequate service for personal uses like emails, e-Signatures or Electronic Lab Notebooks.
-The Synchronic Web extends this infrastructure with stronger security and trust guarantees that are uniquely suitable for highly consequential, highly controversial, or multi-national use cases.
+The Synchronic Web also offers a superset of features enabled by transparency services.
+Whereas transparency services assert immutable history owned by a single entity, the Synchronic Web provides a more distributed notion of history that can span multiple organizations.
+However, given the closely-aligned objectives, it is likely that the two technologies will prove to be highly convergent and complimentary.
 
 !!! note
 

@@ -46,12 +46,12 @@ plugins:
   - search
 
 nav:
-  - General Information:
+  - Overview:
     - Overview: index.md
-  - Publications:
+  - Documents:
     - Whitepaper: whitepaper.md
     - JCDL Poster: jcdl.md
-  - Links:
+  - Software:
     - Journal SDK : http://github.com/sandialabs/sync-journal
     - Record Logic: http://github.com/sandialabs/sync-records
     - Service Deployments: http://github.com/sandialabs/sync-services
