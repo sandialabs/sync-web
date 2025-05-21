@@ -116,13 +116,11 @@ For example, consider a four-journal network where each journal is controlled by
 The ledger interface allows us to concretely build this network through the directed _peering_ functionality.
 On each journal:
 
-`(*local* "password" (ledger-peer! journal-2 (lambda (msg) (sync-remote "http://journal-2.io" msg)))) ; on Journal 1`
+`(*local* "password-1" (ledger-peer! journal-2 (lambda (msg) (sync-remote "http://journal-2.io" msg)))) ; on Journal 1`
 
-`(*local* "password" (ledger-peer! journal-2 (lambda (msg) (sync-remote "http://journal-2.io" msg)))) ; on Journal 1`
+`(*local* "password-2" (ledger-peer! journal-3 (lambda (msg) (sync-remote "http://journal-3.io" msg)))) ; on Journal 2`
 
-`(*local* "password" (ledger-peer! journal-3 (lambda (msg) (sync-remote "http://journal-3.io" msg)))) ; on Journal 2`
-
-`(*local* "password" (ledger-peer! journal-4 (lambda (msg) (sync-remote "http://journal-4.io" msg)))) ; on Journal 2`
+`(*local* "password-2" (ledger-peer! journal-4 (lambda (msg) (sync-remote "http://journal-4.io" msg)))) ; on Journal 2`
 
 In the `ledger-peer!` function, the first argument is the name of the peer, which the journal is free to chose.
 The second argument is the logic for a function that the ledger interface uses to communicate with the remote journal.
@@ -134,25 +132,25 @@ Later on, the upsteam journal can use this lightweight check to securely verify 
 
 For example, suppose that nodes 3 and 4 update their local states about 10 seconds after they come online.
 
-`(*local* "password" (ledger-set! (*state* status sensor-a) online)) ; on Journal 3`
+`(*local* "password-3" (ledger-set! (*state* status sensor-a) online)) ; on Journal 3`
 
-`(*local* "password" (ledger-set! (*state* status sensor-b) failed)) ; on Journal 4`
+`(*local* "password-4" (ledger-set! (*state* status sensor-b) failed)) ; on Journal 4`
 
 Sometime later, suppose that the organization controlling Journal 1 discovers it is has been attacked by an advanced threat actor and needs to check the historical health of its sensors.
 Using the commands queries, it can securely query for the necessary data:
 
-`(*local* "password" (ledger-get (*peers* journal-2 *peers* journal-3 *state* status sensor-a)) 12) ; on Journal 1`
+`(*local* "password-1" (ledger-get (*peers* journal-2 *peers* journal-3 *state* status sensor-a)) 12) ; on Journal 1`
 
 `> online`
 
-`(*local* "password" (ledger-get (*peers* journal-2 *peers* journal-4 *state* status sensor-b)) 12) ; on Journal 1`
+`(*local* "password-1" (ledger-get (*peers* journal-2 *peers* journal-4 *state* status sensor-b)) 12) ; on Journal 1`
 
 `> failed`
 
 The returned values are, in a crytographically rigorous sense, secure.
-Whereas an adversary might be able to compromise a single node, it is proportionally harder for it to compromise all nodes in a distributed network.
+Whereas an adversary might be able to compromise a single node, it is compoundingly more difficult for it to compromise all nodes in a distributed network.
 To convincingly fake Journal 4's sensor status, for example, the adversary would have to alter all of Journal 4, Journal 2 and Journal 1's databases.
-Failure to do so would cause result in an overt data integrity failure.
+Failure to synchronize the entire attack would cause an overt data integrity alert.
 
 Finally, much like with local state, it is also possible to pin and unpin states from remote journals.
 Here, pinning can both reduce network fetching time and also preserve verifiable proof of the result indefinitely.
