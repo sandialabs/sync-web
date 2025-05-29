@@ -155,10 +155,6 @@ Failure to synchronize the entire attack would cause an overt data integrity ale
 Finally, much like with local state, it is also possible to pin and unpin states from remote journals.
 Here, pinning can both reduce network fetching time and also preserve verifiable proof of the result indefinitely.
 
-!!! note
-
-    The pinning functionality is still in the process of being implemented
-
 `(*local* "password" (ledger-pin! (*peers* journal-2 *peers* journal-3 *state* status sensor-a)) 12)`
 
 `(*local* "password" (ledger-unpin! (*peers* journal-2 *peers* journal-4 *state* status sensor-b)) 12)`
