@@ -52,6 +52,7 @@ nav:
   - Documents:
     - Whitepaper: whitepaper.md
     - JCDL Poster: jcdl.md
+    - Digital Identity: identity.md
   - Software:
     - Journal SDK : http://github.com/sandialabs/sync-journal
     - Record Logic: http://github.com/sandialabs/sync-records
