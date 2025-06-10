@@ -25,7 +25,7 @@ For example, say we write an article called “The Synchronic Web,” whose pdf 
 
 Coincident with publication, we can invoke the journal sdk via: 
 
-`(*local* "password" (ledger-set! (*state* documents arxiv the-synchronic-web) “0x116...”))`
+`(*local* "password" (ledger-set! (*state* documents arxiv the-synchronic-web) "0x116..."))`
 
 `> #t`
 
@@ -33,7 +33,7 @@ And then, any time in the future, we can query the journal to retrieve the hash,
 
 `(*local* "password" (ledger-get (*state* documents arxiv the-synchronic-web))`
 
-`> “0x116...”`
+`> "0x116..."`
 
 Even though this is a simple example, it already illustrates a few useful commands.
 First, note the boilerplate that prefixes the actual operation with keyword `*local*`, a `"password"`.
@@ -57,13 +57,13 @@ This index represent relative notions of time on the Synchronic Web.
 Consider an example of a naturally changing data artifact: a software repository.
 We can imagine setting up a git CI/CD pipeline that automatically writes to a journal with every git push like so:
 
-`(*local* "password" (ledger-set! (*state* repos my-repo) “0x32a8bcdd...32”))`
+`(*local* "password" (ledger-set! (*state* repos my-repo) "0x32a8bcdd...32"))`
 
 `> #t`
 
 Then, 10 seconds later, we might write a new commit push to the same path: 
 
-`(*local* "password" (ledger-set! (*state* repos my-repo) “0xda3ff8d1...1b”))`
+`(*local* "password" (ledger-set! (*state* repos my-repo) "0xda3ff8d1...1b"))`
 
 `> #t`
 
