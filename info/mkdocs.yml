@@ -49,6 +49,7 @@ nav:
   - Overview:
     - Overview: index.md
     - Quickstart: quickstart.md
+    - Walkthrough: walkthrough.md
   - Documents:
     - Whitepaper: whitepaper.md
     - JCDL Poster: jcdl.md
