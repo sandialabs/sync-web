@@ -9,3 +9,7 @@ scrape_configs:
     file_sd_configs:
       - files:
           - /etc/prometheus/targets.json
+  - job_name: "agent-monitor"
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/agent_targets.json
