@@ -32,7 +32,6 @@ check_flag
 
 rm sync-services -rf
 git clone https://github.com/sandialabs/sync-services.git
-git checkout objects
 
 # Pull latest updates from repo
 COMPOSE=sync-services/compose/general/docker-compose.yml

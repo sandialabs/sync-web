@@ -199,7 +199,7 @@ def run(peers):
     while True:
         Thread(target=_act, args=[call]).start()
         time.sleep(max((until - datetime.now()).total_seconds(), 0))
-        until += timedelta(seconds=int(env["ACTIVITY"]))
+        until += timedelta(seconds=float(env["ACTIVITY"]))
 
 
 if __name__ == "__main__":

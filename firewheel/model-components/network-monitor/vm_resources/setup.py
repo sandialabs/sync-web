@@ -489,7 +489,7 @@ result = fetch(
                         {
                             "refId": "A",
                             "datasource": {"type": "prometheus", "uid": uid},
-                            "expr": 'sum by(instance) (rate(social_agent_requests_total{job="agent-monitor"}[$window]))',
+                            "expr": 'sum by(instance) (rate(social_agent_activity_cycles_success_total{job="agent-monitor"}[$window]))',
                             "editorMode": "code",
                             "legendFormat": "{{instance}}",
                             "range": True,

@@ -16,7 +16,7 @@ class Plugin(AbstractPlugin):
     def run(self, connectivity="2", size="32", activity="0", words="8"):
         connectivity = int(connectivity)
         size = int(size)
-        activity = int(activity)
+        activity = float(activity)
         words = int(words)
 
         journals = [v.name for v in self.g.get_vertices() if v.is_decorated_by(Journal)]
