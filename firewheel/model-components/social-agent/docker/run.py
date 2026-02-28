@@ -23,7 +23,7 @@ with open(os.path.join(DIR, "frankenstein.txt")) as fd:
         x.lower() for x in fd.read() if x.isascii() and x.isalpha() or x.isspace()
     ).split()
 
-NUM_WORDS = int(env['WORDS'])
+NUM_WORDS = int(env["WORDS"])
 METRICS_PATH = env.get(
     "METRICS_TEXTFILE", "/var/lib/node_exporter/textfile/social_agent.prom"
 )
@@ -41,6 +41,8 @@ class Metrics:
         self.set_latency_count = 0
         self.activity_cycles_total = 0
         self.activity_cycles_success_total = 0
+        self.journal_nodes = set()
+        self.inferred_journal_hop_requests_total = {}
 
     def record_request(self, function, duration, success):
         with self.lock:
@@ -60,6 +62,20 @@ class Metrics:
             if success:
                 self.activity_cycles_success_total += 1
 
+    def register_journals(self, journals):
+        with self.lock:
+            self.journal_nodes.update(journals)
+
+    def record_inferred_journal_hops(self, hops):
+        with self.lock:
+            for src, dst in hops:
+                key = (src, dst)
+                self.journal_nodes.add(src)
+                self.journal_nodes.add(dst)
+                self.inferred_journal_hop_requests_total[key] = (
+                    self.inferred_journal_hop_requests_total.get(key, 0) + 1
+                )
+
     def snapshot(self):
         with self.lock:
             return {
@@ -72,6 +88,10 @@ class Metrics:
                 "set_latency_count": self.set_latency_count,
                 "activity_cycles_total": self.activity_cycles_total,
                 "activity_cycles_success_total": self.activity_cycles_success_total,
+                "journal_nodes": sorted(self.journal_nodes),
+                "inferred_journal_hop_requests_total": dict(
+                    self.inferred_journal_hop_requests_total
+                ),
             }
 
 
@@ -80,6 +100,10 @@ METRICS = Metrics()
 
 def write_metrics():
     stats = METRICS.snapshot()
+
+    def _escape_label(value):
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
     lines = [
         "# HELP social_agent_requests_total Total journal interface requests sent by the social agent.",
         "# TYPE social_agent_requests_total counter",
@@ -108,7 +132,33 @@ def write_metrics():
         "# HELP social_agent_uptime_seconds Uptime of the social agent process.",
         "# TYPE social_agent_uptime_seconds gauge",
         f"social_agent_uptime_seconds {max(time.time() - stats['started'], 0)}",
+        "# HELP social_agent_peering_journal_node_info Known journal nodes for inferred peering graph visualization.",
+        "# TYPE social_agent_peering_journal_node_info gauge",
     ]
+    for node in stats["journal_nodes"]:
+        node_label = _escape_label(node.rsplit(".", 1)[0])
+        lines.append(
+            'social_agent_peering_journal_node_info{id="%s",title="%s"} 1'
+            % (node_label, node_label)
+        )
+
+    lines.extend(
+        [
+            "# HELP social_agent_inferred_journal_hop_requests_total Count of inferred successful journal-to-journal hop communications observed via extended reads.",
+            "# TYPE social_agent_inferred_journal_hop_requests_total counter",
+        ]
+    )
+    for (src, dst), count in sorted(
+        stats["inferred_journal_hop_requests_total"].items(), key=lambda item: item[0]
+    ):
+        src_label = _escape_label(src.rsplit(".", 1)[0])
+        dst_label = _escape_label(dst.rsplit(".", 1)[0])
+        edge_id = _escape_label(f"{src_label}->{dst_label}")
+        lines.append(
+            'social_agent_inferred_journal_hop_requests_total{id="%s",source="%s",target="%s",secondaryStat="msg/s"} %s'
+            % (edge_id, src_label, dst_label, count)
+        )
+
     tmp_path = f"{METRICS_PATH}.tmp"
     os.makedirs(os.path.dirname(METRICS_PATH), exist_ok=True)
     with open(tmp_path, "w") as fd:
@@ -139,17 +189,25 @@ def call(function, *arguments):
             },
         ).json()
         success = True
-        logger.info(f"{datetime.now().isoformat()} {function} | {arguments} -> {result}")
+        logger.info(
+            f"{datetime.now().isoformat()} {function} | {arguments} -> {result}"
+        )
         return result
     finally:
         METRICS.record_request(function, time.perf_counter() - started, success)
 
 
 def run(peers):
+    local_journal = env["JOURNAL"]
+
     # initialize peering
-    for peer in peers[env["JOURNAL"]]:
+    for peer in peers[local_journal]:
         # todo: handle public key
-        while r := call("general-peer!", peer.rsplit(".", 1)[0], {"*type/string*": f"http://{peer}/interface"}):
+        while r := call(
+            "general-peer!",
+            peer.rsplit(".", 1)[0],
+            {"*type/string*": f"http://{peer}/interface"},
+        ):
             if r is not True:
                 logger.warning(f"Could not peer with {peer}, trying again")
                 time.sleep(1)
@@ -168,9 +226,11 @@ def run(peers):
     def _act(call):
         cycle_success = False
         try:
-            path, node = [], env["JOURNAL"]
+            path, node = [], local_journal
+            traversal = [local_journal]
             while choice(2) and peers.get(node):
                 node = choice(peers[node])
+                traversal.append(node)
                 path += [-1, ["*peer*", node.rsplit(".", 1)[0], "chain"]]
 
             path += [-1, ["*state*", "data", f"key-{randint(0, env['SIZE'])}"]]
@@ -181,6 +241,11 @@ def run(peers):
             if type(result) is not dict or "*type/string*" not in result:
                 logger.warning("Cannot complete action")
                 return
+
+            if len(traversal) > 1:
+                METRICS.record_inferred_journal_hops(
+                    list(zip(traversal[:-1], traversal[1:]))
+                )
 
             ls = result["*type/string*"].split(" ")
             ls[randint(0, NUM_WORDS)] = choice(WORDS)
@@ -215,5 +280,10 @@ if __name__ == "__main__":
 
     with open(os.path.join(DIR, "peers.json")) as fd:
         peers = json.load(fd)
+
+    known_journals = {env["JOURNAL"], *peers.keys()}
+    for peer_list in peers.values():
+        known_journals.update(peer_list)
+    METRICS.register_journals(known_journals)
 
     run(peers)
