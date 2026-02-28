@@ -1,6 +1,12 @@
 (define-class (tree)
+  ;; Tree class provides a hashed key-value directory with Merkle-style nodes.
 
   (define (~key-bits self key)
+    ;; Convert key to a list of bits derived from its hash.
+    ;;   Args:
+    ;;     key (any): lookup key.
+    ;;   Returns:
+    ;;     list: bit list (0/1) for the key hash.
     (let loop-1 ((bytes (map (lambda (x) x) (sync-hash key))) (ret '()))
       (if (null? bytes) (reverse ret)
           (let* ((byte (car bytes))
@@ -11,9 +17,18 @@
             (loop-1 (cdr bytes) (append (as-bits byte) ret))))))
 
   (define (~dir-new self)
+    ;; Create an empty directory node.
+    ;;   Returns:
+    ;;     sync node: empty directory node.
     (sync-null))
 
   (define (~dir-get self node key)
+    ;; Fetch value for key within a directory node.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;     key (any): lookup key.
+    ;;   Returns:
+    ;;     sync node: value node, sync-null, or stub.
     (let loop ((node node) (bits ((self '~key-bits) key)))
       (cond ((sync-null? node) node)
             ((sync-stub? node) node)
@@ -24,6 +39,13 @@
                       (loop (sync-cdr node) (cdr bits)))))))
 
   (define (~dir-set self node key value)
+    ;; Set key to value within a directory node.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;     key (any): lookup key.
+    ;;     value (sync node): value to set.
+    ;;   Returns:
+    ;;     sync node: updated directory node.
     (let loop-1 ((node node) (bits ((self '~key-bits) key)) (depth 0))
       (if (or (sync-null? node) (sync-stub? node)) (sync-cons key value)
           (let ((left (sync-car node)) (right (sync-cdr node)))
@@ -44,6 +66,12 @@
                             (else (error 'logic-error "Missing conditions"))))))))))
 
   (define (~dir-delete self node key)
+    ;; Delete key from directory node and collapse empty branches.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;     key (any): lookup key.
+    ;;   Returns:
+    ;;     sync node: updated directory node.
     (let loop ((node node) (bits ((self '~key-bits) key)))
       (if (or (sync-null? node) (sync-stub? node)) (sync-null)
           (let ((left (sync-car node)) (right (sync-cdr node)))
@@ -57,9 +85,20 @@
                         (else (sync-cons left right)))))))))
 
   (define (~dir-digest self node)
+    ;; Compute digest of a directory node.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;   Returns:
+    ;;     byte-vector: digest of node.
     (sync-digest node))
 
   (define (~dir-slice self node key)
+    ;; Slice directory to include only path to key with cuts elsewhere.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;     key (any): lookup key.
+    ;;   Returns:
+    ;;     sync node: sliced directory node.
     (let loop ((node node) (bits ((self '~key-bits) key)))
       (cond ((sync-null? node) node)
             ((sync-stub? node) node)
@@ -73,6 +112,13 @@
                                    (loop right (cdr bits)))))))))
 
   (define (~dir-prune self node key keep-key?)
+    ;; Prune subtree at key, optionally keeping the key itself.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;     key (any): lookup key.
+    ;;     keep-key? (boolean): whether to keep the key node.
+    ;;   Returns:
+    ;;     sync node: pruned directory node.
     (let loop ((node node) (bits ((self '~key-bits) key)))
       (if (or (sync-null? node) (sync-stub? node)) node
           (let ((left (sync-car node)) (right (sync-cdr node)))
@@ -87,8 +133,13 @@
                       (sync-cut node)
                       (sync-cons left right))))))))
 
-  ;; todo: is this still necessary?
   (define (~dir-merge self node-1 node-2)
+    ;; Merge two directory nodes with compatible structure.
+    ;;   Args:
+    ;;     node-1 (sync node): directory node.
+    ;;     node-2 (sync node): directory node.
+    ;;   Returns:
+    ;;     sync node: merged directory node.
     (let recurse ((node-1 node-1) (node-2 node-2))
       (cond ((and (sync-stub? node-1) (sync-stub? node-2)) node-1)
             ((and (not (sync-stub? node-1)) (sync-stub? node-2)) node-1)
@@ -100,6 +151,11 @@
             (else (error 'invalid-structure "Cannot merge incompatible structure")))))
 
   (define (~dir-all self node)
+    ;; Collect all keys in a directory node and whether it is fully known.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;   Returns:
+    ;;     list: (keys-list known?) for this subtree.
     (let recurse ((node node))
       (cond ((sync-null? node) '(() #t))
             ((sync-stub? node) '(() #f))
@@ -110,6 +166,11 @@
                             ,(and (cadr all-l) (cadr all-r))))))))))
 
   (define (~dir-valid? self node)
+    ;; Validate that directory node matches key prefixes.
+    ;;   Args:
+    ;;     node (sync node): directory root node.
+    ;;   Returns:
+    ;;     boolean: True/False for prefix validity.
     (let ((new (let loop ((node node) (bits '()))
                  (if (or (sync-null? node) (sync-stub? node)) node
                      (let ((left (sync-car node)) (right (sync-cdr node)))
@@ -122,26 +183,47 @@
                                       (loop right (cons 1 bits)))))))))
       (equal? node new)))
 
-  ;; --- helper functions ---
-
   (define (~key->bytes self key)
+    ;; Encode a key to a tagged byte-vector.
+    ;;   Args:
+    ;;     key (any): lookup key.
+    ;;   Returns:
+    ;;     byte-vector: tagged encoding of key.
     (cond ((sync-node? key) (error 'invalid-type "Keys cannot be sync nodes"))
           ((byte-vector? key) (append #u(0) key))
           (else (append #u(1) (expression->byte-vector key)))))
 
   (define (~bytes->key self bytes)
+    ;; Decode a tagged byte-vector into a key.
+    ;;   Args:
+    ;;     bytes (byte-vector): encoded key bytes.
+    ;;   Returns:
+    ;;     key: decoded key value.
     (case (bytes 0)
       ((0) (subvector bytes 1))
       ((1) (byte-vector->expression (subvector bytes 1)))
       (else (error 'invalid-type "Key type encoding not recognized"))))
 
   (define (~struct-tag self)
+    ;; Return the tag used to identify embedded structure nodes.
+    ;;   Returns:
+    ;;     sync node: struct tag node.
     (sync-cons (sync-null) (sync-null)))
 
   (define (~struct? self node)
+    ;; Check whether node is a tagged structure wrapper.
+    ;;   Args:
+    ;;     node (sync node): candidate node.
+    ;;   Returns:
+    ;;     boolean: True/False if node is a struct wrapper.
     (and (sync-pair? node) (equal? (sync-car node) ((self '~struct-tag)))))
 
   (define (~r-read self path)
+    ;; Read raw node at path without decoding.
+    ;;   Args:
+    ;;     path (list of byte-vectors): path segments.
+    ;;   Returns:
+    ;;     sync node: raw node at path.
     (let loop ((node (self '(1))) (path path))
       (cond ((sync-null? node) node)
             ((sync-stub? node) node)
@@ -149,6 +231,12 @@
             (else (loop ((self '~dir-get) node (car path)) (cdr path))))))
 
   (define* (~r-write! self path value)
+    ;; Write raw node value at path, creating directory nodes as needed.
+    ;;   Args:
+    ;;     path (list of byte-vectors): path segments.
+    ;;     value (sync node): value to set.
+    ;;   Returns:
+    ;;     boolean: #t after writing raw node.
     (set! (self '(1))
           (let loop ((node (self '(1))) (path path))
             (if (null? path) value
@@ -158,12 +246,22 @@
                   ((self '~dir-set) node key (loop old (cdr path))))))))
 
   (define (obj->node self obj)
+    ;; Encode an object into a sync node representation.
+    ;;   Args:
+    ;;     obj (any): value to encode.
+    ;;   Returns:
+    ;;     sync node: encoded value node.
     (cond ((sync-node? obj) obj)
           ((procedure? obj) (sync-cons ((self '~struct-tag)) (obj)))
           ((byte-vector? obj) (append #u(0) obj)) 
           (else (append #u(1) (expression->byte-vector obj)))))
 
   (define (node->obj self node)
+    ;; Decode a sync node into an object.
+    ;;   Args:
+    ;;     node (sync node): encoded node.
+    ;;   Returns:
+    ;;     any: decoded value or thunk for struct.
     (cond ((byte-vector? node)
            (case (node 0)
              ((0) (subvector node 1))
@@ -177,45 +275,45 @@
           (else (error 'invalid-type "Invalid value type"))))
 
   (define (get self path)
-    "Retrieve the data at the specified path.
-
-         > path (list sym|vec): path from the tree root to data
-         < return (sym . (list exp)): list containing the type and value of the data
-             - 'object type indicates a simple lisp-serializable value
-             - 'structure type indicates a complex value represented by sync-pair?
-             - 'directory type indicates an intermediate directory node
-               - the second item is a list of known subpath segments
-               - the third item is a bool indicating whether the directory is complete
-                 (i.e., none of its underlying data has been pruned)
-             - 'nothing type indicates that no data is found at the path
-             - 'unknown type indicates the path has been cut"
+    ;; Get value at path, decoding node types and directory info.
+    ;;   Args:
+    ;;     path (list of keys): path segments.
+    ;;   Returns:
+    ;;     any: value, '(nothing), '(unknown), or '(directory ((key type) ...) known?).
     (let ((path (map (self '~key->bytes) path)))
       (let ((obj ((self 'node->obj) ((self '~r-read) path))))
         (if (sync-node? obj)
             (cond ((sync-null? obj) '(nothing))
                   ((sync-stub? obj) '(unknown))
-                  (else
-                   (let ((all ((self '~dir-all) obj)))
-                     `(directory ,(map (self '~bytes->key) (car all)) ,(cadr all)))))
+                  (else (let ((all ((self '~dir-all) obj)))
+                          `(directory ,(map (lambda (k)
+                                              `(,((self '~bytes->key) k)
+                                                ,(let ((child ((self '~dir-get) obj k)))
+                                                   (cond (((self '~struct?) child) 'object)
+                                                         ((sync-node? child) (if (sync-stub? child) 'unknown 'directory))
+                                                         (else 'value)))))
+                                            (car all))
+                                      ,(cadr all)))))
             (cond ((procedure? obj) (obj))
                   (else obj))))))
 
   (define (equal? self source path)
-    "Indicate whether two paths that contain identical data
-
-         > path (list sym|vec): path from the tree root to source data
-         > target (list sym|vec): path from the tree root to target data
-         < return (bool): if paths are equal then #t, otherwise #f"
+    ;; Compare raw nodes at two paths for exact equality.
+    ;;   Args:
+    ;;     source (list of keys): source path.
+    ;;     path (list of keys): target path.
+    ;;   Returns:
+    ;;     boolean: True/False for exact node equality.
     (let ((source (map (self '~key->bytes) source)) (path (map (self '~key->bytes) path)))
       (equal? ((self '~r-read) source) ((self '~r-read) path))))
 
   (define (equivalent? self source path)
-    "Indicate whether two paths point to data that was formed
-         from an identical originating data structure (before possible pruning)
-
-         > path (list sym|vec): path from the tree root to source data
-         > target (list sym|vec): path from the tree root to target data
-         < return (bool): if paths are equivalent then #t, otherwise #f"
+    ;; Compare raw nodes at two paths for digest-equivalence.
+    ;;   Args:
+    ;;     source (list of keys): source path.
+    ;;     path (list of keys): target path.
+    ;;   Returns:
+    ;;     boolean: True/False for digest-equivalence.
     (let ((source (map (self '~key->bytes) source)) (path (map (self '~key->bytes) path)))
       (let ((val-1 ((self '~r-read) source)) (val-2 ((self '~r-read) path)))
         (cond ((and (byte-vector? val-1) (byte-vector? val-2))
@@ -225,15 +323,12 @@
               (else #f)))))
 
   (define (set! self path value)
-    "Write the value to the path. Recursively generate parent
-         directories if necessary. If necessary, force all parent directories
-         into a new underlayed form. If the value is #f, then delete the data
-         at the path and recursively delete empty parent directories as
-         necessary.
-
-         > path (list sym|vec): path from the tree root to the data
-         > value (exp|sync-pair): data to be stored at the path
-         < return (bool): boolean indicating success of the operation"
+    ;; Set value at path, handling special directory/unknown/nothing cases.
+    ;;   Args:
+    ;;     path (list of keys): path segments.
+    ;;     value (any): value to set.
+    ;;   Returns:
+    ;;     boolean: #t after mutation.
     (cond ((equal? value '(unknown))
            (error 'value-error "Value conflicts with key expression '(unknown)"))
           ((and (list? value) (not (null? value)) (eq? (car value) 'directory))
@@ -250,25 +345,22 @@
                   ((self '~r-write!) (map (self '~key->bytes) path) ((self 'obj->node) content))))))
 
   (define (copy! self source path)
-    "Copy data from the source path to the target path.
-         Recursively generate parent directories if necessary. If
-         necessary, force all parent directories into a new underlayed form. If
-         the value is #f, then delete the data at the path and recursively
-         delete empty parent directories as necessary.
-
-         > source (list sym|vec): path from the tree root to the source data
-         > path (list sym|vec): path from the tree root to the target data
-         < return (bool): boolean indicating success of the operation"
+    ;; Copy raw node from source path to target path.
+    ;;   Args:
+    ;;     source (list of keys): source path.
+    ;;     path (list of keys): target path.
+    ;;   Returns:
+    ;;     boolean: #t after copy.
     (let ((source (map (self '~key->bytes) source)) (path (map (self '~key->bytes) path)))
       ((self '~r-write!) path ((self '~r-read) source))))
 
   (define* (prune! self path keep-key?)
-    "Prune specified data from a directory while maintaining the
-         original hashes. If executed on directory that has not been previously
-         pruned or sliced, then the directory becomes an overlayed directory.
-
-         > path (list sym|vec): path from the tree root to the target directory 
-         < return (bool): boolean indicating success of the operation"
+    ;; Prune subtree at path, optionally keeping the key node.
+    ;;   Args:
+    ;;     path (list of keys): path segments.
+    ;;     keep-key? (boolean): whether to keep the key node.
+    ;;   Returns:
+    ;;     boolean: #t after prune.
     (let ((path (map (self '~key->bytes) path)))
       (set! (self '(1))
             (let loop ((node (self '(1))) (path path))
@@ -280,13 +372,11 @@
                                 ((self '~dir-prune) node (car path) keep-key?)))))))))
 
   (define (slice! self path)
-    "Prune all data from directory EXCEPT for the specified path
-         while maintaining the original hashes. If executed on directory that
-         has not been previously pruned or sliced, then the directory becomes
-         an overlayed directory.
-
-         > path (list sym|vec): path from the tree root to the target directory 
-         < return (bool): boolean indicating success of the operation"
+    ;; Slice tree to include only nodes along path.
+    ;;   Args:
+    ;;     path (list of keys): path segments.
+    ;;   Returns:
+    ;;     boolean: #t after slice.
     (let ((path (map (self '~key->bytes) path)))
       (set! (self '(1))
             (let loop ((node (self '(1))) (path path))
@@ -297,13 +387,12 @@
                             ((self '~dir-slice) ((self '~dir-set) node key (loop ((self '~dir-get) node key) (cdr path)))
                              key))))))))
 
-  ;; todo: is this still necessary?
   (define (merge! self other)
-    "Recursively combine data from two equivalent directories.
-
-         > source (list sym|vec): path from the tree root to the source directory 
-         > path (list sym|vec): path from the tree root to the target directory 
-         < return (bool): boolean indicating success of the operation"
+    ;; Merge another equivalent tree into this one.
+    ;;   Args:
+    ;;     other (tree): other tree.
+    ;;   Returns:
+    ;;     boolean: #t on success, #f if not mergeable.
     (let ((node-1 (self '(1))) (node-2 (other '(1))))
       (if (or (sync-null? node-1) (not (equal? (sync-digest node-1) (sync-digest node-2)))) #f
           (set! (self '(1))
@@ -325,6 +414,9 @@
                                                 (cdr keys)))))))))))))
 
   (define (valid? self)
+    ;; Validate internal directory structure of the whole tree.
+    ;;   Returns:
+    ;;     boolean: True/False if tree structure is valid.
     (let loop-1 ((node (self '(1))))
       (cond ((sync-null? node) #t)
             ((sync-stub? node) #t)
