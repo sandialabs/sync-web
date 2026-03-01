@@ -1,5 +1,10 @@
-# Glossary
-
+---
+title: Glossary
+sidebar:
+  label: Glossary
+  order: 6
+head: []
+---
 Use this glossary as a quick reference for recurring terms used across usage, operation, development, and research documentation.
 
 ## Terms

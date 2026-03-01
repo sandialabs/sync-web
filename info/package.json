@@ -1,0 +1,19 @@
+{
+  "name": "sync-web-info",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Synchronic Web documentation site (Astro + Starlight).",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "capture:screenshots": "node ./scripts/capture-screenshots.mjs",
+    "capture:screenshots:stack": "./scripts/capture-screenshots-with-stack.sh"
+  },
+  "devDependencies": {
+    "@astrojs/mdx": "^4.0.8",
+    "@astrojs/starlight": "^0.35.0",
+    "astro": "^5.0.0",
+    "playwright": "^1.52.0"
+  }
+}
