@@ -1,0 +1,69 @@
+:root {
+  --sw-blue: #00add0;
+  --sw-blue-medium: #0076a9;
+  --sw-blue-dark: #002b4c;
+  --sw-black: #000000;
+
+  --sl-color-accent-low: #d7f3f9;
+  --sl-color-accent: #0076a9;
+  --sl-color-accent-high: #002b4c;
+  --sl-color-text-accent: #0076a9;
+}
+
+[data-theme="dark"] {
+  --sl-color-accent-low: #0f2e42;
+  --sl-color-accent: #00add0;
+  --sl-color-accent-high: #7edff0;
+  --sl-color-text-accent: #00add0;
+}
+
+.site-title,
+.hero h1,
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  color: var(--sw-blue-dark);
+}
+
+[data-theme="dark"] .site-title,
+[data-theme="dark"] .hero h1,
+[data-theme="dark"] .sl-markdown-content h1,
+[data-theme="dark"] .sl-markdown-content h2,
+[data-theme="dark"] .sl-markdown-content h3 {
+  color: var(--sw-blue);
+}
+
+/* Keep right-side page outline labels readable and wrapped. */
+.right-sidebar-panel .sl-container {
+  max-width: 100%;
+}
+
+.right-sidebar-panel {
+  overflow-x: hidden;
+}
+
+.right-sidebar-panel ul,
+.right-sidebar-panel li {
+  max-width: 100%;
+}
+
+.right-sidebar-panel a {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.right-sidebar-panel a span {
+  display: block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.right-sidebar-panel a code,
+.right-sidebar-panel a :where(code) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

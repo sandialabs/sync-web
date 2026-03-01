@@ -3,22 +3,34 @@
 Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+npm install
 ```
 
 Run locally with live reload:
 
 ```bash
-mkdocs serve
+npm run dev
 ```
 
 Build static site:
 
 ```bash
-mkdocs build
+npm run build
 ```
 
-The generated site is available under `site/`.
+Preview static build:
+
+```bash
+npm run preview
+```
+
+The generated site is available under `dist/`.
+
+## Content Location
+
+- Active Starlight content lives in `src/content/docs`.
+- Static assets (including screenshots) live in `public/images`.
+- Legacy MkDocs files remain under `docs/` for reference only and are not used by the Astro build.
 
 ## UI Screenshot Refresh
 
@@ -49,7 +61,7 @@ npm run capture:screenshots:stack
 Optional environment variables:
 
 - `SYNC_BASE_URL` (default `http://127.0.0.1:8192`)
-- `SYNC_SCREENSHOT_DIR` (default `./docs/images/screenshots`)
+- `SYNC_SCREENSHOT_DIR` (default `./public/images/screenshots`)
 - `SYNC_SCREENSHOT_SETTLE_MS` (default `1500`)
 - `SYNC_SERVICES_DIR` (default `/code/sync-services`, used by `capture:screenshots:stack`)
 - `PORT`, `SECRET`, `PERIOD`, `WINDOW`, `LOCAL_LISP_PATH` (used by `capture:screenshots:stack`)

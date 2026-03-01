@@ -8,7 +8,7 @@ const infoDir = path.resolve(__dirname, "..");
 
 const baseUrl = process.env.SYNC_BASE_URL || "http://127.0.0.1:8192";
 const outputDir =
-  process.env.SYNC_SCREENSHOT_DIR || path.join(infoDir, "docs", "images", "screenshots");
+  process.env.SYNC_SCREENSHOT_DIR || path.join(infoDir, "public", "images", "screenshots");
 const settleMs = Number(process.env.SYNC_SCREENSHOT_SETTLE_MS || "1500");
 
 const targets = [
