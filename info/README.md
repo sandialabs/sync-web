@@ -1,7 +1,21 @@
 # Run
 
-To build the info site, run the following command.
+Install dependencies:
 
-`$ mkdocs build`
+```bash
+pip install -r requirements.txt
+```
 
-The static website is now available under [./docs](./docs).
+Run locally with live reload:
+
+```bash
+mkdocs serve
+```
+
+Build static site:
+
+```bash
+mkdocs build
+```
+
+The generated site is available under `site/`.

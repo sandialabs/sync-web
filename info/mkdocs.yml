@@ -8,13 +8,24 @@ theme:
     text: Roboto
     code: Roboto Mono
   palette:
-    primary: custom
-    scheme: custom
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
     - toc.follow
     - toc.integrate
     - content.code.copy
     - content.tooltips
+    - content.tabs.link
 
 extra:
   generator: false
@@ -27,10 +38,12 @@ markdown_extensions:
   - attr_list
   - pymdownx.snippets:
       auto_append:
-        - docs/glossary.md
+        - docs/snippets/abbreviations.md
   - admonition
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.highlight:
       anchor_linenums: true
       linenums: true
@@ -46,15 +59,9 @@ plugins:
   - search
 
 nav:
-  - Overview:
-    - Overview: index.md
-    - Quickstart: quickstart.md
-    - Walkthrough: walkthrough.md
-  - Documents:
-    - Whitepaper: whitepaper.md
-    - JCDL Poster: jcdl.md
-    - Digital Identity: identity.md
-  - Software:
-    - Journal SDK : http://github.com/sandialabs/sync-journal
-    - Record Logic: http://github.com/sandialabs/sync-records
-    - Service Deployments: http://github.com/sandialabs/sync-services
+  - Overview: index.md
+  - Usage: usage.md
+  - Operation: operation.md
+  - Development: development.md
+  - Research: research.md
+  - Glossary: glossary.md

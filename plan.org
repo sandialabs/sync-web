@@ -1,0 +1,202 @@
+* Overview
+- BLUF on why/how/what of sync web
+
+** Contents
+- provide links + overview
+- mention that each builds on the last)
+  - Users (link to usage)
+  - Operators (like to operation)
+  - Developers (link to development)
+  - Researchers (link to research)
+    
+** Purpose
+- Talk about value and need for shared state layer over open-world, partially-trusted networks
+  
+*** Dynamic Object Structures
+- Talk about need for simple structure, language, and functions to encapsulate data and information over "time"
+*** Dynamic Peer Topologies
+- Talk about need for scalable, permissionless, usage-driven peer topologies
+- This is notion of state across "space"
+
+** Resources
+- provide links/descriptions of each
+- state information about open-source/licensing and Sandia authorship for all
+
+*** Software Repositories
+**** sync-web
+**** sync-journal
+**** sync-records
+**** sync-service
+**** sync-analysis
+
+*** Live Nodes
+- beagle.sync-web.org
+  
+* Usage
+- Couple sentences about this section
+
+** Graphical Interface
+- introduce explorer app
+- describe read/write/pin/peer operations
+** Programmatic API
+- give details about endpoint and mention either lisp or json is possible
+- describe read/write/pin/peer operations
+  - provide both scheme and json examples with the little language conversion box thing
+- provide full details on json/scheme conversion
+  - lisp lists <-> json dictionaries
+  - special types
+
+* Operation
+- Couple sentences about this section
+- for all examples, provide both Lisp and JSON examples
+  
+** Deployment
+- Docker compose options
+
+** Services
+*** Interface
+*** Journal
+*** Explorer
+*** Workbench
+
+** Network API
+- populate from interface.scm + control.scm + ledger.scm
+  
+** Operations
+- Mention that this provides how-tos for various common operations
+
+*** Updating
+- updating control
+- updating standard
+- updating config
+- updating ledger
+- updating ledger
+
+*** Secret Rotation
+- Rotating root secret
+- Rotating interface secret
+  
+** Specifications
+- Couple sentences about this section
+  
+*** Control API
+- root-level API
+- root commands (get, set, etc)
+  
+*** General API
+- ledger operations + slight extension
+
+*** Scheme Conversion
+
+
+* Development
+- Couple sentences about this section
+- walk through the various layers of interface.scm
+
+** Architecture
+- Couple sentences about this section
+
+*** System
+- how the *sync-state* / queries workflow works
+- concurrency management
+  - only one write at a time (may have to repeat)
+  - any number of reads at a time
+- network operation capabilities
+- memory and database memory stores
+- implementation of s7 and extended language evaluation
+- periodic stepping
+
+*** Language
+- describe/link to s7 scheme documentation
+- black-listed functions
+- new convenience primitives
+- new sync primitives for data structures
+
+*** Structure
+- everything is a hash DAG
+- language allows for controlled interpretation of DAG
+
+*** Objects
+- describe high-level universal part (just code on left and data on right in sync node)
+- describe system implemented by sync standard
+
+** Specifications
+- Couple sentences about this section
+
+*** Journal Configuration
+- provide/explain the various commandline configs
+
+*** s7 Extended Primitives
+- just the extra primitives from evaluator.rs and lib.rs
+
+*** Standard Objects
+- inspired by Python
+  - no variables, just methods
+  - state is captured in single `state` root
+  - no inheritance
+- libraries are just instantiate objects with no space
+- describe syntax for get/set state using (self '(1 0 0 1 0 1 ...)) as shorthand for sync-cdr/car operations
+
+**** Standard Class
+
+**** Tree Class
+
+**** Linear Chain Class
+
+**** Log Chain Class
+
+**** Configuration Class
+
+**** Ledger Class
+
+** Testing
+- Synchronous Testing
+- Stress Testing
+- Network Emulation
+  
+** Guidance
+
+*** Style Guide
+- prefer the (object 'method) syntax for everything to avoid namespace polution
+- *variable* for special variables
+- `~` for local or hidden variables (like `_` in other languages)
+- prefer assoc lists in web-facing calls to make it look nicer in JSON
+- code on the left child and state on the right child
+- <any other patterns that are noticeable from the existing record stash>
+
+*** Gotchas
+- Operations that the sequence below will potentially cause a bunch of loops and slow down the system
+  - reading some fast-moving state of your own record
+  - making a call across the network (since it takes time)
+  - mutating some variable based on the response
+- Mutating object state does not automatically set it from whatever structure you pulled it from--you need to manually set it yourself
+  
+* Research
+- This section enumerates research angles
+
+** Topics
+
+*** Data Structures
+- distributed merkle data structures
+- delete-able (prunable) data structures
+  
+*** Distributed Systems
+- byzantine fault detection
+- content-addressed state
+- cross-domain provenance
+- peer-to-peer transparency
+  
+*** Programming Languages
+- meta-circular runtime extension
+- hot-swappable semantics
+- policy-as-code
+
+** Domains
+*** Web Archiving
+*** Digital Engineering
+*** Decentralized Web
+
+** Prior Work
+- Whitepaper
+- JCDL
+- Digital identities
