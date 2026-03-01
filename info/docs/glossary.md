@@ -1,5 +1,7 @@
 # Glossary
 
+Use this glossary as a quick reference for recurring terms used across usage, operation, development, and research documentation.
+
 ## Terms
 
 - **Synchronic Web**: The space of all data that is cryptographically hashed into a single distributed data structure.

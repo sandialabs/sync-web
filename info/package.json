@@ -1,0 +1,13 @@
+{
+  "name": "sync-web-info-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Utility scripts for sync-web documentation assets.",
+  "scripts": {
+    "capture:screenshots": "node ./scripts/capture-screenshots.mjs",
+    "capture:screenshots:stack": "./scripts/capture-screenshots-with-stack.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}

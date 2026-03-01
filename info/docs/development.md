@@ -390,6 +390,8 @@ This mode is best for validating emergent behavior, peer dynamics, and monitorin
 
 ## Guidance
 
+This section captures conventions and failure patterns that are useful during day-to-day implementation and review work.
+
 ### Style Guide
 
 Recommended conventions used across current class modules:

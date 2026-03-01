@@ -5,6 +5,8 @@ The goal is to make concrete, publishable problem statements easy to identify fr
 
 ## Topics
 
+These topics map concrete technical mechanisms in the current stack to research directions that can support publishable work.
+
 ### Data Structures
 
 Promising data-structure work includes distributed Merkle structures for programmable state, prunable authenticated structures (`slice!`, `prune!`, `pin!`, `unpin!`), and proof-aware serialization/deserialization for selective disclosure.

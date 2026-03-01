@@ -37,6 +37,8 @@ This topology flexibility is useful in real systems where trust boundaries and c
 
 ## Resources
 
+This section links to the primary repositories and live endpoints that developers and operators use most often.
+
 ### Software Repositories
 
 All official resources are found in the following public repositories:

@@ -5,15 +5,41 @@ It focuses on the currently deployed `general` interface shape used by `sync-ser
 
 ## Graphical Interface
 
-The `general` compose network exposes two primary web clients:
+The `general` compose network exposes two primary web clients: Explorer (`/explorer/`) and Workbench (`/workbench/`).
+Together they cover the full operator/developer loop: inspect data, make changes, verify outcomes, and convert successful workflows into repeatable API calls.
 
-Explorer at `/explorer/` is the state-navigation surface used for inspecting and updating record or ledger paths.
-Workbench at `/workbench/` is the API-oriented workspace used to compose, run, and debug calls.
+### Explorer
 
-Core operations in both interfaces include reading data with `get`, staging writes with `set!`, pinning historical paths with `pin!`, and adding peers with `general-peer!`.
+The Explorer is the state-navigation and content-management interface.
+Use it when you need to inspect ledger or record paths, browse peer-visible state, and apply operational changes without hand-writing queries.
 
-For most users, this is the fastest way to become productive because it exposes common operations without requiring immediate familiarity with the full request schema.
-As confidence grows, the same operations can be moved into scripts and applications through the programmatic API.
+Typical Explorer workflow:
+
+1. Synchronize to the latest state so path navigation reflects current chain data.
+2. Navigate through local `*state*` paths or remote peer paths.
+3. Read content and metadata, then stage updates with `set!` semantics through the UI.
+4. Pin or unpin paths to control retention behavior across chain evolution.
+5. Add peers (`general-peer!`) when expanding network visibility.
+
+The Explorer is best for operational tasks and data exploration because it makes path structure and state transitions visible.
+
+![Explorer desktop view](images/screenshots/explorer-desktop.png)
+
+### Workbench
+
+The Workbench is the API-oriented query environment.
+Use it when you want precise control over requests, fast iteration on payload shape, and direct inspection of results.
+
+Typical Workbench workflow:
+
+1. Start from a known request pattern (for example `get`, `set!`, `pin!`, or `general-peer!`).
+2. Run the request in Lisp or JSON form and inspect the returned value.
+3. Iterate on arguments/authentication until behavior matches intent.
+4. Use the final request as a template for automation or service integration.
+
+The Workbench is best for debugging and integration development because it exposes the request/response layer directly.
+
+![Workbench desktop view](images/screenshots/workbench-desktop.png)
 
 ## Programmatic API
 

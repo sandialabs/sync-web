@@ -6,6 +6,8 @@ Unless otherwise noted, examples target the `sync-services/compose/general` stac
 
 ## Deployment
 
+This section describes how to bring up and manage the reference runtime stack used throughout the rest of this guide.
+
 ### Docker Compose
 
 The compose deployment is the baseline operating mode for local, staging, and many production-like environments.
@@ -188,6 +190,8 @@ Each example includes both Lisp and JSON forms.
 These are direct calls that can be run manually, but they also serve as templates for operational automation.
 
 ### Secret Rotation
+
+Secret rotation is the minimum operational hygiene task for any deployed environment and should be part of regular runbooks.
 
 #### Rotate interface secret
 
