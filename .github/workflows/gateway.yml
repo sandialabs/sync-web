@@ -24,6 +24,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Install gateway dependencies
+        working-directory: ./services/gateway
+        run: npm ci
+      - name: TypeScript build check
+        working-directory: ./services/gateway
+        run: npm run build
       - name: Build and push versioned Docker image
         run: |
           version=$( cat ./services/gateway/version.txt )

@@ -66,7 +66,7 @@ LOCAL_LISP_PATH=/absolute/path/to/lisp ./tests/up-compose.sh
 ```
 
 The script runs `docker compose up` in the foreground. Press `Ctrl+C` to stop and exit; it will tear the stack down so nothing keeps running.
-`gateway` is built locally from `services/gateway`. `explorer` and `workbench` use compose defaults unless `LOCAL_LISP_PATH` is set (which enables local UI overrides).
+`gateway` uses the compose image (`ghcr.io/sandialabs/sync-services/gateway:<version>`). `explorer` and `workbench` use compose defaults unless `LOCAL_LISP_PATH` is set (which enables local UI overrides).
 
 ## Programmatic Smoke Test
 
@@ -81,7 +81,7 @@ LOCAL_LISP_PATH=/absolute/path/to/lisp ./tests/smoke-compose.sh
 ```
 
 The script starts the compose network, waits for Explorer/Workbench/Gateway docs, checks journal and gateway API responses, and tears everything down automatically.
-`gateway` is built locally from `services/gateway`. `explorer` and `workbench` use compose defaults unless `LOCAL_LISP_PATH` is set (which enables local UI overrides).
+`gateway` uses the compose image (`ghcr.io/sandialabs/sync-services/gateway:<version>`). `explorer` and `workbench` use compose defaults unless `LOCAL_LISP_PATH` is set (which enables local UI overrides).
 
 ## End
 

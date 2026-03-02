@@ -33,8 +33,7 @@ services:
       SYNC_WORKBENCH_ENDPOINT: /interface
 
   gateway:
-    build: ../../services/gateway
-    image: sync-services/gateway:local
+    image: ghcr.io/sandialabs/sync-services/gateway:1.0.0
     container_name: gateway
     networks:
       - docker
@@ -42,7 +41,6 @@ services:
       - journal
     environment:
       HOST: 0.0.0.0
-      PORT: 8180
       JOURNAL_JSON_ENDPOINT: http://journal/interface/json
       JOURNAL_LISP_ENDPOINT: http://journal/interface
       ALLOW_ADMIN_ROUTES: "1"

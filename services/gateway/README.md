@@ -78,7 +78,6 @@ npm run start
 Swagger UI:
 
 - `GET /api/v1/docs` (canonical)
-- `GET /api/docs` (compatibility redirect)
 
 Landing page:
 
