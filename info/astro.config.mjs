@@ -6,11 +6,18 @@ import logo from "./src/assets/logo.png";
 const isGitHubActions = process.env.GITHUB_ACTIONS === "true";
 const repoName = process.env.GITHUB_REPOSITORY?.split("/")[1];
 const pagesUrl = process.env.GITHUB_PAGES_URL;
+const normalizeBase = (value) => {
+  if (!value || value === "/") return "/";
+  const withLeadingSlash = value.startsWith("/") ? value : `/${value}`;
+  return withLeadingSlash.endsWith("/")
+    ? withLeadingSlash
+    : `${withLeadingSlash}/`;
+};
 const pagesBasePath = (() => {
   if (!pagesUrl) return "";
   try {
-    const pathname = new URL(pagesUrl).pathname.replace(/\/$/, "");
-    return pathname || "/";
+    const pathname = new URL(pagesUrl).pathname;
+    return normalizeBase(pathname);
   } catch {
     return "";
   }
@@ -19,7 +26,7 @@ const pagesBasePath = (() => {
 export default defineConfig({
   site: pagesUrl ?? "https://sandialabs.github.io",
   base: isGitHubActions
-    ? pagesBasePath || (repoName ? `/${repoName}` : "/")
+    ? pagesBasePath || (repoName ? normalizeBase(`/${repoName}`) : "/")
     : "/",
   integrations: [
     starlight({
