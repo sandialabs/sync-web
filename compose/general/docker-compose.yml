@@ -41,6 +41,7 @@ services:
       - journal
     environment:
       HOST: 0.0.0.0
+      PORT: 80
       JOURNAL_JSON_ENDPOINT: http://journal/interface/json
       JOURNAL_LISP_ENDPOINT: http://journal/interface
       ALLOW_ADMIN_ROUTES: "1"
