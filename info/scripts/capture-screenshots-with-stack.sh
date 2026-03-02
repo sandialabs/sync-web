@@ -55,6 +55,7 @@ dc up -d --build
 echo "Waiting for UI routes..."
 wait_for_http "http://127.0.0.1:$PORT/explorer/"
 wait_for_http "http://127.0.0.1:$PORT/workbench/"
+wait_for_http "http://127.0.0.1:$PORT/gateway/"
 
 echo "Capturing screenshots..."
 SYNC_BASE_URL="http://127.0.0.1:$PORT" npm --prefix "$INFO_DIR" run capture:screenshots

@@ -22,6 +22,11 @@ const targets = [
     url: `${baseUrl}/workbench/`,
     selector: "body",
   },
+  {
+    key: "gateway",
+    url: `${baseUrl}/api/v1/docs`,
+    selector: "body",
+  },
 ];
 
 const variants = [

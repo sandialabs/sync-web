@@ -13,7 +13,7 @@ It focuses on the currently deployed `general` interface shape used by `sync-ser
 
 ## Graphical Interface
 
-The `general` compose network exposes two primary web clients: Explorer (`/explorer/`) and Workbench (`/workbench/`).
+The `general` compose network exposes three primary web clients: Explorer (`/explorer/`), Workbench (`/workbench/`), and Gateway (`/gateway/`).
 Together they cover the full operator/developer loop: inspect data, make changes, verify outcomes, and convert successful workflows into repeatable API calls.
 
 ### Explorer
@@ -48,6 +48,23 @@ Typical Workbench workflow:
 The Workbench is best for debugging and integration development because it exposes the request/response layer directly.
 
 ![Workbench desktop view](/images/screenshots/workbench-desktop.png)
+
+### Gateway
+
+The Gateway is the web-facing API surface for journal operations.
+Use it when clients should call stable, versioned HTTP routes instead of direct function-shaped interface requests.
+
+Typical Gateway workflow:
+
+1. Start with `GET /gateway/` for route orientation.
+2. Use `GET /api/v1/docs` to review request and response schemas.
+3. Execute public general operations through `GET` routes (for example `size`, `information`, and `resolve`).
+4. Execute restricted `general` and optional `control` operations through authenticated `POST` routes.
+5. Move validated requests into application clients or automation scripts using the same gateway contracts.
+
+The Gateway is best for service integration because it standardizes journal calls into HTTP endpoints with explicit request validation.
+
+![Gateway desktop view](/images/screenshots/gateway-desktop.png)
 
 ## Programmatic API
 
