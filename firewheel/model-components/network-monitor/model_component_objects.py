@@ -29,7 +29,7 @@ class Monitor:
             [
                 "GRAFANA_USER=admin",
                 "GRAFANA_PASSWORD=admin",
-                "PROMETHEUS=http://prometheus.docker:9090",
+                "PROMETHEUS=http://prometheus:9090",
             ]
         )
 

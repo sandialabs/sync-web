@@ -1,7 +1,7 @@
 import os
 import json
 import random
-from locust import HttpUser, task, events
+from locust import HttpUser, task
 
 
 class HelloWorldUser(HttpUser):
@@ -12,14 +12,18 @@ class HelloWorldUser(HttpUser):
 
         request_data = {
             "function": "set!",
-            "arguments": [[["*state*", "locust", key]], val],
-            "authentication": os.environ["SECRET"],
+            "arguments": {
+                "path": [["*state*", "locust", key]],
+                "value": {"*type/string*": val},
+            },
+            "authentication": {"*type/string*": os.environ["SECRET"]},
         }
-        response = self.client.post("", json=request_data)
+        response = self.client.post("/interface/json", json=request_data)
 
         # Truncate request and response for readable logging
+        request_text = json.dumps(request_data, separators=(",", ":"))
         req_truncated = (
-            request_data[:80] + "..." if len(request_data) > 80 else request_data
+            request_text[:80] + "..." if len(request_text) > 80 else request_text
         )
         resp_truncated = (
             response.text[:80] + "..." if len(response.text) > 80 else response.text

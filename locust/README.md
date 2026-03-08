@@ -4,7 +4,9 @@ This directory contains a Locust load testing script for testing the synchronic 
 
 ## Prerequisites
 
-1. Follow the instructions in the ledger journal service to spin up a ledger compose network: `https://github.com/sandialabs/sync-services/tree/main/compose/ledger`
+1. Start the current general compose stack from `sync-services`:
+   - `SECRET=pass PORT=8192 ./tests/local-compose.sh up`
+   - or `SECRET=pass PORT=8192 docker compose -f compose/general/docker-compose.yml up -d`
 
 2. Ensure you have the `SECRET` environment variable set (must match the server's secret)
 
@@ -13,14 +15,14 @@ This directory contains a Locust load testing script for testing the synchronic 
 ### Interactive Web UI Mode (Recommended for Development)
 
 ```bash
-$ SECRET=pass locust --host=http://localhost:8192/.interface
+$ SECRET=pass locust --host=http://localhost:8192
 ```
 
 **Expected Behavior:**
 1. Locust starts and displays: `Starting web interface at http://localhost:8089`
 2. Open your browser to http://localhost:8089
 3. You'll see the Locust web interface with:
-   - **Host**: Pre-filled with `http://localhost:8192/.interface`
+   - **Host**: Pre-filled with `http://localhost:8192`
    - **Number of users**: Input field for concurrent users
    - **Spawn rate**: Input field for users spawned per second
 4. Enter desired values (e.g., 10 users, 2 spawn rate) and click **"Start swarming"**
@@ -33,7 +35,7 @@ $ SECRET=pass locust --host=http://localhost:8192/.interface
 ### Headless Mode (For Automated Testing)
 
 ```bash
-$ SECRET=pass locust --host=http://localhost:8192/interface --users=10 --spawn-rate=2 --run-time=60s --headless
+$ SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
 ```
 
 **Expected Behavior:**
@@ -46,26 +48,26 @@ $ SECRET=pass locust --host=http://localhost:8192/interface --users=10 --spawn-r
 
 ```bash
 # Save results to CSV files
-$ SECRET=pass locust --host=http://localhost:8192/.interface --users=10 --spawn-rate=2 --run-time=60s --headless --csv=results
+$ SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless --csv=results
 
 # Run with custom web UI port
-$ SECRET=pass locust --host=http://localhost:8192/.interface --web-port=8090
+$ SECRET=pass locust --host=http://localhost:8192 --web-port=8090
 ```
 
 ## Test Behavior
 
 The load test performs the following actions:
 - Generates random key-value pairs
-- Sends POST requests to `/.interface` endpoint with Lisp-style commands
-- Each request format: `(*local* "SECRET" (ledger-set! (*state* locust KEY) VALUE))`
+- Sends POST requests to `/interface/json` with the JSON function envelope
+- Each request sets `(*state* locust <key>)` to a random string value via `set!`
 - Logs both request and response (truncated to 80 characters each)
 
 ## Expected Output
 
 In the terminal, you'll see output like:
 ```
-REQ: (*local* "pass" (ledger-set! (*state* locust key-123456) val-789012)) | RESP: #t
-REQ: (*local* "pass" (ledger-set! (*state* locust key-234567) val-890123)) | RESP: #t
+REQ: {"function":"set!","arguments":{"path":[["*state*","locust","key-123456"]],"value":{"*type/string*":"val-789012"}},"authentication":{"*type/string*":"pass"}} | RESP: true
+REQ: {"function":"set!","arguments":{"path":[["*state*","locust","key-234567"]],"value":{"*type/string*":"val-890123"}},"authentication":{"*type/string*":"pass"}} | RESP: true
 ```
 
 ## Troubleshooting
