@@ -16,6 +16,7 @@ This compose stack runs one journal with gateway, explorer, workbench, and the d
 - `WINDOW` (default `1024`): retained historical state window
 - `TLS_CERT_HOST_PATH` (default `./tls/tls.crt`): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (default `./tls/tls.key`): host key file mounted into router
+- `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
 
@@ -46,7 +47,8 @@ SECRET=password PORT=8192 \
 docker compose -f compose/general/docker-compose.yml up -d
 ```
 
-Note: the default compose stack does not mount a host ACME webroot directory. If you use ACME HTTP-01 (for example, certbot webroot mode), add an explicit bind mount for `/var/www/acme-challenge` in your deployment-specific compose customization.
+The default compose stack now mounts ACME webroot to `/var/www/acme-challenge`.
+Use `ACME_WEBROOT_HOST_PATH` to override where challenge files come from on the host.
 
 Example:
 

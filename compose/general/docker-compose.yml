@@ -55,6 +55,7 @@ services:
     volumes:
       - ${TLS_CERT_HOST_PATH:-./tls/tls.crt}:/etc/nginx/certs/tls.crt:ro
       - ${TLS_KEY_HOST_PATH:-./tls/tls.key}:/etc/nginx/certs/tls.key:ro
+      - ${ACME_WEBROOT_HOST_PATH:-./acme-challenge}:/var/www/acme-challenge
     depends_on:
       - journal
       - explorer
