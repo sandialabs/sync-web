@@ -25,56 +25,69 @@ Required/important environment variables:
 
 - `SECRET` (required): interface authentication secret
 - `PORT` (default `8192`): published HTTP port
+- `HTTPS_PORT` (default `443`): published HTTPS port
 - `PERIOD` (default `2`): stepping cadence parameter passed to journal
 - `WINDOW` (default `1024`): retention window for unpinned history
-- `LOCAL_LISP_PATH` (optional in test scripts): local override path for Lisp class files
+- `TLS_CERT_HOST_PATH` (optional): host certificate file mounted into router
+- `TLS_KEY_HOST_PATH` (optional): host key file mounted into router
+- `LOCAL_LISP_DIRECTORY` (optional in test scripts): local override path for Lisp class files
 
 Start:
 
 ```bash
-SECRET=password PORT=8192 ./tests/up-compose.sh
+SECRET=password ./tests/local-compose.sh up
 ```
 
 Smoke validation:
 
 ```bash
-./tests/smoke-compose.sh
+./tests/local-compose.sh smoke
 ```
 
-Stop:
+Direct HTTP deployment (no TLS):
+
+```bash
+SECRET=password PORT=80 \
+docker compose -f compose/general/docker-compose.yml up -d
+```
+
+Optional TLS with the same compose file:
+
+```bash
+TLS_CERT_HOST_PATH=/absolute/path/to/fullchain.pem \
+TLS_KEY_HOST_PATH=/absolute/path/to/privkey.pem \
+SECRET=password PORT=80 \
+HTTPS_PORT=443 \
+docker compose -f compose/general/docker-compose.yml up -d
+```
+
+Stop (`-v` to delete volumes):
 
 ```bash
 docker compose -f compose/general/docker-compose.yml down -v
 ```
 
-## Services
+## Routing
 
 The service split allows teams to scale or replace one layer at a time.
-For example, interface routing can be adjusted independently from journal runtime updates.
-
-### Interface
-
-The interface service is the public nginx entry point for the deployment.
+For example, router behavior can be adjusted independently from journal runtime updates.
+The router service is the public nginx entry point for the deployment.
 It serves runtime query routes and UI routes:
 
 | Route | Purpose |
 | --- | --- |
 | `/interface` | Lisp request endpoint for direct evaluator and API calls. |
 | `/interface/json` | JSON request endpoint for web and service integrations. |
+| `/gateway/` | Gateway landing page and route orientation. |
+| `/api/v1/docs` | Swagger/OpenAPI documentation for versioned API routes. |
+| `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
 | `/explorer/` | Browser UI for navigating and editing ledger and record paths. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
 
-### Journal
+Router mode is selected at startup:
 
-The journal service is the Rust runtime (`journal-sdk`), which loads the boot script, executes periodic step commands, and hosts the evaluator-backed interfaces consumed by the web layer.
-
-### Explorer
-
-Explorer is the operator-facing UI for browsing and editing ledger state, especially peer-visible paths and operational state transitions.
-
-### Workbench
-
-Workbench is the developer-facing query console and API reference surface used for payload authoring, validation, and ad hoc diagnostics.
+- HTTP mode when TLS cert/key files are not found.
+- TLS mode when both cert/key files are present.
 
 ## Network API
 
@@ -208,7 +221,7 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
 
 ```scheme
 ((function *secret*)
- (arguments ("old-password" "new-password"))
+ (arguments ((secret "new-password")))
  (authentication "old-password"))
 ```
 
@@ -218,10 +231,9 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
 ```json
 {
   "function": "*secret*",
-  "arguments": [
-    {"*type/string*": "old-password"},
-    {"*type/string*": "new-password"}
-  ],
+  "arguments": {
+    "secret": {"*type/string*": "new-password"}
+  },
   "authentication": {"*type/string*": "old-password"}
 }
 ```
