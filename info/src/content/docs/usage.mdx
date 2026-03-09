@@ -91,7 +91,7 @@ That keeps client implementations simple and makes troubleshooting easier across
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `function` | symbol/string | Yes | API function name |
-| `arguments` | list/array | Usually | Positional function arguments |
+| `arguments` | object / association list | Usually | Keyword-style fields for ledger calls |
 | `authentication` | string / `*type/string*` | Restricted calls | Interface secret |
 
 > **Note:**
@@ -110,7 +110,8 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function get)
- (arguments (((*state* docs article hash)) #t))
+ (arguments ((path ((*state* docs article hash)))
+             (details? #t)))
  (authentication "password"))
 ```
 
@@ -120,12 +121,10 @@ You can copy them into Workbench first, then move them into automation once vali
 ```json
 {
   "function": "get",
-  "arguments": [
-    [
-      ["*state*", "docs", "article", "hash"],
-      true
-    ]
-  ],
+  "arguments": {
+    "path": [["*state*", "docs", "article", "hash"]],
+    "details?": true
+  },
   "authentication": {"*type/string*": "password"}
 }
 ```
@@ -144,7 +143,8 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function set!)
- (arguments (((*state* docs article hash)) "0xabc123"))
+ (arguments ((path ((*state* docs article hash)))
+             (value "0xabc123")))
  (authentication "password"))
 ```
 
@@ -154,12 +154,10 @@ You can copy them into Workbench first, then move them into automation once vali
 ```json
 {
   "function": "set!",
-  "arguments": [
-    [
-      ["*state*", "docs", "article", "hash"],
-      {"*type/string*": "0xabc123"}
-    ]
-  ],
+  "arguments": {
+    "path": [["*state*", "docs", "article", "hash"]],
+    "value": {"*type/string*": "0xabc123"}
+  },
   "authentication": {"*type/string*": "password"}
 }
 ```
@@ -174,7 +172,7 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function pin!)
- (arguments ((-1 (*state* docs article hash))))
+ (arguments ((path (-1 (*state* docs article hash)))))
  (authentication "password"))
 ```
 
@@ -184,7 +182,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ```json
 {
   "function": "pin!",
-  "arguments": [[-1, ["*state*", "docs", "article", "hash"]]],
+  "arguments": {"path": [-1, ["*state*", "docs", "article", "hash"]]},
   "authentication": {"*type/string*": "password"}
 }
 ```
@@ -199,7 +197,8 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function general-peer!)
- (arguments (journal_b "http://journal-b.example.org/interface"))
+ (arguments ((name journal_b)
+             (interface "http://journal-b.example.org/interface")))
  (authentication "password"))
 ```
 
@@ -209,10 +208,10 @@ You can copy them into Workbench first, then move them into automation once vali
 ```json
 {
   "function": "general-peer!",
-  "arguments": [
-    "journal_b",
-    {"*type/string*": "http://journal-b.example.org/interface"}
-  ],
+  "arguments": {
+    "name": "journal_b",
+    "interface": {"*type/string*": "http://journal-b.example.org/interface"}
+  },
   "authentication": {"*type/string*": "password"}
 }
 ```

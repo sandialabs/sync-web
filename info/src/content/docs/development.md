@@ -162,6 +162,17 @@ State path shorthand follows cdr/car traversal semantics such as `(self '(1 0 0 
 In the tables below, methods prefixed with `*` (for example `*init*`) are still part of the public class API.
 Only methods prefixed with `~` are treated as internal/helper methods.
 
+#### Normative Guidelines
+
+For standard object implementations, `define-class` and `define-method` are the normative authoring forms.
+
+- New runtime classes SHOULD be expressed as a single `define-class` form.
+- Class members MUST be declared with `define-method`; arbitrary top-level expressions inside a class body are not part of the supported model.
+- Constructors SHOULD be implemented as `(*init* self ...)` methods rather than ad hoc initialization outside the class form.
+- Internal helper behavior SHOULD be exposed as `~`-prefixed methods, while stable external behavior SHOULD use non-`~` method names.
+
+This convention keeps class loading deterministic, keeps object serialization semantics predictable, and aligns with how `standard.scm` validates class definitions during `make`.
+
 #### Standard Class
 
 Public API (`standard.scm`):
@@ -309,21 +320,21 @@ Run interactive stack:
 
 ```bash
 cd /code/sync-services
-SECRET=password PORT=8192 ./tests/up-compose.sh
+SECRET=password PORT=8192 ./tests/local-compose.sh up
 ```
 
 Run automated health/smoke checks:
 
 ```bash
 cd /code/sync-services
-./tests/smoke-compose.sh
+./tests/local-compose.sh smoke
 ```
 
 Optional local Lisp override (to test in-progress local bootstrap code):
 
 ```bash
 cd /code/sync-services
-LOCAL_LISP_PATH=/absolute/path/to/lisp ./tests/smoke-compose.sh
+LOCAL_LISP_DIRECTORY=/absolute/path/to/lisp ./tests/local-compose.sh smoke
 ```
 
 The smoke script verifies route readiness and key API behavior (for example `size` and authenticated `configuration` responses).
