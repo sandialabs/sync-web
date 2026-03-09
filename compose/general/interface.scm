@@ -81,7 +81,7 @@
                           (loop (cdr sub-steps)))
                          ((eq? (caar sub-steps) 'step-peer!)
                           (sync-call `((function ,(caar sub-steps))
-                                       (arguments ((name (cadar sub-steps))))
+                                       (arguments ((name ,(cadar sub-steps))))
                                        (authentication ,(cadr auth))) #f)
                           (loop (cdr sub-steps)))
                          (else (error 'step-error "Cannot execute unrecognized substep"))))))
