@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 logger.setLevel(logging.INFO)
 
+REQUEST_TIMEOUT_SECONDS = 60
+MAX_IN_FLIGHT_THREADS = 64
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,7 +54,7 @@ class Metrics:
             if function == "get":
                 self.get_latency_sum += duration
                 self.get_latency_count += 1
-            elif function == "set!":
+            elif function in {"set!", "set"}:
                 self.set_latency_sum += duration
                 self.set_latency_count += 1
 
@@ -176,37 +178,58 @@ def metrics_writer():
         time.sleep(1)
 
 
-def call(function, *arguments):
+def call(operation, arguments=None):
     started = time.perf_counter()
     success = False
     try:
-        result = requests.post(
-            f"http://{env['JOURNAL']}/interface/json",
-            json={
-                "function": function,
-                "arguments": arguments,
-                "authentication": env["SECRET"],
-            },
-        ).json()
+        public_operations = {"size", "information", "synchronize", "resolve"}
+        get_only_operations = {"size", "information", "peers"}
+
+        gateway_base = env.get(
+            "JOURNAL_GATEWAY_BASE", f"http://{env['JOURNAL']}/api/v1/general"
+        )
+        url = f"{gateway_base}/{operation}"
+
+        headers = {"accept": "application/json"}
+        if operation not in public_operations:
+            headers["x-sync-auth"] = env["SECRET"]
+
+        if operation in get_only_operations:
+            response = requests.get(
+                url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS
+            )
+        else:
+            headers["content-type"] = "application/json"
+            body = {"arguments": arguments} if arguments is not None else {}
+            response = requests.post(
+                url, headers=headers, json=body, timeout=REQUEST_TIMEOUT_SECONDS
+            )
+
+        response.raise_for_status()
+        result = response.json()
         success = True
         logger.info(
-            f"{datetime.now().isoformat()} {function} | {arguments} -> {result}"
+            f"{datetime.now().isoformat()} {operation} | {arguments} -> {result}"
         )
         return result
     finally:
-        METRICS.record_request(function, time.perf_counter() - started, success)
+        METRICS.record_request(operation, time.perf_counter() - started, success)
 
 
 def run(peers):
     local_journal = env["JOURNAL"]
+    size = int(env["SIZE"])
+    work_sem = threading.BoundedSemaphore(MAX_IN_FLIGHT_THREADS)
 
     # initialize peering
     for peer in peers[local_journal]:
         # todo: handle public key
         while r := call(
-            "general-peer!",
-            peer.rsplit(".", 1)[0],
-            {"*type/string*": f"http://{peer}/interface"},
+            "general-peer",
+            {
+                "name": peer.rsplit(".", 1)[0],
+                "interface": {"*type/string*": f"http://{peer}/interface"},
+            },
         ):
             if r is not True:
                 logger.warning(f"Could not peer with {peer}, trying again")
@@ -215,16 +238,19 @@ def run(peers):
                 break
 
     # preload the journal
-    for i in range(int(env["SIZE"])):
+    for i in range(size):
         call(
-            "set!",
-            [["*state*", "data", f"key-{i}"]],
-            {"*type/string*": " ".join(choice(WORDS, NUM_WORDS))},
+            "set",
+            {
+                "path": [["*state*", "data", f"key-{i}"]],
+                "value": {"*type/string*": " ".join(choice(WORDS, NUM_WORDS))},
+            },
         )
 
     # perform a single action
     def _act(call):
         cycle_success = False
+        work_sem.acquire()
         try:
             path, node = [], local_journal
             traversal = [local_journal]
@@ -233,10 +259,10 @@ def run(peers):
                 traversal.append(node)
                 path += [-1, ["*peer*", node.rsplit(".", 1)[0], "chain"]]
 
-            path += [-1, ["*state*", "data", f"key-{randint(0, env['SIZE'])}"]]
+            path += [-1, ["*state*", "data", f"key-{randint(0, size)}"]]
 
             # read from the journal
-            result = call("get", path)
+            result = call("get", {"path": path})
 
             if type(result) is not dict or "*type/string*" not in result:
                 logger.warning("Cannot complete action")
@@ -252,17 +278,24 @@ def run(peers):
 
             # # write to the journal
             set_result = call(
-                "set!",
-                [["*state*", "data", f"key-{randint(0, env['SIZE'])}"]],
-                {"*type/string*": " ".join(ls)},
+                "set",
+                {
+                    "path": [["*state*", "data", f"key-{randint(0, size)}"]],
+                    "value": {"*type/string*": " ".join(ls)},
+                },
             )
             cycle_success = set_result is True
         finally:
             METRICS.record_cycle(cycle_success)
+            work_sem.release()
 
     until = datetime.now()
     while True:
-        Thread(target=_act, args=[call]).start()
+        if work_sem.acquire(blocking=False):
+            work_sem.release()
+            Thread(target=_act, args=[call], daemon=True).start()
+        else:
+            logger.warning("Skipping activity cycle: max in-flight worker threads reached")
         time.sleep(max((until - datetime.now()).total_seconds(), 0))
         until += timedelta(seconds=float(env["ACTIVITY"]))
 

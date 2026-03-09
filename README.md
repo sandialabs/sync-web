@@ -7,7 +7,7 @@ This project provides analysis tools and simulation components for the Synchroni
 
 ### FIREWHEEL Model Components
 
-- **ledger-journal**: Creates journal nodes that maintain distributed ledger state with configurable periodicity and secrets
+- **general-journal**: Creates journal nodes that maintain distributed ledger state with configurable periodicity and secrets
 - **network-monitor**: Provides monitoring and observability using Prometheus and Grafana for real-time network metrics and visualization
 - **social-agent**: Simulates social agents that interact with the ledger system, with configurable connectivity, size, and activity parameters
 

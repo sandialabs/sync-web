@@ -4,7 +4,7 @@ This directory contains FIREWHEEL model components for simulating distributed le
 
 ## Components
 
-### Ledger Journal (`ledger-journal`)
+### General Journal (`general-journal`)
 A distributed ledger component that provides journaling capabilities for tracking transactions and state changes across the network.
 
 **Features:**
@@ -36,7 +36,7 @@ Simulates social agents that interact with the ledger system, generating realist
 Run a basic experiment with 4 journals and 4 agents running at a period of one step every 4 seconds, each with network monitoring, 2 outgoing peers and 32 key-value pairs per node, each value 8 words long, and an activity level of one read/write every 2 seconds
 
 ```bash
-firewheel experiment -r synchronic_web.ledger_journal:4:2 synchronic_web.social_agent:4:32:2:8 synchronic_web.network_monitor control_network minimega.launch
+firewheel experiment -r synchronic_web.general_journal:4:2 synchronic_web.social_agent:4:32:2:8 synchronic_web.network_monitor control_network minimega.launch
 ```
 
 ### Accessing the Monitoring Dashboard
@@ -65,17 +65,17 @@ To access the Grafana monitoring dashboard:
 
 ### Small Test Environment
 ```bash
-firewheel experiment -r synchronic_web.ledger_journal:2:2 synchronic_web.network_monitor synchronic_web.social_agent:1:16:0 control_network minimega.launch
+firewheel experiment -r synchronic_web.general_journal:2:2 synchronic_web.network_monitor synchronic_web.social_agent:1:16:0 control_network minimega.launch
 ```
 
 ### Medium Scale Simulation
 ```bash
-firewheel experiment -r synchronic_web.ledger_journal:8:2 synchronic_web.network_monitor synchronic_web.social_agent:4:64:1 control_network minimega.launch
+firewheel experiment -r synchronic_web.general_journal:8:2 synchronic_web.network_monitor synchronic_web.social_agent:4:64:1 control_network minimega.launch
 ```
 
 ### Large Scale Deployment
 ```bash
-firewheel experiment -r synchronic_web.ledger_journal:16:2 synchronic_web.network_monitor synchronic_web.social_agent:8:128:2 control_network minimega.launch
+firewheel experiment -r synchronic_web.general_journal:16:2 synchronic_web.network_monitor synchronic_web.social_agent:8:128:2 control_network minimega.launch
 ```
 
 ## Requirements
@@ -92,3 +92,7 @@ The simulation creates a network topology with:
 - Social agents generating transaction patterns
 - Router infrastructure connecting components
 - Control network for experiment management
+
+## Issues
+
+- [ ] Current discrepancy between local development, github build, and FIREWHEEL testing is suboptimal 

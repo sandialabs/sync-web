@@ -68,8 +68,8 @@ class Plugin(AbstractPlugin):
 
                 agent.run_executable(
                     -10,
-                    "echo",
-                    arguments=[f'"{journal_ip} {journal.name}"', ">>", "/etc/hosts"],
+                    "bash",
+                    arguments=f'-c "echo \\"{journal_ip} {journal.name}\\" >> /etc/hosts"',
                     vm_resource=False,
                 )
 
