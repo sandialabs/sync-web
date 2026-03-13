@@ -67,6 +67,15 @@ Stop (`-v` to delete volumes):
 docker compose -f compose/general/docker-compose.yml down -v
 ```
 
+The default stack includes:
+
+- journal runtime (`general`)
+- router/nginx entrypoint
+- gateway API service
+- explorer UI
+- workbench UI
+- file-system SMB service
+
 ## Routing
 
 The service split allows teams to scale or replace one layer at a time.
@@ -83,6 +92,7 @@ It serves runtime query routes and UI routes:
 | `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
 | `/explorer/` | Browser UI for navigating and editing ledger and record paths. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
+| SMB share | File-system projection exposing `/stage`, `/ledger`, and `/control/pin`. |
 
 Router mode is selected at startup:
 
