@@ -310,7 +310,13 @@ These tests validate class behavior and cross-journal message scripts in a repea
 
 ### Service Stack Smoke Tests
 
-Use `sync-services/tests` when you need to validate the integrated runtime plus web routes (`/explorer`, `/workbench`, `/interface/json`).
+Use `sync-services/tests` when you need to validate the integrated runtime plus the primary operator surfaces:
+
+- `/explorer`
+- `/workbench`
+- `/gateway`
+- `/interface/json`
+- the SMB-backed file-system projection
 
 Prerequisites:
 
@@ -337,11 +343,11 @@ cd /code/sync-services
 LOCAL_LISP_DIRECTORY=/absolute/path/to/lisp ./tests/local-compose.sh smoke
 ```
 
-The smoke script verifies route readiness and key API behavior (for example `size` and authenticated `configuration` responses).
+The smoke script verifies route readiness, key API behavior (for example `size` and authenticated `configuration` responses), and the compose-integrated file-system service.
 
-### UI Unit Tests
+### Service-Level Tests
 
-`sync-services/services/explorer` and `sync-services/services/workbench` include component/unit tests for client behavior.
+`sync-services/services/explorer` and `sync-services/services/workbench` include client-side unit tests, and `sync-services/services/file-system` includes .NET contract tests for filesystem projection behavior.
 
 Prerequisites:
 
@@ -359,6 +365,11 @@ npm test
 cd /code/sync-services/services/workbench
 npm install
 npm test
+```
+
+```bash
+cd /code/sync-services/services/file-system
+dotnet test tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj
 ```
 
 ### Stress Testing

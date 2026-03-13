@@ -17,7 +17,7 @@ This repository serves as the main entry point and documentation hub for the Syn
 - **Quick Links to Core Components:**  
   - [Journal SDK](https://github.com/sandialabs/sync-journal): Core executable for deploying a Synchronic Web node ("journal").
   - [Record Logic](https://github.com/sandialabs/sync-records): Lisp/Scheme functions and data structures for configuring journal logic.
-  - [Service Deployments](https://github.com/sandialabs/sync-services): Containerized microservices and Docker Compose networks for deploying Synchronic Web applications.
+  - [Service Deployments](https://github.com/sandialabs/sync-services): Containerized microservices and Docker Compose networks for deploying Synchronic Web applications, including `gateway`, `explorer`, `workbench`, and the SMB-backed `file-system` projection service.
   - [Experiment Analysis](https://github.com/sandialabs/sync-analysis): Experiments for analyzing performance and robustness of Synchronic Web networks.
 
 
