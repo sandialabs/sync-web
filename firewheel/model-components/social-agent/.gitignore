@@ -1,2 +1,3 @@
 .synchronic_web.social_agent.installed
 env/
+docker/custom-setup.sh

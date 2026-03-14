@@ -28,6 +28,25 @@ jobs:
         run: |
           python -m unittest discover -s ./firewheel/model-components/social-agent/docker/tests -p "test_*.py" -v
 
+  docker-validate:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build social-agent Docker image for amd64
+        uses: docker/build-push-action@v6
+        with:
+          context: ./firewheel/model-components/social-agent/docker
+          push: false
+          load: false
+          platforms: linux/amd64
+
   publish:
     needs: test
     runs-on: ubuntu-latest
@@ -42,14 +61,20 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Build and push versioned Docker image
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Read social-agent version
+        id: version
         run: |
-          version=$( cat ./firewheel/model-components/social-agent/version.txt )
-          docker build ./firewheel/model-components/social-agent/docker --tag ghcr.io/${{ github.repository }}/social-agent:$version
-          docker push ghcr.io/${{ github.repository }}/social-agent:$version
-      - name: Retag and push latest Docker image
-        run: |
-          version=$( cat ./firewheel/model-components/social-agent/version.txt )
-          docker tag ghcr.io/${{ github.repository }}/social-agent:$version \
-                     ghcr.io/${{ github.repository }}/social-agent:latest 
-          docker push ghcr.io/${{ github.repository }}/social-agent:latest
+          echo "value=$(cat ./firewheel/model-components/social-agent/version.txt)" >> "$GITHUB_OUTPUT"
+      - name: Build and push multi-arch Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./firewheel/model-components/social-agent/docker
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}/social-agent:${{ steps.version.outputs.value }}
+            ghcr.io/${{ github.repository }}/social-agent:latest
