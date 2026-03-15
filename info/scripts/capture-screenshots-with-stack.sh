@@ -3,7 +3,11 @@ set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 INFO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
-SERVICES_DIR="${SYNC_SERVICES_DIR:-/code/sync-services}"
+SERVICES_DIR="${SYNC_SERVICES_DIR:-}"
+if [ -z "$SERVICES_DIR" ]; then
+    echo "SYNC_SERVICES_DIR is required." >&2
+    exit 1
+fi
 COMPOSE_DIR="$SERVICES_DIR/compose/general"
 LOCAL_OVERRIDE_FILE="$SERVICES_DIR/tests/docker-compose.local.yml"
 LOCAL_UI_OVERRIDE_FILE="$SERVICES_DIR/tests/docker-compose.local-ui.yml"

@@ -36,6 +36,8 @@ The generated site is available under `dist/`.
 
 Use this when you want to refresh Explorer/Workbench screenshots embedded in docs.
 
+The current Explorer screenshot flow captures the default landing view, which now opens in `Ledger` mode.
+
 Prerequisites:
 
 1. Bring up `sync-services` so `/explorer/` and `/workbench/` are live (default expected URL is `http://127.0.0.1:8192`).
@@ -63,5 +65,24 @@ Optional environment variables:
 - `SYNC_BASE_URL` (default `http://127.0.0.1:8192`)
 - `SYNC_SCREENSHOT_DIR` (default `./public/images/screenshots`)
 - `SYNC_SCREENSHOT_SETTLE_MS` (default `1500`)
-- `SYNC_SERVICES_DIR` (default `/code/sync-services`, used by `capture:screenshots:stack`)
+- `SYNC_SERVICES_DIR` (required for `capture:screenshots:stack`)
 - `PORT`, `SECRET`, `PERIOD`, `WINDOW`, `LOCAL_LISP_PATH` (used by `capture:screenshots:stack`)
+
+Example:
+
+```bash
+SYNC_SERVICES_DIR=/absolute/path/to/sync-services npm run capture:screenshots:stack
+```
+
+## Multi-Node Testing
+
+For local multi-node journal plus social-agent testing, use the compose harness in `sync-analysis`:
+
+```bash
+cd /code/sync-analysis/compose/social-agent-network
+SYNC_SERVICES_GENERAL_COMPOSE=/code/sync-services/compose/general/docker-compose.yml \
+python3 generate.py
+docker compose up
+```
+
+That harness reuses the full `sync-services` general stack per node and is the current local path for testing peer topology behavior without FIREWHEEL.
