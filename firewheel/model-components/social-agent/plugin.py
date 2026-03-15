@@ -21,17 +21,17 @@ class Plugin(AbstractPlugin):
 
         journals = [v.name for v in self.g.get_vertices() if v.is_decorated_by(Journal)]
 
-        peers = (
-            {
-                x: random.sample(
-                    [y for y in journals if y != x],
-                    min(connectivity, len(journals) - 1),
-                )
-                for x in journals
-            }
-            if len(journals) > 1
-            else {}
-        )
+        edges = {
+            x: random.sample(
+                [y for y in journals if y != x],
+                min(connectivity, len(journals) - 1),
+            )
+            for x in journals
+        }
+        peers = {
+            "nodes": {journal_name: {"router_host": journal_name} for journal_name in journals},
+            "edges": edges,
+        }
 
         for vertex in list(self.g.get_vertices()):
             if vertex.is_decorated_by(Journal):
@@ -46,7 +46,8 @@ class Plugin(AbstractPlugin):
                     Switch, init_args=[f"journal-agent-sw-{index}"]
                 )
 
-                # Connect the journal to the agent on a private network
+                # Connect the journal VM and its colocated agent on a private network.
+                # The agent reaches the local stack through the router exposed on the VM host.
                 journal_ip = next(ips)
                 journal.connect(journal_agent_sw, journal_ip, journal_agent_net.netmask)
 
@@ -56,6 +57,7 @@ class Plugin(AbstractPlugin):
                 agent.decorate(
                     SocialAgent,
                     init_args=[
+                        journal.name,
                         journal.name,
                         journal.secret,
                         journal.period,
@@ -73,6 +75,5 @@ class Plugin(AbstractPlugin):
                     vm_resource=False,
                 )
 
-                # Connect the agent to both the journal on a private network,
-                # and to the "environment" on a "simulation" network
+                # Connect the agent to the private network it uses to reach its own router-hosting VM.
                 agent.connect(journal_agent_sw, next(ips), journal_agent_net.netmask)

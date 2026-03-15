@@ -33,7 +33,7 @@ Simulates social agents that interact with the ledger system, generating realist
 
 ## Quick Start
 
-Run a basic experiment with 4 journals and 4 agents running at a period of one step every 4 seconds, each with network monitoring, 2 outgoing peers and 32 key-value pairs per node, each value 8 words long, and an activity level of one read/write every 2 seconds
+Run a basic experiment with 4 journals and 4 agents running at a period of one step every 4 seconds, each with network monitoring, 2 outgoing peers and 32 key-value pairs per node, each value 8 words long, and serial activity enabled (`ACTIVITY=0`)
 
 ```bash
 firewheel experiment -r synchronic_web.general_journal:4:2 synchronic_web.social_agent:4:32:2:8 synchronic_web.network_monitor control_network minimega.launch
@@ -59,7 +59,7 @@ To access the Grafana monitoring dashboard:
 ### Social Agent Parameters
 - **Connectivity**: Number of peer connections per agent
 - **Size**: Agent population size
-- **Activity**: Activity level (0 = low, higher values = more active)
+- **Activity**: Seconds between activity cycles. `0` means serial unpaced mode and is the current default.
 
 ## Example Configurations
 
@@ -92,6 +92,9 @@ The simulation creates a network topology with:
 - Social agents generating transaction patterns
 - Router infrastructure connecting components
 - Control network for experiment management
+
+The canonical social-agent container runtime now lives in `../docker/social-agent/`.
+The FIREWHEEL `social-agent` model component is the orchestration adapter that consumes that runtime contract.
 
 ## Issues
 

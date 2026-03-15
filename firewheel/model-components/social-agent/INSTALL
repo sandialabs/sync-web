@@ -32,7 +32,7 @@ check_flag
 
 VERSION=$( cat "$SCRIPT_DIR/version.txt" )
 
-# Create docker image
+# Pull the published image built from sync-analysis/docker/social-agent
 docker pull ghcr.io/sandialabs/sync-analysis/social-agent:$VERSION
 docker tag ghcr.io/sandialabs/sync-analysis/social-agent:$VERSION social-agent
 

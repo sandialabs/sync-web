@@ -10,8 +10,9 @@ from utilities.tools import Utilities
 @require_class(Utilities)
 @require_class(Ubuntu2204Server)
 class SocialAgent:
-    def __init__(self, journal, secret, period, size, activity, peers, words):
-        self.journal = journal
+    def __init__(self, node_name, router_host, secret, period, size, activity, peers, words):
+        self.node_name = node_name
+        self.router_host = router_host
         self.secret = secret
         self.period = period
         self.size = size
@@ -26,7 +27,8 @@ class SocialAgent:
     def run_agent(self):
         args = " ".join(
             [
-                f"-e JOURNAL={self.journal}",
+                f"-e NODE_NAME={self.node_name}",
+                f"-e ROUTER_GATEWAY_BASE=http://{self.router_host}/api/v1/general",
                 f"-e SECRET={self.secret}",
                 f"-e PERIOD={self.period}",
                 f"-e SIZE={self.size}",
