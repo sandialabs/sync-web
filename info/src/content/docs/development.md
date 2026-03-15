@@ -398,6 +398,91 @@ cd /code/sync-analysis/locust
 SECRET=pass locust --host=http://localhost:8192/interface --users=10 --spawn-rate=2 --run-time=60s --headless
 ```
 
+### Multi-Node Compose Testing
+
+Use `sync-analysis/compose/social-agent-network` when you want a local multi-node network with one full `sync-services` stack and one social agent per node, without using FIREWHEEL.
+
+Prerequisites:
+
+You need Docker Engine with the `docker compose` plugin, Python 3, and `PyYAML` available in the environment where you run the generator.
+
+Generate the stack:
+
+```bash
+cd /absolute/path/to/sync-analysis/compose/social-agent-network
+SYNC_SERVICES_GENERAL_COMPOSE=/absolute/path/to/sync-services/compose/general/docker-compose.yml \
+python3 generate.py
+```
+
+Run it:
+
+```bash
+docker compose up
+```
+
+Generator defaults:
+
+- `NODE_COUNT=4`
+- `SECRET=pass`
+- `CONNECTIVITY=2`
+- `PERIOD=2`
+- `WINDOW=1024`
+- `SIZE=32`
+- `ACTIVITY=0`
+- `WORDS=8`
+
+Network model:
+
+- each node gets its own `private-<n>` network
+- all routers and journals join a shared `public` network
+- routers remain the named HTTP boundary between nodes
+- file-system remains the SMB boundary per node
+- social agents live on `public` and talk through routers
+
+Generated topology artifacts:
+
+- `docker-compose.yml`
+- `peers.json`
+- `metrics/social-agent-*/`
+- `results/social-agent-*/benchmark.json`
+- `results/network-benchmark.json` when `aggregate_results.py` is running
+
+`peers.json` uses:
+
+- `nodes`: journal-name to router-host mapping
+- `edges`: deterministic outgoing peer adjacency using the same `random.seed(0)` and bounded-degree sampling as FIREWHEEL
+
+Port allocation:
+
+- router HTTP starts at `8192` and increments by node index
+- SMB uses `445` for node `0`, then `1445`, `1446`, and so on
+
+Metrics output:
+
+- each social agent writes Prometheus textfile metrics into its own host-mounted directory under `metrics/`
+- this preserves the current FIREWHEEL-style agent metric output path for local compose runs without adding a full monitoring stack yet
+
+Benchmark output:
+
+- each social agent also writes a rolling JSON snapshot to `results/social-agent-*/benchmark.json`
+- these files are the simplest place to start for end-to-end throughput benchmarking, especially in serial unpaced mode with `ACTIVITY=0`
+- run `python3 aggregate_results.py` in the harness directory to maintain `results/network-benchmark.json` as a cluster-wide aggregate snapshot
+
+For local testing of an unpublished social-agent image, build a local tag and override it during generation:
+
+```bash
+cd /absolute/path/to/sync-analysis
+docker build -t social-agent:dev -f docker/social-agent/Dockerfile .
+```
+
+```bash
+cd /absolute/path/to/sync-analysis/compose/social-agent-network
+SYNC_SERVICES_GENERAL_COMPOSE=/absolute/path/to/sync-services/compose/general/docker-compose.yml \
+IMAGE_OVERRIDE_SOCIAL_AGENT=social-agent:dev \
+python3 generate.py
+docker compose up
+```
+
 ### Network Emulation
 
 Use `sync-analysis/firewheel` for topology-level distributed simulation across journals, agents, and monitoring components.

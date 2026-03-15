@@ -19,17 +19,24 @@ Together they cover the full operator/developer loop: inspect data, make changes
 ### Explorer
 
 The Explorer is the state-navigation and content-management interface.
-Use it when you need to inspect ledger or record paths, browse peer-visible state, and apply operational changes without hand-writing queries.
+It now has two explicit modes:
+
+- `Ledger`
+  - the default landing mode
+  - route-based browsing of committed state across peers and snapshots
+- `Stage`
+  - local editable staged state
+  - file and directory oriented editing actions
 
 Typical Explorer workflow:
 
-1. Synchronize to the latest state so path navigation reflects current chain data.
-2. Navigate through local `*state*` paths or remote peer paths.
-3. Read content and metadata, then stage updates with `set!` semantics through the UI.
-4. Pin or unpin paths to control retention behavior across chain evolution.
-5. Add peers (`general-peer!`) when expanding network visibility.
+1. Start in `Ledger` and synchronize to the latest committed root.
+2. Use the route strip to browse from `Self` through peers and historical snapshots.
+3. Select a ledger file to switch between content and proof views or pin/unpin it.
+4. Switch to `Stage` when you want to edit local staged files and directories.
+5. Use stage actions to create documents/directories, upload files, edit content, and download files.
 
-The Explorer is best for operational tasks and data exploration because it makes path structure and state transitions visible.
+The Explorer is best for operational tasks and data exploration because it separates committed ledger inspection from local staged editing while keeping both in one UI.
 
 <img src={`${import.meta.env.BASE_URL}images/screenshots/explorer-desktop.png`} alt="Explorer desktop view" />
 

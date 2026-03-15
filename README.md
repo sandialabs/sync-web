@@ -18,7 +18,13 @@ This repository serves as the main entry point and documentation hub for the Syn
   - [Journal SDK](https://github.com/sandialabs/sync-journal): Core executable for deploying a Synchronic Web node ("journal").
   - [Record Logic](https://github.com/sandialabs/sync-records): Lisp/Scheme functions and data structures for configuring journal logic.
   - [Service Deployments](https://github.com/sandialabs/sync-services): Containerized microservices and Docker Compose networks for deploying Synchronic Web applications, including `gateway`, `explorer`, `workbench`, and the SMB-backed `file-system` projection service.
-  - [Experiment Analysis](https://github.com/sandialabs/sync-analysis): Experiments for analyzing performance and robustness of Synchronic Web networks.
+  - [Experiment Analysis](https://github.com/sandialabs/sync-analysis): Experiments for analyzing performance and robustness of Synchronic Web networks, including a local `compose/social-agent-network` generator for multi-node social-agent testing.
+
+## Testing Surfaces
+
+- `sync-services/tests/local-compose.sh smoke` is the quickest single-node service-stack validation path for explorer/workbench/gateway/router/file-system.
+- `sync-analysis/compose/social-agent-network/generate.py` provides a local multi-node test network with one full service cluster and one social agent per node.
+- `sync-web/info/README.md` documents the UI screenshot/testing workflow used when the docs site needs fresh explorer/workbench captures.
 
 
 ---
