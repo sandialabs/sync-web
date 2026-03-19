@@ -127,6 +127,7 @@ def rewrite_service_environment(service_name, node_index, environment, secret, p
     elif service_name == "file-system":
         env_map["SYNC_FS_GatewayBaseUrl"] = f"http://gateway-{node_index}/api/v1"
         env_map["SYNC_FS_GatewayAuthToken"] = secret
+        env_map["SYNC_FS_JournalJsonUrl"] = f"http://journal-{node_index}/interface/json"
 
     return env_map
 
