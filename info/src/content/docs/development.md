@@ -6,7 +6,7 @@ sidebar:
 head: []
 ---
 This section is for developers extending runtime behavior, class logic, and APIs.
-The core pattern is progressive layering through `interface.scm` and class modules loaded at boot.
+The core pattern is progressive layering through `general.scm` and the class modules loaded at boot.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ The general stack boot flow is:
 2. Install/instantiate `standard.scm`.
 3. Install class definitions (`log-chain.scm`, `tree.scm`, `configuration.scm`, `ledger.scm`).
 4. Instantiate and store `ledger` object.
-5. Install interface secret and query dispatcher.
+5. Install general API secret and query dispatcher.
 
 Concurrency behavior in `sync-journal` is optimistic:
 
@@ -147,7 +147,7 @@ These signatures are sourced from primitive registrations in `sync-journal/src/e
 | `crypto-sign` | `(crypto-sign private-key message)` | Sign message with private key. |
 | `crypto-verify` | `(crypto-verify public-key signature message)` | Verify signature against message/public key. |
 
-When adding new primitives, keep conversion behavior and security constraints in mind so JSON/Lisp workflows remain predictable.
+When adding new primitives, keep conversion behavior and security constraints in mind so JSON/Scheme workflows remain predictable.
 
 ### Standard Objects
 
@@ -266,18 +266,20 @@ Public API (`ledger.scm`):
 | `configuration` | `(configuration self)` | Return full configuration (public + private). |
 | `information` | `(information self)` | Return public configuration subset. |
 | `size` | `(size self)` | Return permanent chain length. |
-| `peer!` | `(peer! self name info)` | Register/update peer metadata and cached public key. |
-| `peers` | `(peers self)` | List configured peer names. |
+| `bridge!` | `(bridge! self name info)` | Register/update bridge metadata and cached public key. |
+| `bridges` | `(bridges self)` | List configured bridge names. |
 | `set!` | `(set! self path value)` | Stage local state mutation. |
-| `get` | `(get self path details?)` | Read staged/historical value; optional content/pinned/proof bundle. |
+| `get` | `(get self path pinned? proof?)` | Read staged/historical value; optional content/pinned/proof bundle. |
 | `pin!` | `(pin! self path)` | Pin path into permanent chain retention. |
 | `unpin!` | `(unpin! self path)` | Remove previously pinned path. |
-| `synchronize` | `(synchronize self index)` | Serialize peer-sync proof view at index. |
+| `synchronize` | `(synchronize self index)` | Serialize bridge-sync proof view at index. |
 | `resolve` | `(resolve self index path)` | Serialize resolved path view for remote verification. |
-| `step-peer!` | `(step-peer! self name)` | Fetch and verify peer chain head into staged state. |
+| `step-bridge!` | `(step-bridge! self name)` | Fetch and verify bridge chain head into staged state. |
 | `step-chain!` | `(step-chain! self)` | Commit staged state to chain, sign, prune by window, return new size. |
-| `step-generate` | `(step-generate self)` | Generate ordered step operations (chain + peers). |
-| `*update*` | `(*update* self class function)` | Return updated ledger object after applying class-scoped transformation. |
+| `step-generate` | `(step-generate self)` | Generate ordered step operations (chain + bridges). |
+| `update-window` | `(update-window self window)` | Update the configured recent-history window and prune `temp` when it shrinks. |
+| `update-config!` | `(update-config! self path value)` | Update a configuration entry in place. |
+| `update-code!` | `(update-code! self class update!)` | Update one surface-level code object in place. |
 
 ## Testing
 
@@ -314,8 +316,8 @@ Use `sync-services/tests` when you need to validate the integrated runtime plus 
 
 - `/explorer`
 - `/workbench`
-- `/gateway`
-- `/interface/json`
+- `/docs`
+- `/api/v1/...`
 - the SMB-backed file-system projection
 
 Prerequisites:
@@ -374,11 +376,11 @@ dotnet test tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj
 
 ### Stress Testing
 
-Use `sync-analysis/locust` for HTTP load generation against journal interface endpoints.
+Use `sync-analysis/locust` for HTTP load generation against gateway general endpoints.
 
 Prerequisites:
 
-You need a running interface endpoint (typically from `sync-services`), Python 3 with `pip` and Locust dependencies from `requirements.txt`, and a `SECRET` environment variable that matches server configuration.
+You need a running gateway endpoint (typically from `sync-services`), Python 3 with `pip` and Locust dependencies from `requirements.txt`, and a `SECRET` environment variable that matches server configuration.
 
 Install and run:
 
@@ -387,7 +389,7 @@ cd /code/sync-analysis/locust
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-SECRET=pass locust --host=http://localhost:8192/interface
+SECRET=pass locust --host=http://localhost:8192
 ```
 
 Headless example:
@@ -395,7 +397,7 @@ Headless example:
 ```bash
 cd /code/sync-analysis/locust
 . .venv/bin/activate
-SECRET=pass locust --host=http://localhost:8192/interface --users=10 --spawn-rate=2 --run-time=60s --headless
+SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
 ```
 
 ### Multi-Node Compose Testing

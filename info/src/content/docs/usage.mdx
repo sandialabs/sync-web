@@ -13,7 +13,7 @@ It focuses on the currently deployed `general` interface shape used by `sync-ser
 
 ## Graphical Interface
 
-The `general` compose network exposes three primary web clients and one filesystem-oriented service: Explorer (`/explorer/`), Workbench (`/workbench/`), Gateway (`/gateway/`), and File System (SMB).
+The `general` compose network exposes three primary web clients and one filesystem-oriented service: Explorer (`/explorer/`), Workbench (`/workbench/`), Gateway (`/docs` plus `/api/v1/...`), and File System (SMB).
 Together they cover the full operator/developer loop: inspect data, make changes, verify outcomes, mount journal state into ordinary file tools, and convert successful workflows into repeatable API calls.
 
 ### Explorer
@@ -23,7 +23,7 @@ It now has two explicit modes:
 
 - `Ledger`
   - the default landing mode
-  - route-based browsing of committed state across peers and snapshots
+  - route-based browsing of committed state across bridges and snapshots
 - `Stage`
   - local editable staged state
   - file and directory oriented editing actions
@@ -31,7 +31,7 @@ It now has two explicit modes:
 Typical Explorer workflow:
 
 1. Start in `Ledger` and synchronize to the latest committed root.
-2. Use the route strip to browse from `Self` through peers and historical snapshots.
+2. Use the route strip to browse from `Self` through bridges and historical snapshots.
 3. Select a ledger file to switch between content and proof views or pin/unpin it.
 4. Switch to `Stage` when you want to edit local staged files and directories.
 5. Use stage actions to create documents/directories, upload files, edit content, and download files.
@@ -47,8 +47,8 @@ Use it when you want precise control over requests, fast iteration on payload sh
 
 Typical Workbench workflow:
 
-1. Start from a known request pattern (for example `get`, `set!`, `pin!`, or `general-peer!`).
-2. Run the request in Lisp or JSON form and inspect the returned value.
+1. Start from a known request pattern (for example `get`, `set!`, `pin!`, or `general-bridge!`).
+2. Run the request in Scheme or JSON form and inspect the returned value.
 3. Iterate on arguments/authentication until behavior matches intent.
 4. Use the final request as a template for automation or service integration.
 
@@ -63,8 +63,8 @@ Use it when clients should call stable, versioned HTTP routes instead of direct 
 
 Typical Gateway workflow:
 
-1. Start with `GET /gateway/` for route orientation.
-2. Use `GET /api/v1/docs` to review request and response schemas.
+1. Start with `GET /docs` to review request and response schemas.
+2. Use `GET /api/v1/general/size` or another stable route to validate connectivity.
 3. Execute public general operations through `GET` routes (for example `size`, `information`, and `resolve`).
 4. Execute restricted `general` and optional `control` operations through authenticated `POST` routes.
 5. Move validated requests into application clients or automation scripts using the same gateway contracts.
@@ -83,7 +83,7 @@ Typical File System workflow:
 1. Mount the share and work in `/stage` for ordinary mutable file operations.
 2. Browse `/ledger/state` for current committed content.
 3. Traverse `/ledger/previous/<index>/state` for prior committed states.
-4. Traverse `/ledger/peer/<name>/...` for recursively peered ledger state.
+4. Traverse `/ledger/bridge/<name>/...` for recursively bridged ledger state.
 5. Use `/control/pin` for explicit pin and unpin directives on discovered ledger paths.
 
 The File System service is best for shell tools, editors, archives, source trees, and other workflows that already expect a hierarchical filesystem.
@@ -100,12 +100,12 @@ Filesystem projection overview:
 │   ├── previous/
 │   │   └── <index>/
 │   │       ├── state/
-│   │       ├── peer/
+│   │       ├── bridge/
 │   │       └── previous/
-│   └── peer/
+│   └── bridge/
 │       └── <name>/
 │           ├── state/
-│           ├── peer/
+│           ├── bridge/
 │           └── previous/
 └── control/
     └── pin
@@ -130,10 +130,10 @@ The two execution endpoints (`/interface`, `/interface/json`) are for runtime ca
 
 | Endpoint | Description |
 | --- | --- |
-| `POST /interface` | Executes Lisp requests directly against the interface runtime. |
+| `POST /interface` | Executes Scheme requests directly against the interface runtime. |
 | `POST /interface/json` | Executes JSON requests using the object-shaped API envelope. |
-| `POST /interface/lisp-to-json` | Converts Lisp expressions into JSON payload representations. |
-| `POST /interface/json-to-lisp` | Converts JSON payloads back into Lisp forms for debugging and validation. |
+| `POST /interface/scheme-to-json` | Converts Scheme expressions into JSON payload representations. |
+| `POST /interface/json-to-scheme` | Converts JSON payloads back into Scheme forms for debugging and validation. |
 
 ### Request Envelope
 
@@ -148,7 +148,7 @@ That keeps client implementations simple and makes troubleshooting easier across
 
 > **Note:**
 >
-> In Lisp form, API queries are association lists. In JSON form, they are objects with equivalent fields.
+> In Scheme form, API queries are association lists. In JSON form, they are objects with equivalent fields.
 >
 ### Operation Examples
 
@@ -163,7 +163,8 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function get)
  (arguments ((path ((*state* docs article hash)))
-             (details? #t)))
+             (pinned? #t)
+             (proof? #t)))
  (authentication "password"))
 ```
 
@@ -175,7 +176,8 @@ You can copy them into Workbench first, then move them into automation once vali
   "function": "get",
   "arguments": {
     "path": [["*state*", "docs", "article", "hash"]],
-    "details?": true
+    "pinned?": true,
+    "proof?": true
   },
   "authentication": {"*type/string*": "password"}
 }
@@ -184,9 +186,9 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-> **Info: When to use `details? = true`**
+> **Info: When to use `pinned?` and `proof?`**
 >
-> Use `#t` / `true` when you need proof and pin metadata, not just content.
+> Use `pinned?` when you want to know whether a historical path remains pinned, and use `proof?` when you need the proof payload itself.
 >
 #### Write (`set!`)
 
@@ -242,13 +244,13 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-#### Peer (`general-peer!`)
+#### Bridge (`general-bridge!`)
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
 
 ```scheme
-((function general-peer!)
+((function general-bridge!)
  (arguments ((name journal_b)
              (interface "http://journal-b.example.org/interface")))
  (authentication "password"))
@@ -259,7 +261,7 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```json
 {
-  "function": "general-peer!",
+  "function": "general-bridge!",
   "arguments": {
     "name": "journal_b",
     "interface": {"*type/string*": "http://journal-b.example.org/interface"}
@@ -271,16 +273,16 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-## JSON/Lisp Conversion
+## JSON/Scheme Conversion
 
-The converter treats JSON and Lisp as structurally equivalent where possible.
+The converter treats JSON and Scheme as structurally equivalent where possible.
 
 ### Core Mapping
 
-This mapping is the key mental model for moving between web client payloads and Lisp-native request forms.
+This mapping is the key mental model for moving between web client payloads and Scheme-native request forms.
 Once this is clear, advanced payloads become much easier to reason about.
 
-| Lisp | JSON |
+| Scheme | JSON |
 | --- | --- |
 | symbol | string |
 | list | array |
@@ -292,7 +294,7 @@ Once this is clear, advanced payloads become much easier to reason about.
 Special type wrappers are only needed where plain JSON cannot preserve Lisp/runtime semantics.
 If a payload seems unexpectedly interpreted, check whether a special type marker is required.
 
-| JSON marker | Lisp value |
+| JSON marker | Scheme value |
 | --- | --- |
 | `{"*type/string*": "text"}` | string |
 | `{"*type/quoted*": ...}` | `(quote ...)` |
@@ -304,9 +306,9 @@ If a payload seems unexpectedly interpreted, check whether a special type marker
 
 ### Practical Guidance
 
-Use `/interface/lisp-to-json` to generate exact JSON for complex expressions, and use `/interface/json-to-lisp` when debugging client payloads or validating round-trip conversions.
+Use `/interface/scheme-to-json` to generate exact JSON for complex expressions, and use `/interface/json-to-scheme` when debugging client payloads or validating round-trip conversions.
 For web clients, prefer object-shaped API queries (`function`, `arguments`, `authentication`) because they remain easier to read and diff than raw array forms, and reserve array-shaped JSON for raw root command calls.
 Prefer `*type/string*` for literal strings in JSON payloads whenever you need to avoid ambiguity in type conversion.
 
-A common workflow is: prototype in Lisp, convert to JSON, integrate in client code, then round-trip with `json-to-lisp` during debugging.
+A common workflow is: prototype in Scheme, convert to JSON, integrate in client code, then round-trip with `json-to-scheme` during debugging.
 Teams that include conversion checks in their release process generally catch payload-shape regressions earlier.

@@ -85,10 +85,9 @@ It serves runtime query routes and UI routes:
 
 | Route | Purpose |
 | --- | --- |
-| `/interface` | Lisp request endpoint for direct evaluator and API calls. |
+| `/interface` | Scheme request endpoint for direct evaluator and API calls. |
 | `/interface/json` | JSON request endpoint for web and service integrations. |
-| `/gateway/` | Gateway landing page and route orientation. |
-| `/api/v1/docs` | Swagger/OpenAPI documentation for versioned API routes. |
+| `/docs` | Gateway Swagger/OpenAPI documentation and route orientation. |
 | `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
 | `/explorer/` | Browser UI with dedicated `Ledger` and `Stage` modes for committed browsing and local staged editing. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
@@ -101,7 +100,7 @@ Router mode is selected at startup:
 
 ## Network API
 
-Implemented by `compose/general/interface.scm` on top of `control.scm` and `ledger.scm`.
+Implemented by `sync-records/lisp/general.scm` on top of `control.scm` and `ledger.scm`.
 Permission boundaries are central to safe operation, so operators should treat function families as security domains.
 
 ### Function Families
@@ -109,7 +108,7 @@ Permission boundaries are central to safe operation, so operators should treat f
 | Family | Description | Functions |
 | --- | --- | --- |
 | Public (no authentication) | Read-only methods intended for external visibility without secrets. | `size`, `synchronize`, `resolve`, `information` |
-| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `get`, `set!`, `pin!`, `unpin!`, `general-peer!`, `peer!`, `peers`, `configuration`, `step-generate`, `step-chain!`, `step-peer!`, `*secret*` |
+| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `get`, `set!`, `pin!`, `unpin!`, `general-bridge!`, `bridge!`, `bridges`, `general-batch!`, `configuration`, `step-generate`, `step-chain!`, `step-bridge!`, `*secret*` |
 | Root/Admin control | Root control commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
 
 ### Function Reference
@@ -122,7 +121,7 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 | Function | Purpose |
 | --- | --- |
 | `size` | Current permanent-chain size |
-| `synchronize` | Serialize digest/proof data for peer sync |
+| `synchronize` | Serialize digest/proof data for bridge sync |
 | `resolve` | Resolve and serialize state at a path/index |
 | `information` | Public node metadata (e.g., public key/window) |
 
@@ -134,20 +133,20 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 | `set!` | Stage a write |
 | `pin!` | Persist proof/data in permanent chain |
 | `unpin!` | Remove persisted pin |
-| `general-peer!` | Register peer from URL helper |
-| `peer!` | Register peer with explicit RPC handlers |
-| `peers` | List configured peers |
+| `general-bridge!` | Register bridge from URL helper |
+| `bridge!` | Register bridge with explicit RPC handlers |
+| `bridges` | List configured bridges |
 | `configuration` | Return full public/private config |
 | `step-generate` | Build ordered step actions |
 | `step-chain!` | Commit staged state to chain |
-| `step-peer!` | Sync state from a named peer |
+| `step-bridge!` | Sync state from a named bridge |
 | `*secret*` | Rotate interface secret |
 
 #### Root/Admin Functions
 
 | Function | Purpose |
 | --- | --- |
-| `*eval*` | Evaluate arbitrary Lisp in admin context |
+| `*eval*` | Evaluate arbitrary Scheme in admin context |
 | `*call*` | Invoke function with root object |
 | `*step*` | Execute full step cycle |
 | `*set-secret*` | Rotate root/admin secret |
@@ -185,10 +184,10 @@ These are public control commands handled by the transition function in `control
 
 This API is intentionally powerful and low-level, so access should be tightly controlled and audited.
 
-### General Interface API
+### General API Bootstrap
 
-`interface.scm` overlays the instantiated ledger object and dispatches `((function ...))` requests to public ledger methods, with permission checks on each call.
-It also adds one integration helper (`general-peer!`) that composes the lower-level peer registration flow.
+`general.scm` overlays the instantiated ledger object and dispatches `((function ...))` requests to public ledger methods, with permission checks on each call.
+It also adds one integration helper (`general-bridge!`) that composes the lower-level bridge registration flow.
 
 #### General API Methods
 
@@ -202,13 +201,14 @@ It also adds one integration helper (`general-peer!`) that composes the lower-le
 | `set!` | Restricted | Stage write to local state path. |
 | `pin!` | Restricted | Persist selected path/proof in permanent chain. |
 | `unpin!` | Restricted | Remove previously pinned path/proof. |
-| `general-peer!` | Restricted | Add peer from URL and auto-wire `information/synchronize/resolve` handlers. |
-| `peer!` | Restricted | Add peer with explicit handler expressions. |
-| `peers` | Restricted | List configured peer names. |
+| `general-bridge!` | Restricted | Add bridge from URL and auto-wire `information/synchronize/resolve` handlers. |
+| `bridge!` | Restricted | Add bridge with explicit handler expressions. |
+| `bridges` | Restricted | List configured bridge names. |
+| `general-batch!` | Restricted | Execute an ordered list of general-interface requests under one authenticated call. |
 | `configuration` | Restricted | Return full configuration (including private fields). |
 | `step-generate` | Restricted | Generate ordered step actions. |
 | `step-chain!` | Restricted | Commit staged state and advance chain. |
-| `step-peer!` | Restricted | Synchronize a named peer into local staged state. |
+| `step-bridge!` | Restricted | Synchronize a named bridge into local staged state. |
 | `*secret*` | Restricted | Rotate interface secret used by general API auth checks. |
 
 Root commands (`*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*`) are also callable, but remain part of the control-plane surface and should be treated as admin-level operations.
