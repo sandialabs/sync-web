@@ -24,7 +24,7 @@ const targets = [
   },
   {
     key: "gateway",
-    url: `${baseUrl}/api/v1/docs`,
+    url: `${baseUrl}/docs`,
     selector: "body",
   },
 ];

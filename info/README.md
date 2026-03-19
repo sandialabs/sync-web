@@ -85,4 +85,4 @@ python3 generate.py
 docker compose up
 ```
 
-That harness reuses the full `sync-services` general stack per node and is the current local path for testing peer topology behavior without FIREWHEEL.
+That harness reuses the full `sync-services` general stack per node and is the current local path for testing bridge topology behavior without FIREWHEEL.
