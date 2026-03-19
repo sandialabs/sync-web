@@ -44,7 +44,7 @@ run_startup() {
     general=$( cat "$(resolve_lisp_file general.scm)" )
     expr="($general $clear_flag \"$SECRET\" \"$SECRET\" $WINDOW $control '$standard '$chain '$tree '$configuration '$ledger)"
     if [ "$clear_flag" = "#f" ]; then
-        expr="(*eval* \"$SECRET\" '$expr)"
+        expr="(*eval* \"$SECRET\" $expr)"
     fi
     RUST_LOG=$RUST_LOG ./journal-sdk -e "$expr" -d database
 }

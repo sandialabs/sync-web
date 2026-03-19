@@ -9,10 +9,11 @@ services:
     networks:
       - docker
     environment:
-      SECRET: ${SECRET}
+      SECRET: ${SECRET:-}
       PERIOD: ${PERIOD:-2}
       WINDOW: ${WINDOW:-1024}
       RUST_LOG: ${RUST_LOG:-INFO}
+      JOURNAL_UPDATE: ${JOURNAL_UPDATE:-}
     volumes:
       - database:/srv/database
 
@@ -85,7 +86,7 @@ services:
       SYNC_FS_GatewayBaseUrl: ${SYNC_FS_GatewayBaseUrl:-http://gateway/api/v1}
       SYNC_FS_JournalJsonUrl: ${SYNC_FS_JournalJsonUrl:-http://journal/interface/json}
       SYNC_FS_GatewayTimeoutMs: ${SYNC_FS_GatewayTimeoutMs:-30000}
-      SYNC_FS_GatewayAuthToken: ${SECRET}
+      SYNC_FS_GatewayAuthToken: ${SECRET:-}
     ports:
       - "${SMB_PORT:-445}:445"
 
