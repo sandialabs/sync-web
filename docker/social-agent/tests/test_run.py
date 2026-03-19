@@ -73,7 +73,7 @@ class SocialAgentRunTests(unittest.TestCase):
             self.assertEqual(fake_metrics.record_request.call_args.args[0], "size")
             self.assertTrue(fake_metrics.record_request.call_args.args[2])
 
-    def test_call_peers_uses_auth_header(self):
+    def test_call_bridges_uses_auth_header(self):
         with patch.dict(
             os.environ,
             {"WORDS": "8", "NODE_NAME": "journal-0", "SECRET": "pass"},
@@ -84,7 +84,7 @@ class SocialAgentRunTests(unittest.TestCase):
             nodes = {"journal-0": {"router_host": "router-0"}}
 
             with patch.object(run.requests, "get", return_value=_FakeResponse([])) as mock_get:
-                run.call(nodes, "peers")
+                run.call(nodes, "bridges")
 
             headers = mock_get.call_args.kwargs["headers"]
             self.assertEqual(headers["accept"], "application/json")
@@ -246,7 +246,7 @@ class SocialAgentRunTests(unittest.TestCase):
             self.assertEqual(written["get_latency_sum"], 3.0)
             self.assertEqual(written["set_latency_count"], 5)
 
-    def test_run_registers_peers_with_wrapped_name_and_interface(self):
+    def test_run_registers_bridges_with_wrapped_name_and_interface(self):
         with patch.dict(
             os.environ,
             {
@@ -266,16 +266,11 @@ class SocialAgentRunTests(unittest.TestCase):
             }
             edges = {"journal-0": ["journal-1"], "journal-1": []}
 
-            def _call_side_effect(_nodes, operation, arguments=None):
-                if operation == "general-peer":
-                    return True
-                raise KeyboardInterrupt()
-
-            with patch.object(run, "call", side_effect=_call_side_effect) as mock_call:
+            with patch.object(run, "call", side_effect=[True, KeyboardInterrupt()]) as mock_call:
                 with self.assertRaises(KeyboardInterrupt):
                     run.run(nodes, edges)
 
-            self.assertEqual(mock_call.call_args_list[0].args[1], "general-peer")
+            self.assertEqual(mock_call.call_args_list[0].args[1], "general-bridge")
             self.assertEqual(
                 mock_call.call_args_list[0].args[2],
                 {
@@ -453,7 +448,6 @@ class SocialAgentRunTests(unittest.TestCase):
                 ["*state*", "data", "key-0"],
             )
             fake_metrics.record_cycle.assert_called()
-
 
 if __name__ == "__main__":
     unittest.main()

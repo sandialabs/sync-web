@@ -115,7 +115,9 @@ def load_peer_config():
 
 def local_gateway_base(nodes):
     local_router_host = nodes[NODE_NAME]["router_host"]
-    return os.environ.get("ROUTER_GATEWAY_BASE", f"http://{local_router_host}/api/v1/general")
+    return os.environ.get(
+        "ROUTER_GATEWAY_BASE", f"http://{local_router_host}/api/v1/general"
+    )
 
 
 def get_activity_seconds():
@@ -173,7 +175,9 @@ def write_metrics():
     ]
     for node in stats["nodes"]:
         node_label = _escape_label(node)
-        lines.append(f'social_agent_peering_node_info{{id="{node_label}",title="{node_label}"}} 1')
+        lines.append(
+            f'social_agent_peering_node_info{{id="{node_label}",title="{node_label}"}} 1'
+        )
 
     lines.extend(
         [
@@ -181,7 +185,9 @@ def write_metrics():
             "# TYPE social_agent_inferred_hop_requests_total counter",
         ]
     )
-    for (src, dst), count in sorted(stats["inferred_hop_requests_total"].items(), key=lambda item: item[0]):
+    for (src, dst), count in sorted(
+        stats["inferred_hop_requests_total"].items(), key=lambda item: item[0]
+    ):
         src_label = _escape_label(src)
         dst_label = _escape_label(dst)
         edge_id = _escape_label(f"{src_label}->{dst_label}")
@@ -217,7 +223,8 @@ def make_benchmark_snapshot(stats, now, previous=None):
         "uptime_seconds": uptime_seconds,
         "requests_total": stats["requests_total"],
         "requests_failed_total": stats["requests_failed_total"],
-        "requests_succeeded_total": stats["requests_total"] - stats["requests_failed_total"],
+        "requests_succeeded_total": stats["requests_total"]
+        - stats["requests_failed_total"],
         "get_requests_total": stats["get_latency_count"],
         "set_requests_total": stats["set_latency_count"],
         "get_latency_sum": stats["get_latency_sum"],
@@ -232,7 +239,9 @@ def make_benchmark_snapshot(stats, now, previous=None):
             stats["requests_total"] / uptime_seconds if uptime_seconds > 0 else 0.0
         ),
         "activity_cycles_per_second_lifetime": (
-            stats["activity_cycles_total"] / uptime_seconds if uptime_seconds > 0 else 0.0
+            stats["activity_cycles_total"] / uptime_seconds
+            if uptime_seconds > 0
+            else 0.0
         ),
     }
 
@@ -255,13 +264,19 @@ def make_benchmark_snapshot(stats, now, previous=None):
                 (stats["requests_total"] - previous_stats["requests_total"]) / elapsed
             ),
             "get_requests_per_second": (
-                (stats["get_latency_count"] - previous_stats["get_latency_count"]) / elapsed
+                (stats["get_latency_count"] - previous_stats["get_latency_count"])
+                / elapsed
             ),
             "set_requests_per_second": (
-                (stats["set_latency_count"] - previous_stats["set_latency_count"]) / elapsed
+                (stats["set_latency_count"] - previous_stats["set_latency_count"])
+                / elapsed
             ),
             "activity_cycles_per_second": (
-                (stats["activity_cycles_total"] - previous_stats["activity_cycles_total"]) / elapsed
+                (
+                    stats["activity_cycles_total"]
+                    - previous_stats["activity_cycles_total"]
+                )
+                / elapsed
             ),
         }
     )
@@ -308,7 +323,7 @@ def call(nodes, operation, arguments=None):
     success = False
     try:
         public_operations = {"size", "information", "synchronize", "resolve"}
-        get_only_operations = {"size", "information", "peers"}
+        get_only_operations = {"size", "information", "bridges"}
         url = f"{local_gateway_base(nodes)}/{operation}"
 
         headers = {"accept": "application/json"}
@@ -316,16 +331,22 @@ def call(nodes, operation, arguments=None):
             headers["x-sync-auth"] = os.environ["SECRET"]
 
         if operation in get_only_operations:
-            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+            response = requests.get(
+                url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS
+            )
         else:
             headers["content-type"] = "application/json"
             body = arguments if arguments is not None else {}
-            response = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT_SECONDS)
+            response = requests.post(
+                url, headers=headers, json=body, timeout=REQUEST_TIMEOUT_SECONDS
+            )
 
         response.raise_for_status()
         result = response.json()
         success = True
-        logger.info("%s %s | %s -> %s", datetime.now().isoformat(), operation, arguments, result)
+        logger.info(
+            "%s %s | %s -> %s", datetime.now().isoformat(), operation, arguments, result
+        )
         return result
     finally:
         METRICS.record_request(operation, time.perf_counter() - started, success)
@@ -340,14 +361,18 @@ def run(nodes, edges):
         peer_router_host = nodes[peer_node]["router_host"]
         while result := call(
             nodes,
-            "general-peer",
+            "general-bridge",
             {
                 "name": peer_node,
                 "interface": {"*type/string*": f"http://{peer_router_host}/interface"},
             },
         ):
             if result is not True:
-                logger.warning("Could not peer with %s via %s, trying again", peer_node, peer_router_host)
+                logger.warning(
+                    "Could not bridge with %s via %s, trying again",
+                    peer_node,
+                    peer_router_host,
+                )
                 time.sleep(1)
             else:
                 break
@@ -373,7 +398,7 @@ def run(nodes, edges):
                 while choice(2) and edges.get(node_name):
                     node_name = choice(edges[node_name])
                     traversal.append(node_name)
-                    path += [-1, ["*peer*", node_name, "chain"]]
+                    path += [-1, ["*bridge*", node_name, "chain"]]
 
                 path += [-1, ["*state*", "data", f"key-{randint(0, size)}"]]
                 result = call(nodes, "get", {"path": path})
@@ -383,7 +408,9 @@ def run(nodes, edges):
                     return
 
                 if len(traversal) > 1:
-                    METRICS.record_inferred_hops(list(zip(traversal[:-1], traversal[1:])))
+                    METRICS.record_inferred_hops(
+                        list(zip(traversal[:-1], traversal[1:]))
+                    )
 
                 words = result["*type/string*"].split(" ")
                 words[randint(0, NUM_WORDS)] = choice(WORDS)
@@ -413,7 +440,9 @@ def run(nodes, edges):
             work_sem.release()
             Thread(target=_act, daemon=True).start()
         else:
-            logger.warning("Skipping activity cycle: max in-flight worker threads reached")
+            logger.warning(
+                "Skipping activity cycle: max in-flight worker threads reached"
+            )
         time.sleep(max((until - datetime.now()).total_seconds(), 0))
         until += timedelta(seconds=activity_seconds)
 

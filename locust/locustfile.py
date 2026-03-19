@@ -11,14 +11,14 @@ class HelloWorldUser(HttpUser):
         val = f"val-{random.randint(0, 2**20)}"
 
         request_data = {
-            "function": "set!",
-            "arguments": {
-                "path": [["*state*", "locust", key]],
-                "value": {"*type/string*": val},
-            },
-            "authentication": {"*type/string*": os.environ["SECRET"]},
+            "path": [["*state*", "locust", key]],
+            "value": {"*type/string*": val},
         }
-        response = self.client.post("/interface/json", json=request_data)
+        response = self.client.post(
+            "/api/v1/general/set",
+            json=request_data,
+            headers={"Authorization": f"Bearer {os.environ['SECRET']}"},
+        )
 
         # Truncate request and response for readable logging
         request_text = json.dumps(request_data, separators=(",", ":"))

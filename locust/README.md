@@ -58,7 +58,7 @@ $ SECRET=pass locust --host=http://localhost:8192 --web-port=8090
 
 The load test performs the following actions:
 - Generates random key-value pairs
-- Sends POST requests to `/interface/json` with the JSON function envelope
+- Sends authenticated POST requests to `/api/v1/general/set` through the gateway
 - Each request sets `(*state* locust <key>)` to a random string value via `set!`
 - Logs both request and response (truncated to 80 characters each)
 
@@ -66,8 +66,8 @@ The load test performs the following actions:
 
 In the terminal, you'll see output like:
 ```
-REQ: {"function":"set!","arguments":{"path":[["*state*","locust","key-123456"]],"value":{"*type/string*":"val-789012"}},"authentication":{"*type/string*":"pass"}} | RESP: true
-REQ: {"function":"set!","arguments":{"path":[["*state*","locust","key-234567"]],"value":{"*type/string*":"val-890123"}},"authentication":{"*type/string*":"pass"}} | RESP: true
+REQ: {"path":[["*state*","locust","key-123456"]],"value":{"*type/string*":"val-789012"}} | RESP: true
+REQ: {"path":[["*state*","locust","key-234567"]],"value":{"*type/string*":"val-890123"}} | RESP: true
 ```
 
 ## Troubleshooting

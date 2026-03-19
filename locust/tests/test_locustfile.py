@@ -19,8 +19,8 @@ class _FakeClient:
         self.response_text = response_text
         self.calls = []
 
-    def post(self, path, json):
-        self.calls.append((path, json))
+    def post(self, path, json, headers=None):
+        self.calls.append((path, json, headers))
         return _FakeResponse(self.response_text)
 
 
@@ -30,7 +30,7 @@ class _FakeUser:
 
 
 class HelloWorldUserTests(unittest.TestCase):
-    def test_posts_expected_payload_to_interface_json(self):
+    def test_posts_expected_payload_to_gateway_set(self):
         client = _FakeClient('{"ok":true}')
         user = _FakeUser(client)
 
@@ -40,15 +40,14 @@ class HelloWorldUserTests(unittest.TestCase):
                     HelloWorldUser.hello_world(user)
 
         self.assertEqual(len(client.calls), 1)
-        path, payload = client.calls[0]
-        self.assertEqual(path, "/interface/json")
-        self.assertEqual(payload["function"], "set!")
-        self.assertEqual(payload["arguments"]["path"], [["*state*", "locust", "key-111"]])
+        path, payload, headers = client.calls[0]
+        self.assertEqual(path, "/api/v1/general/set")
+        self.assertEqual(payload["path"], [["*state*", "locust", "key-111"]])
         self.assertEqual(
-            payload["arguments"]["value"], {"*type/string*": "val-222"}
+            payload["value"], {"*type/string*": "val-222"}
         )
         self.assertEqual(
-            payload["authentication"], {"*type/string*": "test-secret"}
+            headers, {"Authorization": "Bearer test-secret"}
         )
 
     def test_prints_truncated_request_and_response(self):
