@@ -6,7 +6,7 @@ sidebar:
 head: []
 ---
 This section is for developers extending runtime behavior, class logic, and APIs.
-The core pattern is progressive layering through `general.scm` and the class modules loaded at boot.
+The core pattern is progressive layering through `interface.scm` and the class modules loaded at boot.
 
 ## Architecture
 
@@ -21,9 +21,9 @@ The general stack boot flow is:
 
 1. Install `control.scm`.
 2. Install/instantiate `standard.scm`.
-3. Install class definitions (`log-chain.scm`, `tree.scm`, `configuration.scm`, `ledger.scm`).
-4. Instantiate and store `ledger` object.
-5. Install general API secret and query dispatcher.
+3. Install class definitions (`log-chain.scm`, `tree.scm`, `ledger.scm`).
+4. Instantiate and store `ledger` object with inline config state.
+5. Install interface secret and query dispatcher.
 
 Concurrency behavior in `sync-journal` is optimistic:
 
@@ -119,14 +119,14 @@ These signatures are sourced from primitive registrations in `sync-journal/src/e
 | `sync-node` | `(sync-node digest)` | Load sync node identified by digest. |
 | `sync-node?` | `(sync-node? obj)` | Check whether object is a sync node. |
 | `sync-null` | `(sync-null)` | Return null sync node. |
-| `sync-null?` | `(sync-null? sp)` | Check whether node/value is null sync node. |
-| `sync-pair?` | `(sync-pair? sp)` | Check whether node is a pair node. |
-| `sync-stub?` | `(sync-stub? sp)` | Check whether node is a stub node. |
-| `sync-digest` | `(sync-digest node)` | Return digest of sync node. |
+| `sync-null?` | `(sync-null? sp)` | Check whether a sync-node or byte-vector is the null sync node. |
+| `sync-pair?` | `(sync-pair? sp)` | Check whether a sync-node or byte-vector is a pair node. |
+| `sync-stub?` | `(sync-stub? sp)` | Check whether a sync-node or byte-vector is a stub node. |
+| `sync-digest` | `(sync-digest value)` | Return digest of a sync-node or byte-vector. |
 | `sync-cons` | `(sync-cons first rest)` | Construct sync pair node. |
 | `sync-car` | `(sync-car pair)` | Return first child of sync pair. |
 | `sync-cdr` | `(sync-cdr pair)` | Return second child of sync pair. |
-| `sync-cut` | `(sync-cut value)` | Convert node/value into stub form. |
+| `sync-cut` | `(sync-cut node)` | Convert a sync-node into stub form. |
 
 #### Record Lifecycle Primitives
 
@@ -246,37 +246,26 @@ Public API (`log-chain.scm`):
 | `prune!` | `(prune! self index)` | Prune proof detail at index. |
 | `truncate!` | `(truncate! self depth)` | Truncate proof tree depth by cutting deeper nodes. |
 
-#### Configuration Class
-
-Public API (`configuration.scm`):
-
-| Method | Signature | Description |
-| --- | --- | --- |
-| `*init*` | `(*init* self (config '()))` | Initialize configuration expression state. |
-| `get` | `(get self path)` | Read nested configuration value by symbol-path. |
-| `set!` | `(set! self path value)` | Set nested value; delete branch when value is `'()`. |
-
 #### Ledger Class
 
 Public API (`ledger.scm`):
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `*init*` | `(*init* self standard config)` | Initialize ledger with standard helper and configuration object. |
-| `configuration` | `(configuration self)` | Return full configuration (public + private). |
-| `information` | `(information self)` | Return public configuration subset. |
+| `*init*` | `(*init* self standard config tree-class chain-class)` | Initialize ledger with standard helper, inline config expression, and storage classes. |
+| `config` | `(config self (path '()))` | Return full configuration or a nested configuration path. |
+| `info` | `(info self)` | Return public configuration subset. |
 | `size` | `(size self)` | Return permanent chain length. |
-| `bridge!` | `(bridge! self name info)` | Register/update bridge metadata and cached public key. |
-| `bridges` | `(bridges self)` | List configured bridge names. |
+| `bridge!` | `(bridge! self name interface info)` | Register/update bridge metadata and cached public key. |
+| `get` | `(get self path)` | Read staged content at path. |
 | `set!` | `(set! self path value)` | Stage local state mutation. |
-| `get` | `(get self path pinned? proof?)` | Read staged/historical value; optional content/pinned/proof bundle. |
-| `pin!` | `(pin! self path)` | Pin path into permanent chain retention. |
+| `resolve` | `(resolve self path pinned? proof? head)` | Resolve committed content, optionally including pin/proof detail. |
+| `trace` | `(trace self index path head)` | Serialize a proof view rooted at index/path. |
+| `pin!` | `(pin! self path response)` | Pin path into permanent chain retention, optionally from a prepared proof response. |
 | `unpin!` | `(unpin! self path)` | Remove previously pinned path. |
 | `synchronize` | `(synchronize self index)` | Serialize bridge-sync proof view at index. |
-| `resolve` | `(resolve self index path)` | Serialize resolved path view for remote verification. |
-| `step-bridge!` | `(step-bridge! self name)` | Fetch and verify bridge chain head into staged state. |
-| `step-chain!` | `(step-chain! self)` | Commit staged state to chain, sign, prune by window, return new size. |
-| `step-generate` | `(step-generate self)` | Generate ordered step operations (chain + bridges). |
+| `bridge-synchronize!` | `(bridge-synchronize! self name index response)` | Merge a prepared bridge synchronization response. |
+| `step!` | `(step! self unix-time)` | Commit staged state to chain, sign, prune by window, and return new size. |
 | `update-window` | `(update-window self window)` | Update the configured recent-history window and prune `temp` when it shrinks. |
 | `update-config!` | `(update-config! self path value)` | Update a configuration entry in place. |
 | `update-code!` | `(update-code! self class update!)` | Update one surface-level code object in place. |

@@ -100,15 +100,15 @@ Router mode is selected at startup:
 
 ## Network API
 
-Implemented by `sync-records/lisp/general.scm` on top of `control.scm` and `ledger.scm`.
+Implemented by `sync-records/lisp/interface.scm` on top of `control.scm`, `standard.scm`, and `ledger.scm`.
 Permission boundaries are central to safe operation, so operators should treat function families as security domains.
 
 ### Function Families
 
 | Family | Description | Functions |
 | --- | --- | --- |
-| Public (no authentication) | Read-only methods intended for external visibility without secrets. | `size`, `synchronize`, `resolve`, `information` |
-| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `get`, `set!`, `pin!`, `unpin!`, `general-bridge!`, `bridge!`, `bridges`, `general-batch!`, `configuration`, `step-generate`, `step-chain!`, `step-bridge!`, `*secret*` |
+| Public (no authentication) | Read-mostly methods intended for external visibility without secrets. | `size`, `synchronize`, `info`, `config`, `get`, `trace` |
+| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `resolve`, `set!`, `pin!`, `unpin!`, `bridge!`, `bridge-synchronize!`, `*step!*`, `*secret*` |
 | Root/Admin control | Root control commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
 
 ### Function Reference
@@ -122,24 +122,22 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 | --- | --- |
 | `size` | Current permanent-chain size |
 | `synchronize` | Serialize digest/proof data for bridge sync |
-| `resolve` | Resolve and serialize state at a path/index |
-| `information` | Public node metadata (e.g., public key/window) |
+| `info` | Public node metadata (for example public key and window) |
+| `config` | Full current config expression |
+| `get` | Read staged state content |
+| `trace` | Return serialized proof/path view rooted at an index |
 
 #### Restricted Functions
 
 | Function | Purpose |
 | --- | --- |
-| `get` | Read staged or historical data |
+| `resolve` | Resolve committed content, optionally with pin/proof detail |
 | `set!` | Stage a write |
 | `pin!` | Persist proof/data in permanent chain |
 | `unpin!` | Remove persisted pin |
-| `general-bridge!` | Register bridge from URL helper |
-| `bridge!` | Register bridge with explicit RPC handlers |
-| `bridges` | List configured bridges |
-| `configuration` | Return full public/private config |
-| `step-generate` | Build ordered step actions |
-| `step-chain!` | Commit staged state to chain |
-| `step-bridge!` | Sync state from a named bridge |
+| `bridge!` | Register bridge with remote interface and optional prefetched info |
+| `bridge-synchronize!` | Merge a prepared bridge synchronization response |
+| `*step!*` | Run interface stepping, including bridge synchronization |
 | `*secret*` | Rotate interface secret |
 
 #### Root/Admin Functions
@@ -186,8 +184,8 @@ This API is intentionally powerful and low-level, so access should be tightly co
 
 ### General API Bootstrap
 
-`general.scm` overlays the instantiated ledger object and dispatches `((function ...))` requests to public ledger methods, with permission checks on each call.
-It also adds one integration helper (`general-bridge!`) that composes the lower-level bridge registration flow.
+`interface.scm` overlays the instantiated ledger object and dispatches `((function ...))` requests to ledger and bridge-helper methods, with permission checks on each call.
+It also handles remote bridge fetch/merge flows before handing the final operation to `ledger`.
 
 #### General API Methods
 
@@ -195,21 +193,18 @@ It also adds one integration helper (`general-bridge!`) that composes the lower-
 | --- | --- | --- |
 | `size` | Public | Return permanent chain size. |
 | `synchronize` | Public | Return serialized sync proof at index. |
-| `resolve` | Public | Return serialized resolved path proof. |
-| `information` | Public | Return public node configuration. |
-| `get` | Restricted | Read staged or historical content. |
+| `info` | Public | Return public node configuration. |
+| `config` | Public | Return full inline ledger configuration. |
+| `get` | Public | Read staged content. |
+| `trace` | Public | Return serialized proof/path content rooted at an index. |
+| `resolve` | Restricted | Return resolved path content, optionally with pin/proof detail. |
 | `set!` | Restricted | Stage write to local state path. |
 | `pin!` | Restricted | Persist selected path/proof in permanent chain. |
 | `unpin!` | Restricted | Remove previously pinned path/proof. |
-| `general-bridge!` | Restricted | Add bridge from URL and auto-wire `information/synchronize/resolve` handlers. |
-| `bridge!` | Restricted | Add bridge with explicit handler expressions. |
-| `bridges` | Restricted | List configured bridge names. |
-| `general-batch!` | Restricted | Execute an ordered list of general-interface requests under one authenticated call. |
-| `configuration` | Restricted | Return full configuration (including private fields). |
-| `step-generate` | Restricted | Generate ordered step actions. |
-| `step-chain!` | Restricted | Commit staged state and advance chain. |
-| `step-bridge!` | Restricted | Synchronize a named bridge into local staged state. |
-| `*secret*` | Restricted | Rotate interface secret used by general API auth checks. |
+| `bridge!` | Restricted | Add bridge, fetching remote info when omitted. |
+| `bridge-synchronize!` | Restricted | Synchronize a named bridge into local staged state. |
+| `*step!*` | Restricted | Run bridge synchronization and local step progression. |
+| `*secret*` | Restricted | Rotate interface secret used by interface API auth checks. |
 
 Root commands (`*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*`) are also callable, but remain part of the control-plane surface and should be treated as admin-level operations.
 This keeps externally visible behavior stable while allowing implementation details inside ledger classes to evolve.
@@ -277,7 +272,7 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
 ### Updating Runtime Logic
 
 Use root-level calls for controlled live updates.
-Typical update targets are: control hooks, standard, configuration, tree, chain, and ledger.
+Typical update targets are: control hooks, standard, tree, chain, interface, and ledger.
 Because these changes alter live semantics, apply them in lower environments first and validate with smoke checks before promotion.
 
 #### Update control hooks (`*set-query*`, `*set-step*`)
@@ -352,13 +347,13 @@ For step hook updates, use the same pattern with `*set-step*`.
   </TabItem>
 </Tabs>
 
-#### Update configuration state
+#### Inspect current config
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
 
 ```scheme
-((function configuration)
+((function config)
  (authentication "password"))
 ```
 
@@ -367,7 +362,7 @@ For step hook updates, use the same pattern with `*set-step*`.
 
 ```json
 {
-  "function": "configuration",
+  "function": "config",
   "authentication": {"*type/string*": "password"}
 }
 ```
@@ -375,7 +370,7 @@ For step hook updates, use the same pattern with `*set-step*`.
   </TabItem>
 </Tabs>
 
-For in-place configuration mutation, use root-level `*call*` and update `(control object ledger)` with the mutated object.
+For in-place configuration mutation, use the interface `*call*`/`*eval*` control path or the ledger's `update-config!` method from an authenticated admin flow.
 
 #### Update tree/chain/ledger classes
 
