@@ -1,6 +1,6 @@
-FROM ghcr.io/sandialabs/sync-journal/journal-sdk:1.1.2
+FROM ghcr.io/sandialabs/sync-journal/journal-sdk:1.2.0
 
-ARG LISP_REPOSITORY=https://raw.githubusercontent.com/sandialabs/sync-records/ae5d64cfb99864d7480eb944bc178a5a2f58c0c5/lisp/
+ARG LISP_REPOSITORY=https://raw.githubusercontent.com/sandialabs/sync-records/4cd0bcb6d7a5221c3e34d7b16eda27384a2e239e/lisp/
 ARG CUSTOM_SETUP=""
 
 RUN set -eu; \
@@ -16,9 +16,8 @@ RUN wget "${LISP_REPOSITORY}/standard.scm"
 RUN wget "${LISP_REPOSITORY}/log-chain.scm"
 RUN wget "${LISP_REPOSITORY}/linear-chain.scm"
 RUN wget "${LISP_REPOSITORY}/tree.scm"
-RUN wget "${LISP_REPOSITORY}/configuration.scm"
 RUN wget "${LISP_REPOSITORY}/ledger.scm"
-RUN wget "${LISP_REPOSITORY}/general.scm"
+RUN wget "${LISP_REPOSITORY}/interface.scm"
 
 COPY run.sh .
 
