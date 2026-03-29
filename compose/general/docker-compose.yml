@@ -45,6 +45,8 @@ services:
       PORT: 80
       JOURNAL_JSON_ENDPOINT: http://journal/interface/json
       JOURNAL_LISP_ENDPOINT: http://journal/interface
+      CONTROL_JSON_ENDPOINT: http://journal/interface/json
+      CONTROL_LISP_ENDPOINT: http://journal/interface
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-30000}
       ALLOW_ADMIN_ROUTES: "1"
 
