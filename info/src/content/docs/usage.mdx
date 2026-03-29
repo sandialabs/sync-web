@@ -47,7 +47,7 @@ Use it when you want precise control over requests, fast iteration on payload sh
 
 Typical Workbench workflow:
 
-1. Start from a known request pattern (for example `get`, `set!`, `pin!`, or `general-bridge!`).
+1. Start from a known request pattern (for example `get`, `set!`, `pin!`, or `bridge!`).
 2. Run the request in Scheme or JSON form and inspect the returned value.
 3. Iterate on arguments/authentication until behavior matches intent.
 4. Use the final request as a template for automation or service integration.
@@ -65,7 +65,7 @@ Typical Gateway workflow:
 
 1. Start with `GET /docs` to review request and response schemas.
 2. Use `GET /api/v1/general/size` or another stable route to validate connectivity.
-3. Execute public general operations through `GET` routes (for example `size`, `information`, and `resolve`).
+3. Execute public general operations through `GET` routes (for example `size`, `info`, and `trace`).
 4. Execute restricted `general` and optional `control` operations through authenticated `POST` routes.
 5. Move validated requests into application clients or automation scripts using the same gateway contracts.
 
@@ -244,13 +244,13 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-#### Bridge (`general-bridge!`)
+#### Bridge (`bridge!`)
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
 
 ```scheme
-((function general-bridge!)
+((function bridge!)
  (arguments ((name journal_b)
              (interface "http://journal-b.example.org/interface")))
  (authentication "password"))
@@ -261,7 +261,7 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```json
 {
-  "function": "general-bridge!",
+  "function": "bridge!",
   "arguments": {
     "name": "journal_b",
     "interface": {"*type/string*": "http://journal-b.example.org/interface"}
