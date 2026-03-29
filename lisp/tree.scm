@@ -107,7 +107,7 @@
                  (sync-cons (sync-car node) (sync-cut (sync-cdr node)))))
             (else (let ((left (sync-car node)) (right (sync-cdr node)))
                     (sync-cons (if (zero? (car bits)) (loop left (cdr bits))
-                                   (if (sync-null? left) left (sync-cut (sync-cut left))))
+                                   (if (sync-null? left) left (sync-cut left)))
                                (if (zero? (car bits)) (if (sync-null? right) right (sync-cut right))
                                    (loop right (cdr bits)))))))))
 
