@@ -39,6 +39,8 @@ DEFAULT_WINDOW = 1024
 DEFAULT_SIZE = 32
 DEFAULT_ACTIVITY = 0.0
 DEFAULT_WORDS = 8
+DEFAULT_CLIENTS = 1
+AGGREGATE_RESULTS_PORT = 8290
 
 
 def env_required(name):
@@ -196,7 +198,7 @@ def generate_peer_config(node_count, connectivity):
     return {"nodes": nodes, "edges": edges}
 
 
-def make_social_agent_service(node_index, secret, period, size, activity, words):
+def make_social_agent_service(node_index, secret, period, size, activity, words, clients):
     service_name = f"social-agent-{node_index}"
     image = os.environ.get(
         "IMAGE_OVERRIDE_SOCIAL_AGENT",
@@ -214,6 +216,7 @@ def make_social_agent_service(node_index, secret, period, size, activity, words)
             "SIZE": str(size),
             "ACTIVITY": str(activity),
             "WORDS": str(words),
+            "CLIENTS": str(clients),
             "PEERS_CONFIG": "/srv/peers.json",
             "BENCHMARK_OUTPUT": "/srv/results/benchmark.json",
         },
@@ -222,6 +225,20 @@ def make_social_agent_service(node_index, secret, period, size, activity, words)
             f"./metrics/{service_name}:/var/lib/node_exporter/textfile",
             f"./results/{service_name}:/srv/results",
         ],
+    }
+
+
+def make_aggregate_results_service():
+    return {
+        "container_name": "aggregate-results",
+        "image": "python:3.11-alpine",
+        "working_dir": "/workspace",
+        "command": ["python3", "aggregate_results.py"],
+        "volumes": [
+            ".:/workspace",
+        ],
+        "ports": [f"{AGGREGATE_RESULTS_PORT}:8090"],
+        "restart": "unless-stopped",
     }
 
 
@@ -238,6 +255,7 @@ def main():
     size = env_int("SIZE", DEFAULT_SIZE)
     activity = env_float("ACTIVITY", DEFAULT_ACTIVITY)
     words = env_int("WORDS", DEFAULT_WORDS)
+    clients = env_int("CLIENTS", DEFAULT_CLIENTS)
 
     base = load_base_compose(base_compose_path)
     base_services = base["services"]
@@ -308,13 +326,14 @@ def main():
             generated["services"][generated_name] = generated_service
 
         generated["services"][f"social-agent-{node_index}"] = make_social_agent_service(
-            node_index, secret, period, size, activity, words
+            node_index, secret, period, size, activity, words, clients
         )
 
         for volume_name, volume_config in base_named_volumes.items():
             generated["volumes"][f"{volume_name}-{node_index}"] = copy.deepcopy(volume_config)
 
     peers = generate_peer_config(node_count, connectivity)
+    generated["services"]["aggregate-results"] = make_aggregate_results_service()
 
     SCRIPT_DIR.mkdir(parents=True, exist_ok=True)
     ACME_DIR.mkdir(exist_ok=True)

@@ -15,7 +15,6 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 logger.setLevel(logging.INFO)
 
 REQUEST_TIMEOUT_SECONDS = 60
-MAX_IN_FLIGHT_THREADS = 64
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -33,6 +32,8 @@ METRICS_PATH = os.environ.get(
 BENCHMARK_OUTPUT_PATH = os.environ.get("BENCHMARK_OUTPUT", "")
 BENCHMARK_INTERVAL_SECONDS = 1.0
 DEFAULT_SIZE = 32
+LOG_VALUE_LIMIT = 160
+DEFAULT_CLIENTS = 1
 
 
 class Metrics:
@@ -46,7 +47,8 @@ class Metrics:
         self.set_latency_sum = 0.0
         self.set_latency_count = 0
         self.activity_cycles_total = 0
-        self.activity_cycles_success_total = 0
+        self.activity_requests_total = 0
+        self.activity_requests_success_total = 0
         self.nodes = set()
         self.inferred_hop_requests_total = {}
 
@@ -62,11 +64,11 @@ class Metrics:
                 self.set_latency_sum += duration
                 self.set_latency_count += 1
 
-    def record_cycle(self, success):
+    def record_cycle(self, requests_succeeded, requests_total):
         with self.lock:
             self.activity_cycles_total += 1
-            if success:
-                self.activity_cycles_success_total += 1
+            self.activity_requests_total += requests_total
+            self.activity_requests_success_total += requests_succeeded
 
     def register_nodes(self, nodes):
         with self.lock:
@@ -93,7 +95,8 @@ class Metrics:
                 "set_latency_sum": self.set_latency_sum,
                 "set_latency_count": self.set_latency_count,
                 "activity_cycles_total": self.activity_cycles_total,
-                "activity_cycles_success_total": self.activity_cycles_success_total,
+                "activity_requests_total": self.activity_requests_total,
+                "activity_requests_success_total": self.activity_requests_success_total,
                 "nodes": sorted(self.nodes),
                 "inferred_hop_requests_total": dict(self.inferred_hop_requests_total),
             }
@@ -120,6 +123,18 @@ def local_gateway_base(nodes):
     )
 
 
+def is_indexed_path(path):
+    return bool(path) and isinstance(path, list) and path[0] == -1
+
+
+def format_log_value(value, limit=LOG_VALUE_LIMIT):
+    try:
+        text = json.dumps(value, sort_keys=True)
+    except TypeError:
+        text = repr(value)
+    return text if len(text) <= limit else f"{text[: limit - 3]}..."
+
+
 def get_activity_seconds():
     raw = os.environ.get("ACTIVITY", "")
     if raw == "":
@@ -134,6 +149,15 @@ def get_size():
         logger.warning("SIZE must be positive; defaulting to %s", DEFAULT_SIZE)
         return DEFAULT_SIZE
     return size
+
+
+def get_clients():
+    raw = os.environ.get("CLIENTS", str(DEFAULT_CLIENTS))
+    clients = int(raw)
+    if clients <= 0:
+        logger.warning("CLIENTS must be positive; defaulting to %s", DEFAULT_CLIENTS)
+        return DEFAULT_CLIENTS
+    return clients
 
 
 def write_metrics():
@@ -164,9 +188,12 @@ def write_metrics():
         "# HELP social_agent_activity_cycles_total Total activity cycles attempted.",
         "# TYPE social_agent_activity_cycles_total counter",
         f"social_agent_activity_cycles_total {stats['activity_cycles_total']}",
-        "# HELP social_agent_activity_cycles_success_total Total activity cycles where both get and set succeeded.",
-        "# TYPE social_agent_activity_cycles_success_total counter",
-        f"social_agent_activity_cycles_success_total {stats['activity_cycles_success_total']}",
+        "# HELP social_agent_activity_requests_total Total activity requests attempted inside client cycles.",
+        "# TYPE social_agent_activity_requests_total counter",
+        f"social_agent_activity_requests_total {stats['activity_requests_total']}",
+        "# HELP social_agent_activity_requests_success_total Total successful activity requests inside client cycles.",
+        "# TYPE social_agent_activity_requests_success_total counter",
+        f"social_agent_activity_requests_success_total {stats['activity_requests_success_total']}",
         "# HELP social_agent_uptime_seconds Uptime of the social agent process.",
         "# TYPE social_agent_uptime_seconds gauge",
         f"social_agent_uptime_seconds {max(time.time() - stats['started'], 0)}",
@@ -232,7 +259,8 @@ def make_benchmark_snapshot(stats, now, previous=None):
         "set_latency_sum": stats["set_latency_sum"],
         "set_latency_count": stats["set_latency_count"],
         "activity_cycles_total": stats["activity_cycles_total"],
-        "activity_cycles_success_total": stats["activity_cycles_success_total"],
+        "activity_requests_total": stats["activity_requests_total"],
+        "activity_requests_success_total": stats["activity_requests_success_total"],
         "average_get_latency_seconds": get_latency_avg,
         "average_set_latency_seconds": set_latency_avg,
         "requests_per_second_lifetime": (
@@ -240,6 +268,11 @@ def make_benchmark_snapshot(stats, now, previous=None):
         ),
         "activity_cycles_per_second_lifetime": (
             stats["activity_cycles_total"] / uptime_seconds
+            if uptime_seconds > 0
+            else 0.0
+        ),
+        "activity_requests_per_second_lifetime": (
+            stats["activity_requests_success_total"] / uptime_seconds
             if uptime_seconds > 0
             else 0.0
         ),
@@ -252,6 +285,8 @@ def make_benchmark_snapshot(stats, now, previous=None):
                 "get_requests_per_second": 0.0,
                 "set_requests_per_second": 0.0,
                 "activity_cycles_per_second": 0.0,
+                "activity_requests_per_second": 0.0,
+                "activity_request_success_rate": 100.0,
             }
         )
         return snapshot
@@ -278,6 +313,27 @@ def make_benchmark_snapshot(stats, now, previous=None):
                 )
                 / elapsed
             ),
+            "activity_requests_per_second": (
+                (
+                    stats["activity_requests_success_total"]
+                    - previous_stats["activity_requests_success_total"]
+                )
+                / elapsed
+            ),
+            "activity_request_success_rate": (
+                (
+                    stats["activity_requests_success_total"]
+                    - previous_stats["activity_requests_success_total"]
+                )
+                / max(
+                    (
+                        stats["activity_requests_total"]
+                        - previous_stats["activity_requests_total"]
+                    ),
+                    1e-9,
+                )
+            )
+            * 100.0,
         }
     )
     return snapshot
@@ -318,34 +374,59 @@ def benchmark_writer():
         time.sleep(BENCHMARK_INTERVAL_SECONDS)
 
 
-def call(nodes, operation, arguments=None):
+def call(nodes, operation, arguments=None, client_id=None):
     started = time.perf_counter()
     success = False
     try:
-        public_operations = {"size", "information", "synchronize", "resolve"}
-        get_only_operations = {"size", "information", "bridges"}
-        url = f"{local_gateway_base(nodes)}/{operation}"
+        public_operations = {"size", "info", "synchronize", "trace"}
+        get_only_operations = {"size", "info"}
+        effective_operation = operation
+        body = arguments if arguments is not None else {}
+        if operation == "get" and isinstance(body, dict):
+            path = body.get("path")
+            if is_indexed_path(path):
+                effective_operation = "resolve"
+                body = {
+                    "path": path,
+                    "pinned?": False,
+                    "proof?": False,
+                }
+
+        url = f"{local_gateway_base(nodes)}/{effective_operation}"
 
         headers = {"accept": "application/json"}
-        if operation not in public_operations:
+        if effective_operation not in public_operations:
             headers["x-sync-auth"] = os.environ["SECRET"]
 
-        if operation in get_only_operations:
+        if effective_operation in get_only_operations:
             response = requests.get(
                 url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS
             )
         else:
             headers["content-type"] = "application/json"
-            body = arguments if arguments is not None else {}
             response = requests.post(
                 url, headers=headers, json=body, timeout=REQUEST_TIMEOUT_SECONDS
             )
 
+        if not response.ok:
+            logger.error(
+                "%s | %s | %s -> %s",
+                f"client {client_id}" if client_id is not None else "client -",
+                effective_operation,
+                format_log_value(arguments),
+                format_log_value(
+                    {"status": response.status_code, "body": response.text}
+                ),
+            )
         response.raise_for_status()
         result = response.json()
         success = True
         logger.info(
-            "%s %s | %s -> %s", datetime.now().isoformat(), operation, arguments, result
+            "%s | %s | %s -> %s",
+            f"client {client_id}" if client_id is not None else "client -",
+            effective_operation,
+            format_log_value(arguments),
+            format_log_value(result),
         )
         return result
     finally:
@@ -354,18 +435,19 @@ def call(nodes, operation, arguments=None):
 
 def run(nodes, edges):
     size = get_size()
-    work_sem = threading.BoundedSemaphore(MAX_IN_FLIGHT_THREADS)
     activity_seconds = get_activity_seconds()
+    clients = get_clients()
 
     for peer_node in edges.get(NODE_NAME, []):
         peer_router_host = nodes[peer_node]["router_host"]
         while result := call(
             nodes,
-            "general-bridge",
+            "bridge",
             {
                 "name": peer_node,
                 "interface": {"*type/string*": f"http://{peer_router_host}/interface"},
             },
+            client_id="setup",
         ):
             if result is not True:
                 logger.warning(
@@ -385,66 +467,91 @@ def run(nodes, edges):
                 "path": [["*state*", "data", f"key-{i}"]],
                 "value": {"*type/string*": " ".join(choice(WORDS, NUM_WORDS))},
             },
+            client_id="setup",
         )
 
-    def _act():
-        cycle_success = False
-        work_sem.acquire()
+    def _act(client_id):
+        successful_requests = 0
+        total_requests = 0
         try:
             try:
                 path = []
                 node_name = NODE_NAME
                 traversal = [NODE_NAME]
                 while choice(2) and edges.get(node_name):
+                    if not edges.get(node_name):
+                        break
                     node_name = choice(edges[node_name])
                     traversal.append(node_name)
                     path += [-1, ["*bridge*", node_name, "chain"]]
 
                 path += [-1, ["*state*", "data", f"key-{randint(0, size)}"]]
-                result = call(nodes, "get", {"path": path})
-
-                if type(result) is not dict or "*type/string*" not in result:
-                    logger.warning("Cannot complete action")
-                    return
 
                 if len(traversal) > 1:
                     METRICS.record_inferred_hops(
                         list(zip(traversal[:-1], traversal[1:]))
                     )
 
-                words = result["*type/string*"].split(" ")
-                words[randint(0, NUM_WORDS)] = choice(WORDS)
+                if choice(2):
+                    total_requests += 1
+                    result = call(nodes, "get", {"path": path}, client_id=client_id)
 
-                set_result = call(
-                    nodes,
-                    "set",
-                    {
-                        "path": [["*state*", "data", f"key-{randint(0, size)}"]],
-                        "value": {"*type/string*": " ".join(words)},
-                    },
-                )
-                cycle_success = set_result is True
+                    if type(result) is not dict or "*type/string*" not in result:
+                        logger.warning("Cannot complete action")
+                        return
+                    successful_requests += 1
+
+                    words = result["*type/string*"].split(" ")
+                    words[randint(0, NUM_WORDS)] = choice(WORDS)
+
+                    total_requests += 1
+                    set_result = call(
+                        nodes,
+                        "set",
+                        {
+                            "path": [["*state*", "data", f"key-{randint(0, size)}"]],
+                            "value": {"*type/string*": " ".join(words)},
+                        },
+                        client_id=client_id,
+                    )
+                    if set_result is True:
+                        successful_requests += 1
+                else:
+                    total_requests += 1
+                    pin_result = call(nodes, "pin", {"path": path}, client_id=client_id)
+                    if pin_result is not True:
+                        return
+                    successful_requests += 1
+                    total_requests += 1
+                    unpin_result = call(
+                        nodes, "unpin", {"path": path}, client_id=client_id
+                    )
+                    if unpin_result is True:
+                        successful_requests += 1
             except Exception as err:
-                logger.warning("Activity cycle failed: %s", err)
+                logger.warning("Client %s activity cycle failed: %s", client_id, err)
         finally:
-            METRICS.record_cycle(cycle_success)
-            work_sem.release()
+            METRICS.record_cycle(successful_requests, total_requests)
 
-    if activity_seconds <= 0:
+    def _client_loop(client_id):
+        if activity_seconds <= 0:
+            while True:
+                _act(client_id)
+
+        until = datetime.now()
         while True:
-            _act()
+            _act(client_id)
+            time.sleep(max((until - datetime.now()).total_seconds(), 0))
+            until += timedelta(seconds=activity_seconds)
 
-    until = datetime.now()
-    while True:
-        if work_sem.acquire(blocking=False):
-            work_sem.release()
-            Thread(target=_act, daemon=True).start()
-        else:
-            logger.warning(
-                "Skipping activity cycle: max in-flight worker threads reached"
-            )
-        time.sleep(max((until - datetime.now()).total_seconds(), 0))
-        until += timedelta(seconds=activity_seconds)
+    threads = []
+    for client_id in range(clients):
+        thread = Thread(target=lambda cid=client_id: _client_loop(cid), daemon=True)
+        thread.start()
+        threads.append(thread)
+
+    for thread in threads:
+        thread.join()
 
 
 if __name__ == "__main__":

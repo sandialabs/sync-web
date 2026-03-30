@@ -10,7 +10,7 @@ from utilities.tools import Utilities
 @require_class(Utilities)
 @require_class(Ubuntu2204Server)
 class SocialAgent:
-    def __init__(self, node_name, router_host, secret, period, size, activity, peers, words):
+    def __init__(self, node_name, router_host, secret, period, size, activity, peers, words, clients=1):
         self.node_name = node_name
         self.router_host = router_host
         self.secret = secret
@@ -19,6 +19,7 @@ class SocialAgent:
         self.activity = activity
         self.peers = peers
         self.words = words
+        self.clients = clients
 
         self.add_docker()
         self.run_agent()
@@ -34,6 +35,7 @@ class SocialAgent:
                 f"-e SIZE={self.size}",
                 f"-e WORDS={self.words}",
                 f"-e ACTIVITY={self.activity}",
+                f"-e CLIENTS={self.clients}",
                 "-v /home/ubuntu/peers.json:/srv/peers.json",
                 "-v /home/ubuntu/node-exporter-textfile:/var/lib/node_exporter/textfile",
                 "--net=host",

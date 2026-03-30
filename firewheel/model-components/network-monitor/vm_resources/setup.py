@@ -483,7 +483,7 @@ result = fetch(
             "panels": [
                 {
                     "id": 1,
-                    "title": "Request Throughput",
+                    "title": "Successful Activity Requests",
                     "type": "timeseries",
                     "datasource": {"type": "prometheus", "uid": agent_source_uid},
                     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
@@ -496,7 +496,7 @@ result = fetch(
                                 "type": "prometheus",
                                 "uid": agent_source_uid,
                             },
-                            "expr": 'sum by(instance) (rate(social_agent_activity_cycles_success_total{job="agent-monitor"}[$window]))',
+                            "expr": 'sum by(instance) (rate(social_agent_activity_requests_success_total{job="agent-monitor"}[$window]))',
                             "editorMode": "code",
                             "legendFormat": "{{instance}}",
                             "range": True,
@@ -506,7 +506,7 @@ result = fetch(
                 },
                 {
                     "id": 2,
-                    "title": "Success Rate",
+                    "title": "Activity Request Success Rate",
                     "type": "timeseries",
                     "datasource": {"type": "prometheus", "uid": agent_source_uid},
                     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
@@ -522,7 +522,7 @@ result = fetch(
                                 "type": "prometheus",
                                 "uid": agent_source_uid,
                             },
-                            "expr": 'sum by(instance) (rate(social_agent_activity_cycles_success_total{job="agent-monitor"}[$window])) / clamp_min(sum by(instance) (rate(social_agent_activity_cycles_total{job="agent-monitor"}[$window])), 1e-9)',
+                            "expr": 'sum by(instance) (rate(social_agent_activity_requests_success_total{job="agent-monitor"}[$window])) / clamp_min(sum by(instance) (rate(social_agent_activity_requests_total{job="agent-monitor"}[$window])), 1e-9)',
                             "editorMode": "code",
                             "legendFormat": "{{instance}}",
                             "range": True,

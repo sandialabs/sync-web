@@ -38,13 +38,80 @@ python3 generate.py
 docker compose up
 ```
 
+## All-Local Stack
+
+If you want the full network to use local sources from:
+
+- `sync-journal`
+- `sync-records`
+- `sync-services`
+- `sync-analysis`
+
+use the helper script:
+
+```bash
+cd /code/sync-analysis/compose/social-agent-network
+SYNC_JOURNAL=/path/to/sync-journal \
+SYNC_RECORDS=/path/to/sync-records \
+SYNC_SERVICES=/path/to/sync-services \
+./local-stack.sh up
+```
+
+This does the following:
+
+- builds a local `sync-journal` image and tags it as the journal SDK image expected by `sync-services`
+- builds local `sync-services` images using `sync-records/lisp` as the Lisp source of truth
+- builds a local `sync-analysis` social-agent image
+- regenerates `docker-compose.yml` and `peers.json`
+- starts the generated multi-node network
+
+Useful modes:
+
+- `./local-stack.sh build`
+  - build/tag local images only
+- `./local-stack.sh generate`
+  - build images and regenerate compose files without starting the stack
+- `./local-stack.sh up`
+  - build, regenerate, and run the stack
+- `./local-stack.sh down`
+  - stop the generated stack and remove its volumes
+
+Required environment:
+
+- `SYNC_JOURNAL`
+- `SYNC_RECORDS`
+- `SYNC_SERVICES`
+
+The script derives:
+
+- `sync-records/lisp`
+- `sync-services/compose/general/docker-compose.yml`
+
+from those repo roots.
+
+Optional environment overrides:
+
+- `CUSTOM_SETUP_FILE`
+- `DOCKER_PLATFORM`
+- `COMPOSE_PROJECT_NAME`
+
+For custom local certificate/bootstrap setup, point `CUSTOM_SETUP_FILE` at your existing helper script before running:
+
+```bash
+cd /code/sync-analysis/compose/social-agent-network
+SYNC_JOURNAL=/path/to/sync-journal \
+SYNC_RECORDS=/path/to/sync-records \
+SYNC_SERVICES=/path/to/sync-services \
+CUSTOM_SETUP_FILE=/path/to/custom-setup.sh \
+./local-stack.sh up
+```
+
 The generator writes:
 
 - `docker-compose.yml`
 - `peers.json`
 - `metrics/social-agent-*/`
 - `results/social-agent-*/benchmark.json`
-- `results/network-benchmark.json` when you run `aggregate_results.py`
 
 The generated `peers.json` uses:
 
@@ -53,14 +120,7 @@ The generated `peers.json` uses:
 
 Routers expose HTTP ports starting at `8192`.
 File-system services expose SMB on `445` for node `0`, then `1445`, `1446`, and so on.
+The aggregate benchmark dashboard is exposed on `8290`.
 Each social agent writes Prometheus textfile metrics into its own host-mounted directory under `metrics/`.
 Each social agent also writes a rolling benchmark snapshot to `results/social-agent-*/benchmark.json` with per-agent request totals, failure totals, latency averages, and current/lifetime requests-per-second estimates.
-
-To maintain a network-wide aggregate snapshot while the compose stack is running:
-
-```bash
-cd /code/sync-analysis/compose/social-agent-network
-python3 aggregate_results.py
-```
-
-That writes `results/network-benchmark.json`, summing throughput counters and rates across all reporting agents and recomputing latency averages from raw latency sums/counts.
+The generated compose stack also runs an `aggregate-results` sidecar that serves a simple dashboard with side-by-side successful-request-throughput and request-success-rate graphs at `http://127.0.0.1:8290/`.
