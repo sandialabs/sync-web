@@ -50,7 +50,7 @@ All official resources are found in the following public repositories:
 
 1. [sync-web](https://github.com/sandialabs/sync-web): documentation hub and project entry point.
 2. [sync-journal](https://github.com/sandialabs/sync-journal): Rust runtime, HTTP interface, evaluator extensions, persistence.
-3. [sync-records](https://github.com/sandialabs/sync-records): Lisp class logic (`control`, `standard`, `tree`, `chain`, `ledger`, `interface`).
+3. [sync-records](https://github.com/sandialabs/sync-records): Lisp class logic (`root`, `standard`, `tree`, `chain`, `ledger`, `interface`).
 4. [sync-services](https://github.com/sandialabs/sync-services): compose deployments and web services (`interface`, `gateway`, `explorer`, `workbench`, `file-system`).
 5. [sync-analysis](https://github.com/sandialabs/sync-analysis): load testing and network/simulation assets.
 

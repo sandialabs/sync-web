@@ -91,7 +91,7 @@ It serves runtime query routes and UI routes:
 | `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
 | `/explorer/` | Browser UI with dedicated `Ledger` and `Stage` modes for committed browsing and local staged editing. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
-| SMB share | File-system projection exposing `/stage`, `/ledger`, and `/control/pin`. |
+| SMB share | File-system projection exposing `/stage`, `/ledger`, and `/root/pin`. |
 
 Router mode is selected at startup:
 
@@ -100,7 +100,7 @@ Router mode is selected at startup:
 
 ## Network API
 
-Implemented by `sync-records/lisp/interface.scm` on top of `control.scm`, `standard.scm`, and `ledger.scm`.
+Implemented by `sync-records/lisp/interface.scm` on top of `root.scm`, `standard.scm`, and `ledger.scm`.
 Permission boundaries are central to safe operation, so operators should treat function families as security domains.
 
 ### Function Families
@@ -109,7 +109,7 @@ Permission boundaries are central to safe operation, so operators should treat f
 | --- | --- | --- |
 | Public (no authentication) | Read-mostly methods intended for external visibility without secrets. | `size`, `synchronize`, `info`, `config`, `get`, `trace` |
 | Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `resolve`, `set!`, `pin!`, `unpin!`, `bridge!`, `bridge-synchronize!`, `*step!*`, `*secret*` |
-| Root/Admin control | Root control commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
+| Root/Admin | Root commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
 
 ### Function Reference
 
@@ -151,13 +151,13 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 | `*set-step*` | Replace step handler |
 | `*set-query*` | Replace query handler |
 
-### Control Plane API
+### Root Plane API
 
-`control.scm` provides authentication of privileged operations, enforces root mutation/update discipline, and defines hook points for query and step behavior.
+`root.scm` provides authentication of privileged operations, enforces root mutation/update discipline, and defines hook points for query and step behavior.
 
 #### Root Object Methods
 
-These are the public root methods exposed by the control module's base record object.
+These are the public root methods exposed by the root module's base record object.
 
 | Method | Signature | Description |
 | --- | --- | --- |
@@ -167,16 +167,16 @@ These are the public root methods exposed by the control module's base record ob
 | `equal?` | `((root 'equal?) source target)` | Exact structural equality check between two paths. |
 | `equivalent?` | `((root 'equivalent?) source target)` | Digest-equivalence check between two paths. |
 
-#### Root Control Commands
+#### Root Commands
 
-These are public control commands handled by the transition function in `control.scm`.
+These are public root commands handled by the transition function in `root.scm`.
 
 | Command | Signature | Description |
 | --- | --- | --- |
 | `*eval*` | `(*eval* <admin-secret> <expression>)` | Evaluate expression in admin context. |
 | `*call*` | `(*call* <admin-secret> <function>)` | Invoke function with `root` object and persist resulting state. |
 | `*step*` | `(*step* <admin-secret>)` | Execute configured step handler pipeline. |
-| `*set-secret*` | `(*set-secret* <old> <new>)` | Rotate admin secret used by control plane. |
+| `*set-secret*` | `(*set-secret* <old> <new>)` | Rotate admin secret used by root plane. |
 | `*set-step*` | `(*set-step* <admin-secret> <step-function>)` | Replace step handler logic. |
 | `*set-query*` | `(*set-query* <admin-secret> <query-function>)` | Replace query handler logic. |
 
@@ -206,7 +206,7 @@ It also handles remote bridge fetch/merge flows before handing the final operati
 | `*step!*` | Restricted | Run bridge synchronization and local step progression. |
 | `*secret*` | Restricted | Rotate interface secret used by interface API auth checks. |
 
-Root commands (`*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*`) are also callable, but remain part of the control-plane surface and should be treated as admin-level operations.
+Root commands (`*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*`) are also callable, but remain part of the root-plane surface and should be treated as admin-level operations.
 This keeps externally visible behavior stable while allowing implementation details inside ledger classes to evolve.
 
 ## Operations
@@ -272,10 +272,10 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
 ### Updating Runtime Logic
 
 Use root-level calls for controlled live updates.
-Typical update targets are: control hooks, standard, tree, chain, interface, and ledger.
+Typical update targets are: root hooks, standard, tree, chain, interface, and ledger.
 Because these changes alter live semantics, apply them in lower environments first and validate with smoke checks before promotion.
 
-#### Update control hooks (`*set-query*`, `*set-step*`)
+#### Update root hooks (`*set-query*`, `*set-step*`)
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
@@ -320,8 +320,8 @@ For step hook updates, use the same pattern with `*set-step*`.
 (*call* "admin-password"
   (lambda (root)
     (define standard-cls '(define-class (standard) ...))
-    ((root 'set!) '(control class standard) standard-cls)
-    ((root 'set!) '(control object standard)
+    ((root 'set!) '(root class standard) standard-cls)
+    ((root 'set!) '(root object standard)
       (((eval (caddr standard-cls)) #f standard-cls)))))
 ```
 
@@ -338,7 +338,7 @@ For step hook updates, use the same pattern with `*set-step*`.
     [
       "begin",
       ["define", "standard-cls", {"*type/quoted*": ["define-class", ["standard"], "..."]}],
-      [["root", {"*type/quoted*": "set!"}], {"*type/quoted*": ["control", "class", "standard"]}, "standard-cls"]
+      [["root", {"*type/quoted*": "set!"}], {"*type/quoted*": ["root", "class", "standard"]}, "standard-cls"]
     ]
   ]
 ]
@@ -370,15 +370,15 @@ For step hook updates, use the same pattern with `*set-step*`.
   </TabItem>
 </Tabs>
 
-For in-place configuration mutation, use the interface `*call*`/`*eval*` control path or the ledger's `update-config!` method from an authenticated admin flow.
+For in-place configuration mutation, use the interface `*call*`/`*eval*` root path or the ledger's `update-config!` method from an authenticated admin flow.
 
 #### Update tree/chain/ledger classes
 
 Operational pattern:
 
-1. Replace class definition under `(control class <name>)`.
+1. Replace class definition under `(root class <name>)`.
 2. Rebuild affected object with `standard.make`.
-3. Reinsert updated object under `(control object ledger)` or related path.
+3. Reinsert updated object under `(root object ledger)` or related path.
 4. Validate with smoke tests.
 
 <Tabs syncKey="lisp-json">
@@ -388,7 +388,7 @@ Operational pattern:
 (*call* "admin-password"
   (lambda (root)
     (define ledger-cls '(define-class (ledger) ...))
-    ((root 'set!) '(control class ledger) ledger-cls)
+    ((root 'set!) '(root class ledger) ledger-cls)
     ...))
 ```
 
