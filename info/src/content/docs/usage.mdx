@@ -66,7 +66,7 @@ Typical Gateway workflow:
 1. Start with `GET /docs` to review request and response schemas.
 2. Use `GET /api/v1/general/size` or another stable route to validate connectivity.
 3. Execute public general operations through `GET` routes (for example `size`, `info`, and `trace`).
-4. Execute restricted `general` and optional `control` operations through authenticated `POST` routes.
+4. Execute restricted `general` and optional `root` operations through authenticated `POST` routes.
 5. Move validated requests into application clients or automation scripts using the same gateway contracts.
 
 The Gateway is best for service integration because it standardizes journal calls into HTTP endpoints with explicit request validation.
@@ -84,7 +84,7 @@ Typical File System workflow:
 2. Browse `/ledger/state` for current committed content.
 3. Traverse `/ledger/previous/<index>/state` for prior committed states.
 4. Traverse `/ledger/bridge/<name>/...` for recursively bridged ledger state.
-5. Use `/control/pin` for explicit pin and unpin directives on discovered ledger paths.
+5. Use `/root/pin` for explicit pin and unpin directives on discovered ledger paths.
 
 The File System service is best for shell tools, editors, archives, source trees, and other workflows that already expect a hierarchical filesystem.
 
@@ -107,7 +107,7 @@ Filesystem projection overview:
 │           ├── state/
 │           ├── bridge/
 │           └── previous/
-└── control/
+└── root/
     └── pin
 ```
 
@@ -116,7 +116,7 @@ Key semantics:
 - `/stage` is mutable.
 - `/ledger/...` is readable but content-immutable.
 - once you enter any `state/` subtree, remaining path segments are ordinary file and directory names.
-- `/control/pin` is a synthetic UTF-8 control file for pin and unpin directives against discovered `/ledger/...` paths.
+- `/root/pin` is a synthetic UTF-8 root file for pin and unpin directives against discovered `/ledger/...` paths.
 
 ## Programmatic API
 

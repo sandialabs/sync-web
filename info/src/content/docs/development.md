@@ -19,7 +19,7 @@ At runtime, each query is evaluated against the current `*sync-state*` root.
 The left side carries executable logic and the right side carries persistent state.
 The general stack boot flow is:
 
-1. Install `control.scm`.
+1. Install `root.scm`.
 2. Install/instantiate `standard.scm`.
 3. Install class definitions (`log-chain.scm`, `tree.scm`, `ledger.scm`).
 4. Instantiate and store `ledger` object with inline config state.
