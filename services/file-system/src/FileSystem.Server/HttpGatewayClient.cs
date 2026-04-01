@@ -268,8 +268,8 @@ public sealed class HttpGatewayClient : IGeneralInterfaceClient, IDisposable
 
     internal static IReadOnlyList<string> ExtractBridgeNames(JsonNode? body)
     {
-        var bridgeBlock = body?["private"]?["bridge"];
-        if (bridgeBlock is not JsonObject obj)
+        var obj = body as JsonObject ?? body?["private"]?["bridge"] as JsonObject;
+        if (obj is null)
         {
             return Array.Empty<string>();
         }

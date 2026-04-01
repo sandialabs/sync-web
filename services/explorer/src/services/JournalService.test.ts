@@ -337,12 +337,8 @@ describe('JournalService API', () => {
     it('should call config and normalize bridge names', async () => {
       mockFetch.mockResolvedValueOnce(
         mockJsonResponse({
-          private: {
-            bridge: {
-              alice: {},
-              bob: {},
-            },
-          },
+          alice: {},
+          bob: {},
         })
       );
       const result = await service.getPeers();

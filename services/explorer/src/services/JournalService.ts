@@ -168,12 +168,11 @@ export class JournalService {
       return [];
     }
 
-    const privateBlock = (config as Record<string, unknown>).private;
-    if (!privateBlock || typeof privateBlock !== 'object' || Array.isArray(privateBlock)) {
-      return [];
-    }
-
-    const bridgeBlock = (privateBlock as Record<string, unknown>).bridge;
+    const rootObject = config as Record<string, unknown>;
+    const bridgeBlock =
+      rootObject.private && typeof rootObject.private === 'object' && !Array.isArray(rootObject.private)
+        ? (rootObject.private as Record<string, unknown>).bridge
+        : config;
     if (!bridgeBlock || typeof bridgeBlock !== 'object' || Array.isArray(bridgeBlock)) {
       return [];
     }
