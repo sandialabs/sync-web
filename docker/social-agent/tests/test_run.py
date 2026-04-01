@@ -19,6 +19,9 @@ def _load_run_module():
 class _FakeResponse:
     def __init__(self, payload):
         self._payload = payload
+        self.ok = True
+        self.status_code = 200
+        self.text = json.dumps(payload)
 
     def raise_for_status(self):
         return None
@@ -236,7 +239,7 @@ class SocialAgentRunTests(unittest.TestCase):
             self.assertAlmostEqual(snapshot["set_requests_per_second"], 2.0)
             self.assertAlmostEqual(snapshot["activity_cycles_per_second"], 2.0)
             self.assertAlmostEqual(snapshot["activity_requests_per_second"], 2.0)
-            self.assertAlmostEqual(snapshot["activity_request_success_rate"], 100.0)
+            self.assertAlmostEqual(snapshot["activity_request_success_rate"], 80.0)
             self.assertAlmostEqual(snapshot["requests_per_second_lifetime"], 1.5)
 
     def test_write_benchmark_snapshot_writes_json_file(self):
@@ -355,6 +358,10 @@ class SocialAgentRunTests(unittest.TestCase):
             nodes = {"journal-0": {"router_host": "router-0"}}
 
             class _ErrorResponse:
+                ok = False
+                status_code = 500
+                text = "boom"
+
                 def raise_for_status(self):
                     raise requests.HTTPError("boom")
 
@@ -388,7 +395,7 @@ class SocialAgentRunTests(unittest.TestCase):
             edges = {"journal-0": []}
             set_calls = {"count": 0}
 
-            def _call_side_effect(_nodes, operation, arguments=None):
+            def _call_side_effect(_nodes, operation, arguments=None, client_id=None):
                 if operation == "set":
                     set_calls["count"] += 1
                     if set_calls["count"] == 1:
@@ -396,6 +403,8 @@ class SocialAgentRunTests(unittest.TestCase):
                     raise requests.HTTPError("boom")
                 if operation == "get":
                     return {"*type/string*": "one two"}
+                if operation in {"pin", "unpin"}:
+                    raise KeyboardInterrupt()
                 raise AssertionError(f"Unexpected operation {operation}")
 
             with patch.object(run, "call", side_effect=_call_side_effect):
@@ -427,9 +436,15 @@ class SocialAgentRunTests(unittest.TestCase):
             run.METRICS = MagicMock()
             nodes = {"journal-0": {"router_host": "router-0"}}
             edges = {"journal-0": []}
+            set_calls = {"count": 0}
 
-            def _call_side_effect(_nodes, operation, arguments=None):
+            def _call_side_effect(_nodes, operation, arguments=None, client_id=None):
                 if operation == "set":
+                    set_calls["count"] += 1
+                    if set_calls["count"] > run.DEFAULT_SIZE:
+                        raise KeyboardInterrupt()
+                    return True
+                if operation in {"pin", "unpin"}:
                     raise KeyboardInterrupt()
                 raise AssertionError(f"Unexpected operation {operation}")
 
@@ -463,24 +478,35 @@ class SocialAgentRunTests(unittest.TestCase):
             run.METRICS = fake_metrics
             nodes = {"journal-0": {"router_host": "router-0"}}
             edges = {"journal-0": []}
+            set_calls = {"count": 0}
 
-            def _call_side_effect(_nodes, operation, arguments=None):
+            def _call_side_effect(_nodes, operation, arguments=None, client_id=None):
                 if operation == "set":
+                    set_calls["count"] += 1
+                    if set_calls["count"] > run.DEFAULT_SIZE:
+                        raise KeyboardInterrupt()
                     return True
                 if operation == "get":
                     return {"*type/string*": "one two"}
+                if operation in {"pin", "unpin"}:
+                    return True
                 raise AssertionError(f"Unexpected operation {operation}")
 
             with patch.object(run, "randint", return_value=0):
-                with patch.object(run, "call", side_effect=_call_side_effect) as mock_call:
-                    with patch.object(run, "Thread") as mock_thread:
-                        mock_thread.side_effect = lambda target, daemon=True: type(
-                            "_InlineThread",
-                            (),
-                            {"start": lambda self: target(), "join": lambda self: None},
-                        )()
-                        with self.assertRaises(KeyboardInterrupt):
-                            run.run(nodes, edges)
+                with patch.object(
+                    run,
+                    "choice",
+                    side_effect=lambda value, *args, **kwargs: 1 if value == 2 else value[0],
+                ):
+                    with patch.object(run, "call", side_effect=_call_side_effect) as mock_call:
+                        with patch.object(run, "Thread") as mock_thread:
+                            mock_thread.side_effect = lambda target, daemon=True: type(
+                                "_InlineThread",
+                                (),
+                                {"start": lambda self: target(), "join": lambda self: None},
+                            )()
+                            with self.assertRaises(KeyboardInterrupt):
+                                run.run(nodes, edges)
 
             get_call = next(call for call in mock_call.call_args_list if call.args[1] == "get")
             self.assertEqual(
