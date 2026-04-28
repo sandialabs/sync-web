@@ -22,7 +22,6 @@ fi
 
 VERSION="$(cat "$ROOT_DIR/VERSION")"
 SOCIAL_AGENT_LOCAL_TAG="sync-web/local-social-agent:$VERSION"
-JOURNAL_REMOTE_TAG="ghcr.io/sandialabs/sync-web/journal-sdk:$VERSION"
 
 CUSTOM_SETUP=""
 if [ -n "$CUSTOM_SETUP_FILE" ] && [ -x "$CUSTOM_SETUP_FILE" ]; then
@@ -67,41 +66,7 @@ build_social_agent() {
     fi
 }
 
-build_journal_sdk() {
-    echo "Building $JOURNAL_REMOTE_TAG ..."
-    if docker buildx version >/dev/null 2>&1; then
-        if [ -n "$DOCKER_PLATFORM" ]; then
-            docker buildx build \
-                --load \
-                --platform "$DOCKER_PLATFORM" \
-                --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                -t "$JOURNAL_REMOTE_TAG" \
-                "$ROOT_DIR/journal"
-        else
-            docker buildx build \
-                --load \
-                --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                -t "$JOURNAL_REMOTE_TAG" \
-                "$ROOT_DIR/journal"
-        fi
-    else
-        if [ -n "$DOCKER_PLATFORM" ]; then
-            docker build \
-                --platform "$DOCKER_PLATFORM" \
-                --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                -t "$JOURNAL_REMOTE_TAG" \
-                "$ROOT_DIR/journal"
-        else
-            docker build \
-                --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                -t "$JOURNAL_REMOTE_TAG" \
-                "$ROOT_DIR/journal"
-        fi
-    fi
-}
-
 build_local_stack() {
-    build_journal_sdk
     CUSTOM_SETUP_FILE="$CUSTOM_SETUP_FILE" \
     DOCKER_PLATFORM="$DOCKER_PLATFORM" \
     "$ROOT_DIR/tests/api/local-compose.sh" build

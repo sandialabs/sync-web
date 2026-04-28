@@ -29,6 +29,7 @@ cleanup_mode="down"
 VERSION="$(cat "$ROOT_DIR/VERSION")"
 SYNC_WEB_VERSION="$VERSION"
 
+JOURNAL_SDK_REMOTE_TAG="ghcr.io/sandialabs/sync-web/journal-sdk:$VERSION"
 GENERAL_REMOTE_TAG="ghcr.io/sandialabs/sync-web/general:$VERSION"
 GATEWAY_REMOTE_TAG="ghcr.io/sandialabs/sync-web/gateway:$VERSION"
 EXPLORER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/explorer:$VERSION"
@@ -36,6 +37,7 @@ WORKBENCH_REMOTE_TAG="ghcr.io/sandialabs/sync-web/workbench:$VERSION"
 ROUTER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/router:$VERSION"
 FILE_SYSTEM_REMOTE_TAG="ghcr.io/sandialabs/sync-web/file-system:$VERSION"
 
+JOURNAL_SDK_LOCAL_TAG="sync-web/local-journal-sdk:$VERSION"
 GENERAL_LOCAL_TAG="sync-web/local-general:$VERSION"
 GATEWAY_LOCAL_TAG="sync-web/local-gateway:$VERSION"
 EXPLORER_LOCAL_TAG="sync-web/local-explorer:$VERSION"
@@ -119,10 +121,14 @@ build_and_retag() {
     remote_tag="$3"
     build_platform="${4:-$DOCKER_PLATFORM}"
     dockerfile="${5:-}"
+    extra_build_arg="${6:-}"
 
     echo "Building $local_tag ..."
 
     set -- --build-arg "CUSTOM_SETUP=$CUSTOM_SETUP" -t "$local_tag"
+    if [ -n "$extra_build_arg" ]; then
+        set -- --build-arg "$extra_build_arg" "$@"
+    fi
     if [ -n "$build_platform" ]; then
         set -- --platform "$build_platform" "$@"
     fi
@@ -140,7 +146,8 @@ build_and_retag() {
     docker tag "$local_tag" "$remote_tag"
 }
 
-build_and_retag "$ROOT_DIR" "$GENERAL_LOCAL_TAG" "$GENERAL_REMOTE_TAG" "" "$COMPOSE_DIR/Dockerfile"
+build_and_retag "$ROOT_DIR/journal" "$JOURNAL_SDK_LOCAL_TAG" "$JOURNAL_SDK_REMOTE_TAG"
+build_and_retag "$ROOT_DIR" "$GENERAL_LOCAL_TAG" "$GENERAL_REMOTE_TAG" "" "$COMPOSE_DIR/Dockerfile" "JOURNAL_SDK_IMAGE=$JOURNAL_SDK_LOCAL_TAG"
 build_and_retag "$ROOT_DIR/services/gateway" "$GATEWAY_LOCAL_TAG" "$GATEWAY_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
