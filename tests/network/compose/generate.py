@@ -202,7 +202,7 @@ def make_social_agent_service(node_index, secret, period, size, activity, words,
     service_name = f"social-agent-{node_index}"
     image = os.environ.get(
         "IMAGE_OVERRIDE_SOCIAL_AGENT",
-        f"ghcr.io/sandialabs/sync-analysis/social-agent:{SOCIAL_AGENT_VERSION}",
+        f"ghcr.io/sandialabs/sync-web/social-agent:{SOCIAL_AGENT_VERSION}",
     )
     return {
         "container_name": service_name,
