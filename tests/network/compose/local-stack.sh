@@ -59,32 +59,32 @@ build_social_agent() {
             docker buildx build \
                 --load \
                 --platform "$DOCKER_PLATFORM" \
-                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/network/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$ROOT_DIR/tests/common/social-agent"
+                "$ROOT_DIR/tests/network/common/social-agent"
         else
             docker buildx build \
                 --load \
-                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/network/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$ROOT_DIR/tests/common/social-agent"
+                "$ROOT_DIR/tests/network/common/social-agent"
         fi
     else
         if [ -n "$DOCKER_PLATFORM" ]; then
             docker build \
                 --platform "$DOCKER_PLATFORM" \
-                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/network/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$ROOT_DIR/tests/common/social-agent"
+                "$ROOT_DIR/tests/network/common/social-agent"
         else
             docker build \
-                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/network/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$ROOT_DIR/tests/common/social-agent"
+                "$ROOT_DIR/tests/network/common/social-agent"
         fi
     fi
 }

@@ -1,0 +1,35 @@
+name: Records
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["records/**", "journal/**"]
+  pull_request:
+    branches: ["main"]
+    paths: ["records/**", "journal/**"]
+
+concurrency:
+  group: "records-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y llvm-dev libclang-dev clang
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: journal
+      - name: Build journal binary
+        working-directory: journal
+        run: cargo build --release
+      - name: Run records tests
+        run: records/tests/test.sh journal/target/release/journal
