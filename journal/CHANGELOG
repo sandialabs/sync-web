@@ -1,0 +1,56 @@
+------------------------------------------------------------------------------------------------------------------------
+The purpose of this changelog is to document new features and breaking changes that are most likely to affect developers
+------------------------------------------------------------------------------------------------------------------------
+
+--- v1.2.0 (2026.03.29) ---
+
+- Rework strict `sync-eval` around explicit `sync-state` bootstrapping and a more isolated evaluation environment
+- Improve journal runtime concurrency by snapshotting evaluation state, reducing coarse locking, and allowing more concurrent persistor reads
+- Fix persistor root publication, deletion, and reference-ordering issues and clean up root-set merge handling
+- Add and harden strict caching, including correct cache-root eviction and a dedicated cache/overlay module
+- Allow `sync-null?`, `sync-pair?`, `sync-stub?`, and `sync-digest` to operate cleanly on byte-vectors
+- Add primitive integration sanity tests and refresh primitive help text
+
+--- v1.1.0 (2026.03.08) ---
+
+- Add `system-time-utc` and `system-time-unix` primitives for UTC/unix conversion
+- Move time primitives into a dedicated `system` extension module
+- Parse interface queries via `read/open-input-string` to handle trailing comments safely
+
+--- v1.0.5 (2025.02.26) ---
+
+- Add JSON <-> Scheme interface
+- Separate crypto primitives into separate namespace
+- Add time-utc primitive
+- Use explicit period instead of periodicity
+
+--- v1.0.4 (2025.09.14) ---
+
+- Modify core merkle tree structure to support "stumps" and branch digest propogation
+- Implement sync-stub and sync-cut s7 primitives to work with stumps
+- Consolidate sync-pair? and sync-null? into a more general sync-node? type
+
+--- v1.0.3 (2025.08.25) ---
+
+- Add caching mechanism that enforces exactly one unique request per second
+- Add more controlled locking to mitigate runaway concurrency collisions
+- Add info/debugging log activity
+- Switch to using tokio asynchronous threads
+
+--- v1.0.2 (2025.06.23) ---
+
+- Integrate cryptographic signing primitives
+- Modify Dockerfile entrypoint to support commandline execution
+
+--- v1.0.1 (2025.04.22) ---
+
+- Move record creation/deletion functionality into the main interface
+- Simplified URL path structure and rename the main endpoint to /interface
+- Split old sync-call into separate sync-call and sync-http functions
+- Expand sync-call to sync-call, sync-http, and sync-remote
+- Add support for concurrency (via sync-call)
+- Add --evaluate flag for evaluating single expressions
+
+--- v1.0 (2025.04.21) ---
+
+- Initial open-source release

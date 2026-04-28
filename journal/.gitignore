@@ -1,0 +1,6 @@
+target
+Cargo.lock
+db/
+.aider*
+
+custom-setup.sh

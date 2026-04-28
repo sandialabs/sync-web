@@ -1,0 +1,896 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-bguv2lll"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Development | Synchronic Web</title><link rel="canonical" href="https://sandialabs.github.io/development/"/><link rel="sitemap" href="/sitemap-index.xml"/><link rel="shortcut icon" href="/images/favicon.ico" type="image/x-icon"/><meta name="generator" content="Astro v5.18.0"/><meta name="generator" content="Starlight v0.35.3"/><meta property="og:title" content="Development"/><meta property="og:type" content="article"/><meta property="og:url" content="https://sandialabs.github.io/development/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Documentation for usage, operation, development, and research."/><meta property="og:site_name" content="Synchronic Web"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Documentation for usage, operation, development, and research."/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/_astro/print.DNXP8c50.css" media="print"><link rel="stylesheet" href="/_astro/index.Bte4nz8y.css">
+<style>@layer starlight.components{:root{--sl-badge-default-border: var(--sl-color-accent);--sl-badge-default-bg: var(--sl-color-accent-low);--sl-badge-default-text: #fff;--sl-badge-note-border: var(--sl-color-blue);--sl-badge-note-bg: var(--sl-color-blue-low);--sl-badge-note-text: #fff;--sl-badge-danger-border: var(--sl-color-red);--sl-badge-danger-bg: var(--sl-color-red-low);--sl-badge-danger-text: #fff;--sl-badge-success-border: var(--sl-color-green);--sl-badge-success-bg: var(--sl-color-green-low);--sl-badge-success-text: #fff;--sl-badge-caution-border: var(--sl-color-orange);--sl-badge-caution-bg: var(--sl-color-orange-low);--sl-badge-caution-text: #fff;--sl-badge-tip-border: var(--sl-color-purple);--sl-badge-tip-bg: var(--sl-color-purple-low);--sl-badge-tip-text: #fff}[data-theme=light]:root{--sl-badge-default-bg: var(--sl-color-accent-high);--sl-badge-note-bg: var(--sl-color-blue-high);--sl-badge-danger-bg: var(--sl-color-red-high);--sl-badge-success-bg: var(--sl-color-green-high);--sl-badge-caution-bg: var(--sl-color-orange-high);--sl-badge-tip-bg: var(--sl-color-purple-high)}.sl-badge:where(.astro-avdet4wd){display:inline-block;border:1px solid var(--sl-color-border-badge);border-radius:.25rem;font-family:var(--sl-font-system-mono);line-height:normal;color:var(--sl-color-text-badge);background-color:var(--sl-color-bg-badge);overflow-wrap:anywhere}.sidebar-content .sl-badge:where(.astro-avdet4wd){line-height:1;font-size:var(--sl-text-xs);padding:.125rem .375rem}.sidebar-content a[aria-current=page]>.sl-badge:where(.astro-avdet4wd){--sl-color-bg-badge: transparent;--sl-color-border-badge: currentColor;color:inherit}.default:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-default-bg);--sl-color-border-badge: var(--sl-badge-default-border);--sl-color-text-badge: var(--sl-badge-default-text)}.note:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-note-bg);--sl-color-border-badge: var(--sl-badge-note-border);--sl-color-text-badge: var(--sl-badge-note-text)}.danger:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-danger-bg);--sl-color-border-badge: var(--sl-badge-danger-border);--sl-color-text-badge: var(--sl-badge-danger-text)}.success:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-success-bg);--sl-color-border-badge: var(--sl-badge-success-border);--sl-color-text-badge: var(--sl-badge-success-text)}.tip:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-tip-bg);--sl-color-border-badge: var(--sl-badge-tip-border);--sl-color-text-badge: var(--sl-badge-tip-text)}.caution:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-caution-bg);--sl-color-border-badge: var(--sl-badge-caution-border);--sl-color-text-badge: var(--sl-badge-caution-text)}.small:where(.astro-avdet4wd){font-size:var(--sl-text-xs);padding:.125rem .25rem}.medium:where(.astro-avdet4wd){font-size:var(--sl-text-sm);padding:.175rem .35rem}.large:where(.astro-avdet4wd){font-size:var(--sl-text-base);padding:.225rem .45rem}.sl-markdown-content :is(h1,h2,h3,h4,h5,h6) .sl-badge:where(.astro-avdet4wd){vertical-align:middle}}
+@layer starlight.components{svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-size, 1em);width:1em;height:1em}}
+@layer starlight.components{starlight-tabs:where(.astro-esqgolmp){display:block}.tablist-wrapper:where(.astro-esqgolmp){overflow-x:auto}:where(.astro-esqgolmp)[role=tablist]{display:flex;list-style:none;border-bottom:2px solid var(--sl-color-gray-5);padding:0}.tab:where(.astro-esqgolmp){margin-bottom:-2px}.tab:where(.astro-esqgolmp)>:where(.astro-esqgolmp)[role=tab]{display:flex;align-items:center;gap:.5rem;padding:0 1.25rem;text-decoration:none;border-bottom:2px solid var(--sl-color-gray-5);color:var(--sl-color-gray-3);outline-offset:var(--sl-outline-offset-inside);overflow-wrap:initial}.tab:where(.astro-esqgolmp) :where(.astro-esqgolmp)[role=tab][aria-selected=true]{color:var(--sl-color-white);border-color:var(--sl-color-text-accent);font-weight:600}.tablist-wrapper:where(.astro-esqgolmp)~[role=tabpanel]{margin-top:1rem}}
+@layer starlight.components{.sl-steps{--bullet-size: calc(var(--sl-line-height) * 1rem);--bullet-margin: .375rem;list-style:none;counter-reset:steps-counter var(--sl-steps-start, 0);padding-inline-start:0}.sl-steps>li{counter-increment:steps-counter;position:relative;padding-inline-start:calc(var(--bullet-size) + 1rem);padding-bottom:1px;min-height:calc(var(--bullet-size) + var(--bullet-margin))}.sl-steps>li+li{margin-top:0}.sl-steps>li:before{content:counter(steps-counter);position:absolute;top:0;inset-inline-start:0;width:var(--bullet-size);height:var(--bullet-size);line-height:var(--bullet-size);font-size:var(--sl-text-xs);font-weight:600;text-align:center;color:var(--sl-color-white);background-color:var(--sl-color-gray-6);border-radius:99rem;box-shadow:inset 0 0 0 1px var(--sl-color-gray-5)}.sl-steps>li:after{--guide-width: 1px;content:"";position:absolute;top:calc(var(--bullet-size) + var(--bullet-margin));bottom:var(--bullet-margin);inset-inline-start:calc((var(--bullet-size) - var(--guide-width)) / 2);width:var(--guide-width);background-color:var(--sl-color-hairline-light)}}@layer starlight.content{.sl-steps>li>:first-child{--lh: calc(1em * var(--sl-line-height));--shift-y: calc(.5 * (var(--bullet-size) - var(--lh)));transform:translateY(var(--shift-y));margin-bottom:var(--shift-y)}.sl-steps>li>:first-child:where(h1,h2,h3,h4,h5,h6){--lh: calc(1em * var(--sl-line-height-headings))}@supports (--prop: 1lh){.sl-steps>li>:first-child{--lh: 1lh}}}
+@layer starlight.components{.sl-link-button:where(.astro-xwgiixxa){align-items:center;border:1px solid transparent;border-radius:999rem;display:inline-flex;font-size:var(--sl-text-sm);gap:.5em;line-height:1.1875;outline-offset:.25rem;padding:.4375rem 1.125rem;text-decoration:none}.sl-link-button:where(.astro-xwgiixxa).primary{background:var(--sl-color-text-accent);border-color:var(--sl-color-text-accent);color:var(--sl-color-black)}.sl-link-button:where(.astro-xwgiixxa).primary:hover{color:var(--sl-color-black)}.sl-link-button:where(.astro-xwgiixxa).secondary{border-color:inherit;color:var(--sl-color-white)}.sl-link-button:where(.astro-xwgiixxa).minimal{color:var(--sl-color-white);padding-inline:0}.sl-link-button:where(.astro-xwgiixxa) svg{flex-shrink:0}@media(min-width:50rem){.sl-link-button:where(.astro-xwgiixxa){font-size:var(--sl-text-base);padding:.9375rem 1.25rem}}.sl-markdown-content .sl-link-button:where(.astro-xwgiixxa){margin-inline-end:1rem}.sl-markdown-content .sl-link-button:where(.astro-xwgiixxa):not(:where(p *)){margin-block:1rem}}
+</style><script type="module" src="/_astro/page.B1D-nYk3.js"></script></head> <body class="astro-bguv2lll"> <a href="#_top" class="astro-7q3lir66">Skip to content</a>  <div class="page sl-flex astro-vrdttmbt"> <header class="header astro-vrdttmbt"><div class="header astro-kmkmnagf"> <div class="title-wrapper sl-flex astro-kmkmnagf"> <a href="/" class="site-title sl-flex astro-m46x6ez3">  <img class="astro-m46x6ez3" alt src="/_astro/logo.CitzJdM1.png" width="908" height="908">  <span class="astro-m46x6ez3" translate="no"> Synchronic Web </span> </a>  </div> <div class="sl-flex print:hidden astro-kmkmnagf"> <site-search class="astro-kmkmnagf astro-v37mnknz" data-translations="{&#34;placeholder&#34;:&#34;Search&#34;}"> <button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-v37mnknz"> <svg aria-hidden="true" class="astro-v37mnknz astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg> <span class="sl-hidden md:sl-block astro-v37mnknz" aria-hidden="true">Search</span> <kbd class="sl-hidden md:sl-flex astro-v37mnknz" style="display: none;"> <kbd class="astro-v37mnknz">Ctrl</kbd><kbd class="astro-v37mnknz">K</kbd> </kbd> </button> <dialog style="padding:0" aria-label="Search" class="astro-v37mnknz"> <div class="dialog-frame sl-flex astro-v37mnknz">  <button data-close-modal class="sl-flex md:sl-hidden astro-v37mnknz"> Cancel </button> <div class="search-container astro-v37mnknz"> <div id="starlight__search" class="astro-v37mnknz"></div> </div> </div> </dialog> </site-search>  <script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script> <script type="module" src="/_astro/Search.astro_astro_type_script_index_0_lang.cjYDvRdi.js"></script>   </div> <div class="sl-hidden md:sl-flex print:hidden right-group astro-kmkmnagf"> <div class="sl-flex social-icons astro-kmkmnagf">  </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-4yphtoen"> <span class="sr-only astro-4yphtoen">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg> <select autocomplete="off" class="astro-4yphtoen"> <option value="dark" class="astro-4yphtoen">Dark</option><option value="light" class="astro-4yphtoen">Light</option><option value="auto" selected class="astro-4yphtoen">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg> </label>  </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script> <script type="module">const r="starlight-theme",o=e=>e==="auto"||e==="dark"||e==="light"?e:"auto",c=()=>o(typeof localStorage<"u"&&localStorage.getItem(r));function n(e){typeof localStorage<"u"&&localStorage.setItem(r,e==="light"||e==="dark"?e:"")}const l=()=>matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";function t(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e==="auto"?l():e,n(e)}matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{c()==="auto"&&t("auto")});class s extends HTMLElement{constructor(){super(),t(c()),this.querySelector("select")?.addEventListener("change",a=>{a.currentTarget instanceof HTMLSelectElement&&t(o(a.currentTarget.value))})}}customElements.define("starlight-theme-select",s);</script> <script type="module">class s extends HTMLElement{constructor(){super();const e=this.querySelector("select");e&&(e.addEventListener("change",t=>{t.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=t.currentTarget.value)}),window.addEventListener("pageshow",t=>{if(!t.persisted)return;const n=e.querySelector("option[selected]")?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}}customElements.define("starlight-lang-select",s);</script> </div> </div> </header> <nav class="sidebar print:hidden astro-vrdttmbt" aria-label="Main"> <starlight-menu-button class="print:hidden astro-jif73yzw"> <button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-jif73yzw"> <svg aria-hidden="true" class="open-menu astro-jif73yzw astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg> <svg aria-hidden="true" class="close-menu astro-jif73yzw astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg> </button> </starlight-menu-button> <script type="module">class s extends HTMLElement{constructor(){super(),this.btn=this.querySelector("button"),this.btn.addEventListener("click",()=>this.toggleExpanded());const t=this.closest("nav");t&&t.addEventListener("keyup",e=>this.closeOnEscape(e))}setExpanded(t){this.setAttribute("aria-expanded",String(t)),document.body.toggleAttribute("data-mobile-menu-expanded",t)}toggleExpanded(){this.setExpanded(this.getAttribute("aria-expanded")!=="true")}closeOnEscape(t){t.code==="Escape"&&(this.setExpanded(!1),this.btn.focus())}}customElements.define("starlight-menu-button",s);</script>   <div id="starlight__sidebar" class="sidebar-pane astro-vrdttmbt"> <div class="sidebar-content sl-flex astro-vrdttmbt"> <sl-sidebar-state-persist data-hash="1rkp27k" class="astro-kku4brbg"> <script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script>  <ul class="top-level astro-3ii7xxms"> <li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <sl-sidebar-restore data-index="0"></sl-sidebar-restore> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Documentation</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/" aria-current="false" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Overview</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/usage/" aria-current="false" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Usage</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/operation/" aria-current="false" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Operation</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/development/" aria-current="page" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Development</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/research/" aria-current="false" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Research</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/glossary/" aria-current="false" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Glossary</span>  </a> </li> </ul>  </details> </li> </ul>   <script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script> </sl-sidebar-state-persist>  <div class="md:sl-hidden"> <div class="mobile-preferences sl-flex astro-wu23bvmt"> <div class="social-icons astro-wu23bvmt">  </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-4yphtoen"> <span class="sr-only astro-4yphtoen">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg> <select autocomplete="off" class="astro-4yphtoen"> <option value="dark" class="astro-4yphtoen">Dark</option><option value="light" class="astro-4yphtoen">Light</option><option value="auto" selected class="astro-4yphtoen">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg> </label>  </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script>   </div>  </div> </div> </div> </nav> <div class="main-frame astro-vrdttmbt">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-67yu43on"> <aside class="right-sidebar-container print:hidden astro-67yu43on"> <div class="right-sidebar astro-67yu43on"> <script type="module" src="/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C181hMzK.js"></script><script type="module" src="/_astro/TableOfContents.astro_astro_type_script_index_0_lang.CKWWgpjV.js"></script><div class="lg:sl-hidden astro-pb3aqygn"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-doynk5tl"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-doynk5tl"><details id="starlight__mobile-toc" class="astro-doynk5tl"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-doynk5tl"><span class="toggle sl-flex astro-doynk5tl">On this page<svg aria-hidden="true" class="caret astro-doynk5tl astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-doynk5tl"></span></summary><div class="dropdown astro-doynk5tl"><ul class="isMobile astro-g2bywc46" style="--depth: 0;"> <li class="astro-g2bywc46" style="--depth: 0;"> <a href="#_top" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#architecture" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Architecture</span> </a> <ul class="isMobile astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#system" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">System</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#language" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Language</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#structure" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Structure</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#objects" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Objects</span> </a>  </li> </ul>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#specifications" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Specifications</span> </a> <ul class="isMobile astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#journal-configuration" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Journal Configuration</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#s7-extended-primitives" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">s7 Extended Primitives</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#standard-objects" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Standard Objects</span> </a>  </li> </ul>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#testing" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Testing</span> </a> <ul class="isMobile astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#synchronous-testing" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Synchronous Testing</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#service-stack-smoke-tests" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Service Stack Smoke Tests</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#service-level-tests" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Service-Level Tests</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#stress-testing" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Stress Testing</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#multi-node-compose-testing" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Multi-Node Compose Testing</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#network-emulation" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Network Emulation</span> </a>  </li> </ul>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#guidance" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Guidance</span> </a> <ul class="isMobile astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#style-guide" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Style Guide</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#gotchas" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Gotchas</span> </a>  </li> </ul>  </li> </ul> </div></details></nav></mobile-starlight-toc></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-pb3aqygn"><div class="sl-container astro-pb3aqygn"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-g2bywc46" style="--depth: 0;"> <li class="astro-g2bywc46" style="--depth: 0;"> <a href="#_top" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#architecture" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Architecture</span> </a> <ul class="astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#system" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">System</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#language" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Language</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#structure" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Structure</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#objects" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Objects</span> </a>  </li> </ul>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#specifications" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Specifications</span> </a> <ul class="astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#journal-configuration" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Journal Configuration</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#s7-extended-primitives" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">s7 Extended Primitives</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#standard-objects" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Standard Objects</span> </a>  </li> </ul>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#testing" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Testing</span> </a> <ul class="astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#synchronous-testing" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Synchronous Testing</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#service-stack-smoke-tests" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Service Stack Smoke Tests</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#service-level-tests" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Service-Level Tests</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#stress-testing" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Stress Testing</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#multi-node-compose-testing" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Multi-Node Compose Testing</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#network-emulation" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Network Emulation</span> </a>  </li> </ul>  </li><li class="astro-g2bywc46" style="--depth: 0;"> <a href="#guidance" class="astro-g2bywc46" style="--depth: 0;"> <span class="astro-g2bywc46" style="--depth: 0;">Guidance</span> </a> <ul class="astro-g2bywc46" style="--depth: 1;"> <li class="astro-g2bywc46" style="--depth: 1;"> <a href="#style-guide" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Style Guide</span> </a>  </li><li class="astro-g2bywc46" style="--depth: 1;"> <a href="#gotchas" class="astro-g2bywc46" style="--depth: 1;"> <span class="astro-g2bywc46" style="--depth: 1;">Gotchas</span> </a>  </li> </ul>  </li> </ul> </nav></starlight-toc></div></div> </div> </aside> <div class="main-pane astro-67yu43on">  <main data-pagefind-body class="astro-bguv2lll" lang="en" dir="ltr">    <div class="content-panel astro-7nkwcw3z"> <div class="sl-container astro-7nkwcw3z"> <h1 id="_top" class="astro-j6tvhyss">Development</h1>  </div> </div>  <div class="content-panel astro-7nkwcw3z"> <div class="sl-container astro-7nkwcw3z"> <div class="sl-markdown-content"> <p>This section is for developers extending runtime behavior, class logic, and APIs.
+The core pattern is progressive layering through <code dir="auto">interface.scm</code> and class modules loaded at boot.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="architecture">Architecture</h2><a class="sl-anchor-link" href="#architecture"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Architecture”</span></a></div>
+<p>This section explains the implementation layers in the same order they are assembled at runtime.
+If you are debugging a behavior issue, following this order usually narrows root cause quickly.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="system">System</h3><a class="sl-anchor-link" href="#system"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “System”</span></a></div>
+<p>At runtime, each query is evaluated against the current <code dir="auto">*sync-state*</code> root.
+The left side carries executable logic and the right side carries persistent state.
+The general stack boot flow is:</p>
+<ol>
+<li>Install <code dir="auto">control.scm</code>.</li>
+<li>Install/instantiate <code dir="auto">standard.scm</code>.</li>
+<li>Install class definitions (<code dir="auto">log-chain.scm</code>, <code dir="auto">tree.scm</code>, <code dir="auto">configuration.scm</code>, <code dir="auto">ledger.scm</code>).</li>
+<li>Instantiate and store <code dir="auto">ledger</code> object.</li>
+<li>Install interface secret and query dispatcher.</li>
+</ol>
+<p>Concurrency behavior in <code dir="auto">sync-journal</code> is optimistic:</p>
+<ul>
+<li>queries run against a snapshot of root state</li>
+<li>if state changed concurrently, evaluation is retried</li>
+<li>writes eventually synchronize through compare-and-set root updates</li>
+<li>a global lock is used after repeated collisions to serialize update attempts</li>
+</ul>
+<p>Operationally, this behaves like many concurrent readers with controlled commit contention on writes.
+That model is important for developers writing side-effecting logic: deterministic behavior depends on understanding retry semantics.</p>
+<p>Memory/persistence modes:</p>
+<ul>
+<li>in-memory mode (default when no <code dir="auto">--database</code> path is supplied)</li>
+<li>persistent RocksDB-backed storage when <code dir="auto">--database</code> is configured</li>
+</ul>
+<p>Periodic stepping:</p>
+<ul>
+<li>configured by <code dir="auto">--step</code> and <code dir="auto">--period</code></li>
+<li>used in <code dir="auto">sync-services</code> to invoke <code dir="auto">*step*</code> continuously</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="language">Language</h3><a class="sl-anchor-link" href="#language"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Language”</span></a></div>
+<p>The evaluator embeds s7 Scheme and removes high-risk primitives (file/port/loader/escape surfaces).
+It also adds convenience and Synchronic primitives.
+The result is a constrained but expressive execution environment intended for programmable policy and state logic.</p>
+<p>References:</p>
+<p>The s7 reference is in <code dir="auto">sync-journal/external/s7/README.md</code>, and the removed primitive list is defined in <code dir="auto">sync-journal/src/evaluator.rs</code> (<code dir="auto">REMOVE</code>).</p>
+<p>Extended evaluator primitives (examples):</p>
+<p>Representative examples include <code dir="auto">expression->byte-vector</code> and <code dir="auto">byte-vector->expression</code>, <code dir="auto">hex-string->byte-vector</code> and <code dir="auto">byte-vector->hex-string</code>, and utility helpers such as <code dir="auto">random-byte-vector</code>, <code dir="auto">time-unix</code>, and <code dir="auto">print</code>.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="structure">Structure</h3><a class="sl-anchor-link" href="#structure"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Structure”</span></a></div>
+<p>Everything is represented as a hash-addressed DAG of sync nodes.
+<code dir="auto">sync-cons</code>, <code dir="auto">sync-car</code>, <code dir="auto">sync-cdr</code>, <code dir="auto">sync-cut</code>, and <code dir="auto">sync-digest</code> expose low-level structure operations.
+The language runtime controls interpretation of this DAG through object methods and query handlers.
+This separation of structure and interpretation is one reason the stack can evolve quickly without breaking core data guarantees.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="objects">Objects</h3><a class="sl-anchor-link" href="#objects"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Objects”</span></a></div>
+<p>Universal object shape:</p>
+<p>The left child holds code (constructor/behavior), and the right child holds object state.</p>
+<p><code dir="auto">standard.scm</code> implements a compact object protocol:</p>
+<p><code dir="auto">standard.scm</code> implements method dispatch via <code dir="auto">(object 'method)</code>, state access shorthand via <code dir="auto">(self '(path ...))</code>, composition without inheritance by nesting objects in state, and explicit deep operations such as <code dir="auto">deep-get</code>, <code dir="auto">deep-set!</code>, <code dir="auto">deep-call!</code>, and <code dir="auto">deep-merge!</code>.</p>
+<p>In practice, most domain features are built by composing these object primitives rather than introducing new global runtime behavior.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="specifications">Specifications</h2><a class="sl-anchor-link" href="#specifications"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Specifications”</span></a></div>
+<p>Use this section as a reference when wiring local environments, reviewing pull requests, or mapping code changes to runtime behavior.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="journal-configuration">Journal Configuration</h3><a class="sl-anchor-link" href="#journal-configuration"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Journal Configuration”</span></a></div>
+<p><code dir="auto">journal-sdk</code> command-line options:</p>
+<ul>
+<li><code dir="auto">--database</code> / <code dir="auto">-d</code>: persistent DB path</li>
+<li><code dir="auto">--port</code> / <code dir="auto">-p</code>: HTTP port (default <code dir="auto">4096</code>)</li>
+<li><code dir="auto">--boot</code> / <code dir="auto">-b</code>: boot expression evaluated at startup</li>
+<li><code dir="auto">--evaluate</code> / <code dir="auto">-e</code>: one-shot query and exit</li>
+<li><code dir="auto">--step</code> / <code dir="auto">-s</code>: periodic step expression</li>
+<li><code dir="auto">--period</code> / <code dir="auto">-c</code>: seconds between step calls</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="s7-extended-primitives">s7 Extended Primitives</h3><a class="sl-anchor-link" href="#s7-extended-primitives"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “s7 Extended Primitives”</span></a></div>
+<p>The runtime extends base s7 with utility and Synchronic primitives.
+These signatures are sourced from primitive registrations in <code dir="auto">sync-journal/src/evaluator.rs</code> and <code dir="auto">sync-journal/src/lib.rs</code>.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="utility-primitives">Utility Primitives</h4><a class="sl-anchor-link" href="#utility-primitives"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Utility Primitives”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Primitive</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">expression->byte-vector</code></td><td><code dir="auto">(expression->byte-vector expr)</code></td><td>Encode expression into byte-vector form.</td></tr><tr><td><code dir="auto">byte-vector->expression</code></td><td><code dir="auto">(byte-vector->expression bv)</code></td><td>Decode byte-vector into expression.</td></tr><tr><td><code dir="auto">hex-string->byte-vector</code></td><td><code dir="auto">(hex-string->byte-vector str)</code></td><td>Convert hex string to byte-vector.</td></tr><tr><td><code dir="auto">byte-vector->hex-string</code></td><td><code dir="auto">(byte-vector->hex-string bv)</code></td><td>Convert byte-vector to hex string.</td></tr><tr><td><code dir="auto">random-byte-vector</code></td><td><code dir="auto">(random-byte-vector length)</code></td><td>Generate securely random byte-vector of given length.</td></tr><tr><td><code dir="auto">time-unix</code></td><td><code dir="auto">(time-unix)</code></td><td>Return current Unix time in seconds.</td></tr><tr><td><code dir="auto">print</code></td><td><code dir="auto">(print obj ...)</code></td><td>Print values and return last value.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="sync-structure-primitives">Sync Structure Primitives</h4><a class="sl-anchor-link" href="#sync-structure-primitives"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Sync Structure Primitives”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Primitive</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">sync-stub</code></td><td><code dir="auto">(sync-stub digest)</code></td><td>Create a stub node from digest.</td></tr><tr><td><code dir="auto">sync-hash</code></td><td><code dir="auto">(sync-hash bv)</code></td><td>Compute SHA-256 digest of byte-vector.</td></tr><tr><td><code dir="auto">sync-node</code></td><td><code dir="auto">(sync-node digest)</code></td><td>Load sync node identified by digest.</td></tr><tr><td><code dir="auto">sync-node?</code></td><td><code dir="auto">(sync-node? obj)</code></td><td>Check whether object is a sync node.</td></tr><tr><td><code dir="auto">sync-null</code></td><td><code dir="auto">(sync-null)</code></td><td>Return null sync node.</td></tr><tr><td><code dir="auto">sync-null?</code></td><td><code dir="auto">(sync-null? sp)</code></td><td>Check whether node/value is null sync node.</td></tr><tr><td><code dir="auto">sync-pair?</code></td><td><code dir="auto">(sync-pair? sp)</code></td><td>Check whether node is a pair node.</td></tr><tr><td><code dir="auto">sync-stub?</code></td><td><code dir="auto">(sync-stub? sp)</code></td><td>Check whether node is a stub node.</td></tr><tr><td><code dir="auto">sync-digest</code></td><td><code dir="auto">(sync-digest node)</code></td><td>Return digest of sync node.</td></tr><tr><td><code dir="auto">sync-cons</code></td><td><code dir="auto">(sync-cons first rest)</code></td><td>Construct sync pair node.</td></tr><tr><td><code dir="auto">sync-car</code></td><td><code dir="auto">(sync-car pair)</code></td><td>Return first child of sync pair.</td></tr><tr><td><code dir="auto">sync-cdr</code></td><td><code dir="auto">(sync-cdr pair)</code></td><td>Return second child of sync pair.</td></tr><tr><td><code dir="auto">sync-cut</code></td><td><code dir="auto">(sync-cut value)</code></td><td>Convert node/value into stub form.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="record-lifecycle-primitives">Record Lifecycle Primitives</h4><a class="sl-anchor-link" href="#record-lifecycle-primitives"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Record Lifecycle Primitives”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Primitive</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">sync-create</code></td><td><code dir="auto">(sync-create id)</code></td><td>Create record for 32-byte ID.</td></tr><tr><td><code dir="auto">sync-delete</code></td><td><code dir="auto">(sync-delete id)</code></td><td>Delete record for 32-byte ID (except root record).</td></tr><tr><td><code dir="auto">sync-all</code></td><td><code dir="auto">(sync-all)</code></td><td>List all record IDs.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="network-execution-and-crypto-primitives">Network, Execution, and Crypto Primitives</h4><a class="sl-anchor-link" href="#network-execution-and-crypto-primitives"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Network, Execution, and Crypto Primitives”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Primitive</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">sync-call</code></td><td><code dir="auto">(sync-call query blocking? id)</code></td><td>Evaluate query against target record (or current record if <code dir="auto">id</code> omitted).</td></tr><tr><td><code dir="auto">sync-http</code></td><td><code dir="auto">(sync-http method url . data)</code></td><td>Perform HTTP request (<code dir="auto">get</code> or <code dir="auto">post</code>).</td></tr><tr><td><code dir="auto">sync-remote</code></td><td><code dir="auto">(sync-remote url data)</code></td><td>Perform remote post request with payload.</td></tr><tr><td><code dir="auto">crypto-generate</code></td><td><code dir="auto">(crypto-generate seed)</code></td><td>Derive public/private key pair from seed bytes.</td></tr><tr><td><code dir="auto">crypto-sign</code></td><td><code dir="auto">(crypto-sign private-key message)</code></td><td>Sign message with private key.</td></tr><tr><td><code dir="auto">crypto-verify</code></td><td><code dir="auto">(crypto-verify public-key signature message)</code></td><td>Verify signature against message/public key.</td></tr></tbody></table>
+<p>When adding new primitives, keep conversion behavior and security constraints in mind so JSON/Scheme workflows remain predictable.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="standard-objects">Standard Objects</h3><a class="sl-anchor-link" href="#standard-objects"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Standard Objects”</span></a></div>
+<p>The object model is loosely Python-inspired:</p>
+<p>The model uses methods instead of free global variables, captures a single state root per object, uses class-like definitions via <code dir="auto">define-class</code>, and favors explicit composition over inheritance.</p>
+<p>State path shorthand uses cdr/car traversal semantics:</p>
+<p>State path shorthand follows cdr/car traversal semantics such as <code dir="auto">(self '(1 0 0 1 ...))</code>.</p>
+<p>In the tables below, methods prefixed with <code dir="auto">*</code> (for example <code dir="auto">*init*</code>) are still part of the public class API.
+Only methods prefixed with <code dir="auto">~</code> are treated as internal/helper methods.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="normative-guidelines">Normative Guidelines</h4><a class="sl-anchor-link" href="#normative-guidelines"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Normative Guidelines”</span></a></div>
+<p>For standard object implementations, <code dir="auto">define-class</code> and <code dir="auto">define-method</code> are the normative authoring forms.</p>
+<ul>
+<li>New runtime classes SHOULD be expressed as a single <code dir="auto">define-class</code> form.</li>
+<li>Class members MUST be declared with <code dir="auto">define-method</code>; arbitrary top-level expressions inside a class body are not part of the supported model.</li>
+<li>Constructors SHOULD be implemented as <code dir="auto">(*init* self ...)</code> methods rather than ad hoc initialization outside the class form.</li>
+<li>Internal helper behavior SHOULD be exposed as <code dir="auto">~</code>-prefixed methods, while stable external behavior SHOULD use non-<code dir="auto">~</code> method names.</li>
+</ul>
+<p>This convention keeps class loading deterministic, keeps object serialization semantics predictable, and aligns with how <code dir="auto">standard.scm</code> validates class definitions during <code dir="auto">make</code>.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="standard-class">Standard Class</h4><a class="sl-anchor-link" href="#standard-class"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Standard Class”</span></a></div>
+<p>Public API (<code dir="auto">standard.scm</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">make</code></td><td><code dir="auto">(make self class (init ()) debug)</code></td><td>Instantiate an object from a <code dir="auto">define-class</code> form; optionally run constructor args and debug tracing.</td></tr><tr><td><code dir="auto">dump</code></td><td><code dir="auto">(dump self object)</code></td><td>Return raw sync-node representation of an object.</td></tr><tr><td><code dir="auto">load</code></td><td><code dir="auto">(load self node)</code></td><td>Rehydrate an object from serialized sync-node content.</td></tr><tr><td><code dir="auto">deep-get</code></td><td><code dir="auto">(deep-get self object path)</code></td><td>Read value/object across nested object boundaries.</td></tr><tr><td><code dir="auto">deep-set!</code></td><td><code dir="auto">(deep-set! self object path value)</code></td><td>Write value across nested object boundaries.</td></tr><tr><td><code dir="auto">deep-slice!</code></td><td><code dir="auto">(deep-slice! self object path)</code></td><td>Slice object graph along path while preserving digest invariants.</td></tr><tr><td><code dir="auto">deep-prune!</code></td><td><code dir="auto">(deep-prune! self object path)</code></td><td>Prune object graph along path while preserving digest invariants.</td></tr><tr><td><code dir="auto">deep-merge!</code></td><td><code dir="auto">(deep-merge! self object-source object-target)</code></td><td>Merge digest-equivalent object structures.</td></tr><tr><td><code dir="auto">deep-copy!</code></td><td><code dir="auto">(deep-copy! self object path-source path-target)</code></td><td>Copy value from one nested path to another.</td></tr><tr><td><code dir="auto">deep-call!</code></td><td><code dir="auto">(deep-call! self object path function)</code></td><td>Call function at nested path and persist resulting state.</td></tr><tr><td><code dir="auto">serialize</code></td><td><code dir="auto">(serialize self node query)</code></td><td>Build compact proof-oriented serialization of a node/query view.</td></tr><tr><td><code dir="auto">deserialize</code></td><td><code dir="auto">(deserialize self serialization)</code></td><td>Rebuild sync-node structure from serialization output.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="tree-class">Tree Class</h4><a class="sl-anchor-link" href="#tree-class"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Tree Class”</span></a></div>
+<p>Public API (<code dir="auto">tree.scm</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">obj->node</code></td><td><code dir="auto">(obj->node self obj)</code></td><td>Encode Lisp/runtime value into sync-node storage representation.</td></tr><tr><td><code dir="auto">node->obj</code></td><td><code dir="auto">(node->obj self node)</code></td><td>Decode sync-node storage representation into runtime value.</td></tr><tr><td><code dir="auto">get</code></td><td><code dir="auto">(get self path)</code></td><td>Read value at key-path; returns value, <code dir="auto">(nothing)</code>, <code dir="auto">(unknown)</code>, or directory metadata.</td></tr><tr><td><code dir="auto">equal?</code></td><td><code dir="auto">(equal? self source path)</code></td><td>Exact structural equality check between two paths.</td></tr><tr><td><code dir="auto">equivalent?</code></td><td><code dir="auto">(equivalent? self source path)</code></td><td>Digest-equivalence check between two paths.</td></tr><tr><td><code dir="auto">set!</code></td><td><code dir="auto">(set! self path value)</code></td><td>Write value at path (or delete when value is <code dir="auto">(nothing)</code>).</td></tr><tr><td><code dir="auto">copy!</code></td><td><code dir="auto">(copy! self source path)</code></td><td>Copy value from source path to target path.</td></tr><tr><td><code dir="auto">prune!</code></td><td><code dir="auto">(prune! self path keep-key?)</code></td><td>Prune proof/state detail at path.</td></tr><tr><td><code dir="auto">slice!</code></td><td><code dir="auto">(slice! self path)</code></td><td>Slice state to keep proof for path and cut unrelated branches.</td></tr><tr><td><code dir="auto">merge!</code></td><td><code dir="auto">(merge! self other)</code></td><td>Merge compatible tree structures.</td></tr><tr><td><code dir="auto">valid?</code></td><td><code dir="auto">(valid? self)</code></td><td>Validate structural/key-prefix consistency of the tree.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="linear-chain-class">Linear Chain Class</h4><a class="sl-anchor-link" href="#linear-chain-class"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Linear Chain Class”</span></a></div>
+<p>Public API (<code dir="auto">linear-chain.scm</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">*init*</code></td><td><code dir="auto">(*init* self)</code></td><td>Initialize empty chain state.</td></tr><tr><td><code dir="auto">get</code></td><td><code dir="auto">(get self index)</code></td><td>Return entry at normalized index.</td></tr><tr><td><code dir="auto">previous</code></td><td><code dir="auto">(previous self index)</code></td><td>Build proof chain ending at index.</td></tr><tr><td><code dir="auto">digest</code></td><td><code dir="auto">(digest self (index ...))</code></td><td>Return digest for proof chain at index.</td></tr><tr><td><code dir="auto">size</code></td><td><code dir="auto">(size self)</code></td><td>Return chain length.</td></tr><tr><td><code dir="auto">index</code></td><td><code dir="auto">(index self index~)</code></td><td>Normalize/index-check external index input.</td></tr><tr><td><code dir="auto">push!</code></td><td><code dir="auto">(push! self data)</code></td><td>Append entry to chain.</td></tr><tr><td><code dir="auto">set!</code></td><td><code dir="auto">(set! self index data)</code></td><td>Replace entry at index.</td></tr><tr><td><code dir="auto">slice!</code></td><td><code dir="auto">(slice! self index)</code></td><td>Slice proof view around index.</td></tr><tr><td><code dir="auto">prune!</code></td><td><code dir="auto">(prune! self index)</code></td><td>Prune proof detail at index.</td></tr><tr><td><code dir="auto">truncate!</code></td><td><code dir="auto">(truncate! self index)</code></td><td>Truncate chain after index and return cut tail.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="log-chain-class">Log Chain Class</h4><a class="sl-anchor-link" href="#log-chain-class"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Log Chain Class”</span></a></div>
+<p>Public API (<code dir="auto">log-chain.scm</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">*init*</code></td><td><code dir="auto">(*init* self)</code></td><td>Initialize empty log-structured chain state.</td></tr><tr><td><code dir="auto">size</code></td><td><code dir="auto">(size self)</code></td><td>Return chain length.</td></tr><tr><td><code dir="auto">index</code></td><td><code dir="auto">(index self index~)</code></td><td>Normalize/index-check external index input.</td></tr><tr><td><code dir="auto">get</code></td><td><code dir="auto">(get self index)</code></td><td>Return entry at normalized index.</td></tr><tr><td><code dir="auto">previous</code></td><td><code dir="auto">(previous self index)</code></td><td>Build proof chain ending at index.</td></tr><tr><td><code dir="auto">digest</code></td><td><code dir="auto">(digest self (index ...))</code></td><td>Return digest for proof chain at index.</td></tr><tr><td><code dir="auto">push!</code></td><td><code dir="auto">(push! self data)</code></td><td>Append entry to chain.</td></tr><tr><td><code dir="auto">set!</code></td><td><code dir="auto">(set! self index data)</code></td><td>Replace entry at index.</td></tr><tr><td><code dir="auto">slice!</code></td><td><code dir="auto">(slice! self index)</code></td><td>Slice proof view around index.</td></tr><tr><td><code dir="auto">prune!</code></td><td><code dir="auto">(prune! self index)</code></td><td>Prune proof detail at index.</td></tr><tr><td><code dir="auto">truncate!</code></td><td><code dir="auto">(truncate! self depth)</code></td><td>Truncate proof tree depth by cutting deeper nodes.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="configuration-class">Configuration Class</h4><a class="sl-anchor-link" href="#configuration-class"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Configuration Class”</span></a></div>
+<p>Public API (<code dir="auto">configuration.scm</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">*init*</code></td><td><code dir="auto">(*init* self (config '()))</code></td><td>Initialize configuration expression state.</td></tr><tr><td><code dir="auto">get</code></td><td><code dir="auto">(get self path)</code></td><td>Read nested configuration value by symbol-path.</td></tr><tr><td><code dir="auto">set!</code></td><td><code dir="auto">(set! self path value)</code></td><td>Set nested value; delete branch when value is <code dir="auto">'()</code>.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h4"><h4 id="ledger-class">Ledger Class</h4><a class="sl-anchor-link" href="#ledger-class"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Ledger Class”</span></a></div>
+<p>Public API (<code dir="auto">ledger.scm</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">*init*</code></td><td><code dir="auto">(*init* self standard config)</code></td><td>Initialize ledger with standard helper and configuration object.</td></tr><tr><td><code dir="auto">configuration</code></td><td><code dir="auto">(configuration self)</code></td><td>Return full configuration (public + private).</td></tr><tr><td><code dir="auto">information</code></td><td><code dir="auto">(information self)</code></td><td>Return public configuration subset.</td></tr><tr><td><code dir="auto">size</code></td><td><code dir="auto">(size self)</code></td><td>Return permanent chain length.</td></tr><tr><td><code dir="auto">bridge!</code></td><td><code dir="auto">(bridge! self name info)</code></td><td>Register/update bridge metadata and cached public key.</td></tr><tr><td><code dir="auto">bridges</code></td><td><code dir="auto">(bridges self)</code></td><td>List configured bridge names.</td></tr><tr><td><code dir="auto">set!</code></td><td><code dir="auto">(set! self path value)</code></td><td>Stage local state mutation.</td></tr><tr><td><code dir="auto">get</code></td><td><code dir="auto">(get self path pinned? proof?)</code></td><td>Read staged/historical value; optional content/pinned/proof bundle.</td></tr><tr><td><code dir="auto">pin!</code></td><td><code dir="auto">(pin! self path)</code></td><td>Pin path into permanent chain retention.</td></tr><tr><td><code dir="auto">unpin!</code></td><td><code dir="auto">(unpin! self path)</code></td><td>Remove previously pinned path.</td></tr><tr><td><code dir="auto">synchronize</code></td><td><code dir="auto">(synchronize self index)</code></td><td>Serialize bridge-sync proof view at index.</td></tr><tr><td><code dir="auto">resolve</code></td><td><code dir="auto">(resolve self index path)</code></td><td>Serialize resolved path view for remote verification.</td></tr><tr><td><code dir="auto">step-bridge!</code></td><td><code dir="auto">(step-bridge! self name)</code></td><td>Fetch and verify bridge chain head into staged state.</td></tr><tr><td><code dir="auto">step-chain!</code></td><td><code dir="auto">(step-chain! self)</code></td><td>Commit staged state to chain, sign, prune by window, return new size.</td></tr><tr><td><code dir="auto">step-generate</code></td><td><code dir="auto">(step-generate self)</code></td><td>Generate ordered step operations (chain + bridges).</td></tr><tr><td><code dir="auto">update-window</code></td><td><code dir="auto">(update-window self window)</code></td><td>Update the configured recent-history window and prune <code dir="auto">temp</code> when it shrinks.</td></tr><tr><td><code dir="auto">update-signing-keys</code></td><td><code dir="auto">(update-signing-keys self public private)</code></td><td>Replace the configured signing keypair.</td></tr><tr><td><code dir="auto">update-code</code></td><td><code dir="auto">(update-code self class function)</code></td><td>Return updated ledger object after applying class-scoped transformation.</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h2"><h2 id="testing">Testing</h2><a class="sl-anchor-link" href="#testing"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Testing”</span></a></div>
+<p>Testing coverage is intentionally split across correctness, stress, and topology concerns so regressions can be isolated by failure type.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="synchronous-testing">Synchronous Testing</h3><a class="sl-anchor-link" href="#synchronous-testing"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Synchronous Testing”</span></a></div>
+<p>Use <code dir="auto">sync-records/tests</code> for deterministic, script-driven correctness checks over simulated journals.</p>
+<p>Prerequisites:</p>
+<p>You need either a built <code dir="auto">journal-sdk</code> binary from <code dir="auto">sync-journal</code> or Docker access to run <code dir="auto">ghcr.io/sandialabs/sync-journal/journal-sdk</code>, and you need a POSIX shell environment.</p>
+<p>Run with local binary:</p>
+<div class="expressive-code"><link rel="stylesheet" href="/_astro/ec.v4551.css"><script type="module" src="/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-records/tests</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">./test.sh</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/journal-sdk</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-records/tests./test.sh /absolute/path/to/journal-sdk"><div></div></button></div></figure></div>
+<p>Run with Docker:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-records/tests</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">docker</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">pull</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">ghcr.io/sandialabs/sync-journal/journal-sdk</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">./test.sh</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">docker run ghcr.io/sandialabs/sync-journal/journal-sdk</span><span style="--0:#D9F5DD;--1:#111111">"</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-records/testsdocker pull ghcr.io/sandialabs/sync-journal/journal-sdk./test.sh &#x22;docker run ghcr.io/sandialabs/sync-journal/journal-sdk&#x22;"><div></div></button></div></figure></div>
+<p>These tests validate class behavior and cross-journal message scripts in a repeatable sequence.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="service-stack-smoke-tests">Service Stack Smoke Tests</h3><a class="sl-anchor-link" href="#service-stack-smoke-tests"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Service Stack Smoke Tests”</span></a></div>
+<p>Use <code dir="auto">sync-services/tests</code> when you need to validate the integrated runtime plus the primary operator surfaces:</p>
+<ul>
+<li><code dir="auto">/explorer</code></li>
+<li><code dir="auto">/workbench</code></li>
+<li><code dir="auto">/docs</code></li>
+<li><code dir="auto">/api/v1/...</code></li>
+<li>the SMB-backed file-system projection</li>
+</ul>
+<p>Prerequisites:</p>
+<p>You need Docker Engine with the <code dir="auto">docker compose</code> plugin and <code dir="auto">curl</code> for route and API checks.</p>
+<p>Run interactive stack:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-services</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">SECRET</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">password</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">PORT</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">8192</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">./tests/local-compose.sh</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">up</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-servicesSECRET=password PORT=8192 ./tests/local-compose.sh up"><div></div></button></div></figure></div>
+<p>Run automated health/smoke checks:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-services</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">./tests/local-compose.sh</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">smoke</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-services./tests/local-compose.sh smoke"><div></div></button></div></figure></div>
+<p>Optional local Lisp override (to test in-progress local bootstrap code):</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-services</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">LOCAL_LISP_DIRECTORY</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/lisp</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">./tests/local-compose.sh</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">smoke</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-servicesLOCAL_LISP_DIRECTORY=/absolute/path/to/lisp ./tests/local-compose.sh smoke"><div></div></button></div></figure></div>
+<p>The smoke script verifies route readiness, key API behavior (for example <code dir="auto">size</code> and authenticated <code dir="auto">configuration</code> responses), and the compose-integrated file-system service.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="service-level-tests">Service-Level Tests</h3><a class="sl-anchor-link" href="#service-level-tests"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Service-Level Tests”</span></a></div>
+<p><code dir="auto">sync-services/services/explorer</code> and <code dir="auto">sync-services/services/workbench</code> include client-side unit tests, and <code dir="auto">sync-services/services/file-system</code> includes .NET contract tests for filesystem projection behavior.</p>
+<p>Prerequisites:</p>
+<p>You need Node.js 20+ and npm to run the Explorer and Workbench unit test suites.</p>
+<p>Run tests:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-services/services/explorer</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">npm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">npm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">test</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-services/services/explorernpm installnpm test"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-services/services/workbench</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">npm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">npm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">test</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-services/services/workbenchnpm installnpm test"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-services/services/file-system</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">dotnet</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">test</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-services/services/file-systemdotnet test tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="stress-testing">Stress Testing</h3><a class="sl-anchor-link" href="#stress-testing"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Stress Testing”</span></a></div>
+<p>Use <code dir="auto">sync-analysis/locust</code> for HTTP load generation against gateway general endpoints.</p>
+<p>Prerequisites:</p>
+<p>You need a running gateway endpoint (typically from <code dir="auto">sync-services</code>), Python 3 with <code dir="auto">pip</code> and Locust dependencies from <code dir="auto">requirements.txt</code>, and a <code dir="auto">SECRET</code> environment variable that matches server configuration.</p>
+<p>Install and run:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-analysis/locust</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-m</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">venv</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">.venv</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">.</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">.venv/bin/activate</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">pip</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-r</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">requirements.txt</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">SECRET</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">pass</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">locust</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--host=http://localhost:8192</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-analysis/locustpython3 -m venv .venv. .venv/bin/activatepip install -r requirements.txtSECRET=pass locust --host=http://localhost:8192"><div></div></button></div></figure></div>
+<p>Headless example:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-analysis/locust</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">.</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">.venv/bin/activate</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">SECRET</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">pass</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">locust</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--host=http://localhost:8192</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--users=10</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--spawn-rate=2</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--run-time=60s</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--headless</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-analysis/locust. .venv/bin/activateSECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="multi-node-compose-testing">Multi-Node Compose Testing</h3><a class="sl-anchor-link" href="#multi-node-compose-testing"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Multi-Node Compose Testing”</span></a></div>
+<p>Use <code dir="auto">sync-analysis/compose/social-agent-network</code> when you want a local multi-node network with one full <code dir="auto">sync-services</code> stack and one social agent per node, without using FIREWHEEL.</p>
+<p>Prerequisites:</p>
+<p>You need Docker Engine with the <code dir="auto">docker compose</code> plugin, Python 3, and <code dir="auto">PyYAML</code> available in the environment where you run the generator.</p>
+<p>Generate the stack:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/sync-analysis/compose/social-agent-network</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">SYNC_SERVICES_GENERAL_COMPOSE</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/sync-services/compose/general/docker-compose.yml</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">\</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">python3 </span><span style="--0:#ECC48D;--1:#3B61B0">generate.py</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /absolute/path/to/sync-analysis/compose/social-agent-networkSYNC_SERVICES_GENERAL_COMPOSE=/absolute/path/to/sync-services/compose/general/docker-compose.yml \python3 generate.py"><div></div></button></div></figure></div>
+<p>Run it:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">docker</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">compose</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">up</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="docker compose up"><div></div></button></div></figure></div>
+<p>Generator defaults:</p>
+<ul>
+<li><code dir="auto">NODE_COUNT=4</code></li>
+<li><code dir="auto">SECRET=pass</code></li>
+<li><code dir="auto">CONNECTIVITY=2</code></li>
+<li><code dir="auto">PERIOD=2</code></li>
+<li><code dir="auto">WINDOW=1024</code></li>
+<li><code dir="auto">SIZE=32</code></li>
+<li><code dir="auto">ACTIVITY=0</code></li>
+<li><code dir="auto">WORDS=8</code></li>
+</ul>
+<p>Network model:</p>
+<ul>
+<li>each node gets its own <code dir="auto">private-&#x3C;n></code> network</li>
+<li>all routers and journals join a shared <code dir="auto">public</code> network</li>
+<li>routers remain the named HTTP boundary between nodes</li>
+<li>file-system remains the SMB boundary per node</li>
+<li>social agents live on <code dir="auto">public</code> and talk through routers</li>
+</ul>
+<p>Generated topology artifacts:</p>
+<ul>
+<li><code dir="auto">docker-compose.yml</code></li>
+<li><code dir="auto">peers.json</code></li>
+<li><code dir="auto">metrics/social-agent-*/</code></li>
+<li><code dir="auto">results/social-agent-*/benchmark.json</code></li>
+<li><code dir="auto">results/network-benchmark.json</code> when <code dir="auto">aggregate_results.py</code> is running</li>
+</ul>
+<p><code dir="auto">peers.json</code> uses:</p>
+<ul>
+<li><code dir="auto">nodes</code>: journal-name to router-host mapping</li>
+<li><code dir="auto">edges</code>: deterministic outgoing peer adjacency using the same <code dir="auto">random.seed(0)</code> and bounded-degree sampling as FIREWHEEL</li>
+</ul>
+<p>Port allocation:</p>
+<ul>
+<li>router HTTP starts at <code dir="auto">8192</code> and increments by node index</li>
+<li>SMB uses <code dir="auto">445</code> for node <code dir="auto">0</code>, then <code dir="auto">1445</code>, <code dir="auto">1446</code>, and so on</li>
+</ul>
+<p>Metrics output:</p>
+<ul>
+<li>each social agent writes Prometheus textfile metrics into its own host-mounted directory under <code dir="auto">metrics/</code></li>
+<li>this preserves the current FIREWHEEL-style agent metric output path for local compose runs without adding a full monitoring stack yet</li>
+</ul>
+<p>Benchmark output:</p>
+<ul>
+<li>each social agent also writes a rolling JSON snapshot to <code dir="auto">results/social-agent-*/benchmark.json</code></li>
+<li>these files are the simplest place to start for end-to-end throughput benchmarking, especially in serial unpaced mode with <code dir="auto">ACTIVITY=0</code></li>
+<li>run <code dir="auto">python3 aggregate_results.py</code> in the harness directory to maintain <code dir="auto">results/network-benchmark.json</code> as a cluster-wide aggregate snapshot</li>
+</ul>
+<p>For local testing of an unpublished social-agent image, build a local tag and override it during generation:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/sync-analysis</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">docker</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">build</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-t</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">social-agent:dev</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-f</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">docker/social-agent/Dockerfile</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">.</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /absolute/path/to/sync-analysisdocker build -t social-agent:dev -f docker/social-agent/Dockerfile ."><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/sync-analysis/compose/social-agent-network</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">SYNC_SERVICES_GENERAL_COMPOSE</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">/absolute/path/to/sync-services/compose/general/docker-compose.yml</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">\</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">IMAGE_OVERRIDE_SOCIAL_AGENT=social-agent:dev </span><span style="--0:#F78C6C;--1:#AA0982">\</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">python3 </span><span style="--0:#ECC48D;--1:#3B61B0">generate.py</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">docker</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">compose</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">up</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /absolute/path/to/sync-analysis/compose/social-agent-networkSYNC_SERVICES_GENERAL_COMPOSE=/absolute/path/to/sync-services/compose/general/docker-compose.yml \IMAGE_OVERRIDE_SOCIAL_AGENT=social-agent:dev \python3 generate.pydocker compose up"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="network-emulation">Network Emulation</h3><a class="sl-anchor-link" href="#network-emulation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Network Emulation”</span></a></div>
+<p>Use <code dir="auto">sync-analysis/firewheel</code> for topology-level distributed simulation across journals, agents, and monitoring components.</p>
+<p>Prerequisites:</p>
+<p>You need the FIREWHEEL framework installed and configured, Docker available on the host, and enough host resources for multi-node simulation workloads.</p>
+<p>Example experiment:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/code/sync-analysis/firewheel</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">firewheel</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">experiment</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-r</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">synchronic_web.ledger_journal:4:2</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">synchronic_web.social_agent:4:32:2:8</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">synchronic_web.network_monitor</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">control_network</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">minimega.launch</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd /code/sync-analysis/firewheelfirewheel experiment -r synchronic_web.ledger_journal:4:2 synchronic_web.social_agent:4:32:2:8 synchronic_web.network_monitor control_network minimega.launch"><div></div></button></div></figure></div>
+<p>This mode is best for validating emergent behavior, peer dynamics, and monitoring instrumentation under realistic network layouts.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="guidance">Guidance</h2><a class="sl-anchor-link" href="#guidance"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Guidance”</span></a></div>
+<p>This section captures conventions and failure patterns that are useful during day-to-day implementation and review work.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="style-guide">Style Guide</h3><a class="sl-anchor-link" href="#style-guide"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Style Guide”</span></a></div>
+<p>Recommended conventions used across current class modules:</p>
+<ul>
+<li>prefer <code dir="auto">(object 'method)</code> style to reduce namespace pollution</li>
+<li>use <code dir="auto">*variable*</code> names for special/global runtime variables</li>
+<li>use <code dir="auto">~name</code> for internal/helper methods and hidden fields</li>
+<li>use association lists for web-facing calls to keep JSON conversion predictable</li>
+<li>keep code in left node and mutable state in right node</li>
+</ul>
+<p>Following these conventions substantially improves maintainability when multiple contributors are updating class logic concurrently.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="gotchas">Gotchas</h3><a class="sl-anchor-link" href="#gotchas"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Gotchas”</span></a></div>
+<p>Common pitfalls in this stack:</p>
+<ul>
+<li>read remote moving state -> wait on network -> mutate local state based on stale assumptions</li>
+<li>mutating a child object does not automatically reattach it into its parent container; write it back explicitly</li>
+<li>broad <code dir="auto">*eval*</code>/<code dir="auto">*call*</code> usage can bypass intended API boundaries; prefer narrow method-level updates where possible</li>
+</ul>
+<p>When possible, add targeted assertions around state digests or path expectations to detect these issues early during development.</p> </div> <footer class="sl-flex astro-3yyafb3n"> <div class="meta sl-flex astro-3yyafb3n">   </div> <div class="pagination-links print:hidden astro-u2l5gyhi" dir="ltr"> <a href="/operation/" rel="prev" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg> <span class="astro-u2l5gyhi"> Previous <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Operation</span> </span> </a> <a href="/research/" rel="next" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg> <span class="astro-u2l5gyhi"> Next <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Research</span> </span> </a> </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>

@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Create a flag for verifying installation
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+INSTALL_FLAG=$SCRIPT_DIR/.synchronic_web.general_journal.installed
+
+#######################################################
+# Checking if this script has already been complete.
+#######################################################
+function check_flag() {
+    if [[ -f "$INSTALL_FLAG" ]]; then
+        echo >&2 "synchronic_web.general_journal is already installed!"
+        exit 117;  # Structure needs cleaning
+    fi
+}
+
+#######################################################
+# A function to help users clean up a partial installation
+# in the event of an error.
+#######################################################
+function cleanup() {
+    echo "Cleaning up synchronic_web.general_journal install"
+    rm -rf $INSTALL_FLAG
+    exit 1
+}
+trap cleanup ERR
+
+# Start to run the script
+
+# Ensure we only complete the script once
+check_flag
+
+rm sync-services -rf
+git clone https://github.com/sandialabs/sync-services.git
+
+# Pull latest updates from repo
+COMPOSE=sync-services/compose/general/docker-compose.yml
+
+mkdir general-images
+SECRET=/ docker compose -f $COMPOSE pull
+SECRET=/ docker compose -f $COMPOSE build
+SECRET=/ docker compose -f $COMPOSE config --images | while read -r image; do
+    docker save -o "general-images/$( echo $image | sha256sum | cut -d " " -f1).tar" $image;
+done
+
+cp -r sync-services/compose/general general-compose
+rm vm_resources/general-compose.tar -rf
+rm vm_resources/general-images.tar -rf
+tar -cf vm_resources/general-compose.tar general-compose
+tar -cf vm_resources/general-images.tar general-images
+
+rm general-compose -rf
+rm general-images -rf
+rm sync-services -rf
+
+# Set the flag to notify of successful completion
+touch $INSTALL_FLAG

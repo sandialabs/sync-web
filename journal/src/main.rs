@@ -1,0 +1,211 @@
+use journal_sdk::{Config, JOURNAL};
+use log::info;
+use rocket::config::Config as RocketConfig;
+use rocket::data::{Limits, ToByteUnit};
+use rocket::response::content::{RawHtml, RawText};
+use rocket::serde::json::Json;
+use rocket::{get, post, routes};
+use serde_json::Value;
+use std::net::{IpAddr, Ipv6Addr};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const MICRO: f64 = 1000000.0;
+
+const INDEX_HTML: &str = r#"<!DOCTYPE html>
+<html>
+    <head>
+ <h2>Journal SDK Home</h2>
+    </head>
+    <body style="padding: 0 20px; font-family: 'Consolas'">
+ <ul>
+     <li><a href="/interface">Scheme Interface</a></li>
+     <li><a href="/interface/json">JSON Interface</a></li>
+     <li><a href="/interface/scheme-to-json">Scheme to JSON</a></li>
+     <li><a href="/interface/json-to-scheme">JSON to Scheme</a></li>
+ </ul>
+    </body>
+</html>
+"#;
+
+const INTERFACE_HTML: &str = r#"<!DOCTYPE html>
+<html>
+    <head>
+ <h2>__TITLE__</h2>
+    </head>
+    <body style="padding: 0 20px; font-family: 'Consolas'">
+ <textarea id="query" rows="8" cols="128" spellcheck="false"></textarea>
+ </br>
+ </br>
+ <button type="button" onclick="customSubmit()">Evaluate</button>
+ </br>
+ <ul id="history">
+ </ul>
+ <script>
+     function customSubmit() {
+  let query = document.getElementById('query').value;
+  fetch('', {
+      method: 'POST',
+      __HEADERS__
+      body: query,
+  }).then(response => {
+      return response.text();
+  }).catch(error => {
+      return "Error: uh oh, not sure what happened";
+  }).then(result => {
+      let history = document.getElementById('history');
+      history.innerHTML = `<li style="list-style: '&#8594; '; color: green">
+   <span style="color: gray">
+       ${query.slice(0, 512)}
+       ${query.length > 512 ? " ..." : ""}
+   </span>
+      </li>
+      <li style="list-style: '  '">
+          ${result.replace(/</g, '&lt').replace(/>/g, '&gt')}
+      </li>` + history.innerHTML;
+  })
+     }
+ </script>
+    </body>
+</html>
+"#;
+
+#[get("/")]
+async fn index() -> RawHtml<String> {
+    RawHtml(String::from(INDEX_HTML))
+}
+
+#[get("/interface", format = "text/html")]
+async fn inform_lisp() -> RawHtml<String> {
+    RawHtml(
+        INTERFACE_HTML
+            .replace("__TITLE__", "Scheme Interface")
+            .replace("__HEADERS__", ""),
+    )
+}
+
+#[post("/interface", data = "<query>", rank = 1)]
+async fn evaluate_lisp(query: &str) -> String {
+    JOURNAL.evaluate(query)
+}
+
+#[get("/interface/scheme-to-json", format = "text/html")]
+async fn inform_scheme_to_json() -> RawHtml<String> {
+    RawHtml(
+        INTERFACE_HTML
+            .replace("__TITLE__", "Scheme to JSON")
+            .replace("__HEADERS__", ""),
+    )
+}
+
+#[post("/interface/scheme-to-json", data = "<query>", rank = 1)]
+async fn scheme_to_json(query: &str) -> Json<Value> {
+    let result = JOURNAL.scheme_to_json(query);
+    Json(result)
+}
+
+#[get("/interface/json", format = "text/html")]
+async fn inform_json() -> RawHtml<String> {
+    RawHtml(
+        INTERFACE_HTML
+            .replace("__TITLE__", "JSON Interface")
+            .replace(
+                "__HEADERS__",
+                "headers: { 'Content-Type': 'application/json' },",
+            ),
+    )
+}
+
+#[post("/interface/json", data = "<query>", format = "json", rank = 1)]
+async fn evaluate_json(query: Json<Value>) -> Json<Value> {
+    let result = JOURNAL.evaluate_json(query.into_inner());
+    Json(result)
+}
+
+#[get("/interface/json-to-scheme", format = "text/html")]
+async fn inform_json_to_scheme() -> RawHtml<String> {
+    RawHtml(INTERFACE_HTML.replace("__TITLE__", "JSON to Scheme").replace(
+        "__HEADERS__",
+        "headers: { 'Content-Type': 'application/json' },",
+    ))
+}
+
+#[post("/interface/json-to-scheme", data = "<query>", format = "json", rank = 1)]
+async fn json_to_scheme(query: Json<Value>) -> RawText<String> {
+    RawText(JOURNAL.json_to_scheme(query.into_inner()))
+}
+
+#[rocket::main]
+async fn main() {
+    let config = Config::new();
+
+    env_logger::init();
+
+    if &config.boot != "" {
+        let result = JOURNAL.evaluate(&config.boot);
+        info!("Boot: {}", result);
+    }
+
+    if &config.evaluate != "" {
+        let result = JOURNAL.evaluate(&config.evaluate);
+        println!("{}", result);
+        return;
+    }
+
+    let mut rocket_config = RocketConfig::default();
+    rocket_config.port = config.port;
+    rocket_config.address = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0));
+    rocket_config.limits = Limits::new()
+        .limit("string", 64_i32.mebibytes())
+        .limit("json", 64_i32.mebibytes());
+
+    if config.step != "" {
+        tokio::spawn(async move {
+            let mut step = 0;
+            let start = ((SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Failed to get system time")
+                .as_micros() as f64
+                / (config.period * MICRO))
+                .ceil()
+                * (config.period * MICRO)) as u128;
+
+            loop {
+                let until = start + step * (config.period * MICRO) as u128;
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Failed to get system time")
+                    .as_micros();
+                if now < until {
+                    tokio::time::sleep(Duration::from_micros(
+                        (until - now)
+                            .try_into()
+                            .expect("Failed to convert duration"),
+                    ))
+                    .await;
+                }
+                let result = JOURNAL.evaluate(&config.step);
+                info!("Step ({:.6}): {}", until as f64 / MICRO, result);
+                step += 1;
+            }
+        });
+    }
+
+    let _ = rocket::build()
+        .mount(
+            "/",
+            routes![
+                index,
+                inform_lisp,
+                evaluate_lisp,
+                inform_scheme_to_json,
+                scheme_to_json,
+                inform_json,
+                evaluate_json,
+                inform_json_to_scheme,
+                json_to_scheme
+            ],
+        )
+        .configure(rocket_config)
+        .launch()
+        .await;
+}

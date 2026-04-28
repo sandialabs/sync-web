@@ -1,0 +1,17 @@
+attributes:
+  depends:
+  - topology
+  precedes: []
+  provides: []
+model_component_objects: model_component_objects.py
+model_components:
+  depends:
+    - synchronic_web.general_journal
+    - base_objects
+    - generic_vm_objects
+    - utilities.tools
+  precedes: []
+name: synchronic_web.social_agent
+plugin: plugin.py
+vm_resources:
+- vm_resources/*.tar
