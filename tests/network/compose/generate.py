@@ -20,13 +20,9 @@ HTTP_ONLY_KEY = SCRIPT_DIR / "http-only.key"
 ACME_DIR = SCRIPT_DIR / "acme-challenge"
 METRICS_DIR = SCRIPT_DIR / "metrics"
 RESULTS_DIR = SCRIPT_DIR / "results"
-SOCIAL_AGENT_VERSION = (
-    SCRIPT_DIR.parents[1]
-    / "firewheel"
-    / "model-components"
-    / "social-agent"
-    / "version.txt"
-).read_text(encoding="utf-8").strip()
+ROOT_DIR = SCRIPT_DIR.parents[2]
+SOCIAL_AGENT_VERSION = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
+DEFAULT_GENERAL_COMPOSE = str(ROOT_DIR / "deploy" / "compose" / "general" / "compose.yaml")
 
 HTTP_PORT_BASE = 8192
 SMB_PORT_BASE = 1445
@@ -243,7 +239,7 @@ def make_aggregate_results_service():
 
 
 def main():
-    base_compose_path = Path(env_required("SYNC_SERVICES_GENERAL_COMPOSE")).resolve()
+    base_compose_path = Path(env_optional("SYNC_SERVICES_GENERAL_COMPOSE", DEFAULT_GENERAL_COMPOSE)).resolve()
     node_count = env_int("NODE_COUNT", DEFAULT_NODE_COUNT)
     if node_count <= 0:
         raise SystemExit("NODE_COUNT must be greater than zero")

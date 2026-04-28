@@ -14,31 +14,9 @@ DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-social-agent-network}"
 export COMPOSE_PROJECT_NAME
 
-require_dir() {
-    name="$1"
-    value="${2:-}"
-    if [ -z "$value" ]; then
-        echo "Environment variable $name is required" >&2
-        exit 1
-    fi
-    if [ ! -d "$value" ]; then
-        echo "$name must point to an existing directory: $value" >&2
-        exit 1
-    fi
-    (CDPATH= cd -- "$value" && pwd -P)
-}
-
-SYNC_SERVICES_DIR="$(require_dir SYNC_SERVICES "${SYNC_SERVICES:-}")"
-SYNC_JOURNAL_DIR="$(require_dir SYNC_JOURNAL "${SYNC_JOURNAL:-}")"
-SYNC_RECORDS_DIR="$(require_dir SYNC_RECORDS "${SYNC_RECORDS:-}")"
-SYNC_RECORDS_LISP_DIR="$SYNC_RECORDS_DIR/lisp"
-if [ ! -d "$SYNC_RECORDS_LISP_DIR" ]; then
-    echo "Expected Lisp directory at $SYNC_RECORDS_LISP_DIR" >&2
-    exit 1
-fi
-SYNC_SERVICES_GENERAL_COMPOSE="$SYNC_SERVICES_DIR/compose/general/docker-compose.yml"
-if [ ! -f "$SYNC_SERVICES_GENERAL_COMPOSE" ]; then
-    echo "Expected compose file at $SYNC_SERVICES_GENERAL_COMPOSE" >&2
+GENERAL_COMPOSE_FILE="$ROOT_DIR/deploy/compose/general/compose.yaml"
+if [ ! -f "$GENERAL_COMPOSE_FILE" ]; then
+    echo "Expected compose file at $GENERAL_COMPOSE_FILE" >&2
     exit 1
 fi
 
@@ -90,7 +68,7 @@ build_social_agent() {
 }
 
 build_journal_sdk() {
-    echo "Building $JOURNAL_REMOTE_TAG from $SYNC_JOURNAL_DIR ..."
+    echo "Building $JOURNAL_REMOTE_TAG ..."
     if docker buildx version >/dev/null 2>&1; then
         if [ -n "$DOCKER_PLATFORM" ]; then
             docker buildx build \
@@ -98,13 +76,13 @@ build_journal_sdk() {
                 --platform "$DOCKER_PLATFORM" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$JOURNAL_REMOTE_TAG" \
-                "$SYNC_JOURNAL_DIR"
+                "$ROOT_DIR/journal"
         else
             docker buildx build \
                 --load \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$JOURNAL_REMOTE_TAG" \
-                "$SYNC_JOURNAL_DIR"
+                "$ROOT_DIR/journal"
         fi
     else
         if [ -n "$DOCKER_PLATFORM" ]; then
@@ -112,12 +90,12 @@ build_journal_sdk() {
                 --platform "$DOCKER_PLATFORM" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$JOURNAL_REMOTE_TAG" \
-                "$SYNC_JOURNAL_DIR"
+                "$ROOT_DIR/journal"
         else
             docker build \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$JOURNAL_REMOTE_TAG" \
-                "$SYNC_JOURNAL_DIR"
+                "$ROOT_DIR/journal"
         fi
     fi
 }
@@ -133,7 +111,7 @@ build_local_stack() {
 generate_network() {
     cd "$SCRIPT_DIR"
     IMAGE_OVERRIDE_SOCIAL_AGENT="$SOCIAL_AGENT_LOCAL_TAG" \
-    SYNC_SERVICES_GENERAL_COMPOSE="$SYNC_SERVICES_GENERAL_COMPOSE" \
+    SYNC_SERVICES_GENERAL_COMPOSE="$GENERAL_COMPOSE_FILE" \
     COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
     python3 generate.py
 }

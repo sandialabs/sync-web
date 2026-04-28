@@ -1,6 +1,6 @@
 # Synchronic Web Records
 
-This repository contains reusable record artifacts, primarily Lisp/Scheme modules and tests, for use with the [Synchronic Web Journal SDK](https://github.com/sandialabs/sync-journal). The active modules here provide the standard object system, storage structures, ledger logic, and authenticated interface layer used by the current sync-record stack.
+This directory contains reusable record artifacts, primarily Lisp/Scheme modules and tests, for use with the Synchronic Web Journal SDK (`journal/`). The active modules here provide the standard object system, storage structures, ledger logic, and authenticated interface layer used by the current sync-record stack.
 
 ## Contents
 
@@ -21,7 +21,7 @@ These Scheme modules are intended to be loaded into a running Synchronic Web Jou
 ### Example: Using with the Journal SDK
 
 1. **Build and run the Journal SDK**  
-   See the [sync-journal README](https://github.com/sandialabs/sync-journal) for build instructions.
+   See `journal/README.md` for build instructions.
 
 2. **Load record modules**  
    You can load the provided Scheme files into the journal using the web interface or by passing them as arguments to the SDK. In practice, `interface.scm` is the entry point that installs and wires together the other active modules.

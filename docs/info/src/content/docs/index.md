@@ -44,17 +44,20 @@ This topology flexibility is useful in real systems where trust boundaries and c
 
 This section links to the primary repositories and live endpoints that developers and operators use most often.
 
-### Software Repositories
+### Source Repository
 
-All official resources are found in the following public repositories:
+All components live in [sandialabs/sync-web](https://github.com/sandialabs/sync-web):
 
-1. [sync-web](https://github.com/sandialabs/sync-web): documentation hub and project entry point.
-2. [sync-journal](https://github.com/sandialabs/sync-journal): Rust runtime, HTTP interface, evaluator extensions, persistence.
-3. [sync-records](https://github.com/sandialabs/sync-records): Lisp class logic (`root`, `standard`, `tree`, `chain`, `ledger`, `interface`).
-4. [sync-services](https://github.com/sandialabs/sync-services): compose deployments and web services (`interface`, `gateway`, `explorer`, `workbench`, `file-system`).
-5. [sync-analysis](https://github.com/sandialabs/sync-analysis): load testing and network/simulation assets.
+| Directory | Description |
+|---|---|
+| `journal/` | Rust runtime, HTTP interface, evaluator extensions, persistence |
+| `records/` | Lisp class logic (`root`, `standard`, `tree`, `chain`, `ledger`, `interface`) |
+| `services/` | Web services (`gateway`, `explorer`, `workbench`, `file-system`, `router`) |
+| `deploy/` | Docker Compose deployment for a single-node stack |
+| `tests/` | Smoke, load, and multi-node network tests |
+| `docs/` | This documentation site |
 
-All repositories are open source and include licensing metadata in-repo (`LICENSE` files where applicable), with Sandia National Laboratories authorship and stewardship.
+The project is open source under the MIT license with Sandia National Laboratories authorship and stewardship.
 
 ### Live Nodes
 

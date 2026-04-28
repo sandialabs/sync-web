@@ -1,6 +1,6 @@
 # The Synchronic Web
 
-The Synchronic Web is a global infrastructure for data assurance, enabling anyone to cryptographically and temporally notarize information. By publishing data to the Synchronic Web, creators and organizations can irrefutably prove the existence and integrity of their data at a specific points in time relative to their trusted anchors. This system supports strong notions of shared global state, provenance, and verifiable history, making it useful for public transparency, cybersecurity, digital media, legal records, intellectual property, and more.
+The Synchronic Web is a global infrastructure for data assurance, enabling anyone to cryptographically and temporally notarize information. By publishing data to the Synchronic Web, creators and organizations can irrefutably prove the existence and integrity of their data at a specific point in time relative to their trusted anchors. This system supports strong notions of shared global state, provenance, and verifiable history, making it useful for public transparency, cybersecurity, digital media, legal records, intellectual property, and more.
 
 At its core, the Synchronic Web is powered by distributed programs called journals, which maintain immutable, version-controlled logs (records) and continuously synchronize cryptographic metadata with other journals to achieve global consensus.
 
@@ -10,21 +10,22 @@ Please see the full [documentation](https://sandialabs.github.io/sync-web/) for 
 
 ## Repository Contents
 
-This repository serves as the main entry point and documentation hub for the Synchronic Web project. It contains:
+Everything lives in [sandialabs/sync-web](https://github.com/sandialabs/sync-web):
 
-- **info/**  
-  Documentation, quickstart guides, whitepapers, and additional resources for understanding and using the Synchronic Web.
-- **Quick Links to Core Components:**  
-  - [Journal SDK](https://github.com/sandialabs/sync-journal): Core executable for deploying a Synchronic Web node ("journal").
-  - [Record Logic](https://github.com/sandialabs/sync-records): Lisp/Scheme functions and data structures for configuring journal logic.
-  - [Service Deployments](https://github.com/sandialabs/sync-services): Containerized microservices and Docker Compose networks for deploying Synchronic Web applications, including `gateway`, `explorer`, `workbench`, and the SMB-backed `file-system` projection service.
-  - [Experiment Analysis](https://github.com/sandialabs/sync-analysis): Experiments for analyzing performance and robustness of Synchronic Web networks, including a local `compose/social-agent-network` generator for multi-node social-agent testing.
+| Directory | Description |
+|---|---|
+| `journal/` | Rust journal-sdk: HTTP server, S7 Scheme evaluator, RocksDB persistence |
+| `records/` | Scheme record logic: `root`, `standard`, `tree`, `chain`, `ledger`, `interface` |
+| `services/` | Web services: `gateway`, `router`, `explorer`, `workbench`, `file-system` |
+| `deploy/` | Docker Compose deployment config for a single-node stack |
+| `tests/` | Smoke tests (`api/`), load tests (`load/`), network tests (`network/`) |
+| `docs/` | Documentation site (Astro/Starlight) |
 
-## Testing Surfaces
+## Quickstart
 
-- `sync-services/tests/local-compose.sh smoke` is the quickest single-node service-stack validation path for explorer/workbench/gateway/router/file-system.
-- `sync-analysis/compose/social-agent-network/generate.py` provides a local multi-node test network with one full service cluster and one social agent per node.
-- `sync-web/info/README.md` documents the UI screenshot/testing workflow used when the docs site needs fresh explorer/workbench captures.
+See `deploy/compose/general/README.md` for single-node deployment instructions.
 
+## Testing
 
----
+- `tests/api/local-compose.sh smoke` — single-node full-stack smoke test
+- `tests/network/compose/local-stack.sh up` — multi-node social-agent network

@@ -2,30 +2,42 @@
 
 ## Setup
 
-First, build or otherwise obtain a version of the [journal SDK](https://github.com/sandialabs/sync-journal).
-There are two options for this:
+First, build or otherwise obtain a version of the journal SDK from `journal/` in this repo.
+There are two options:
 
 ### Binary
 
- Build the binary yourself using the instructions on [journal SDK](https://github.com/sandialabs/sync-journal). If successful, make note of the path to binary (e.g., `./target/debug/journal-sdk`)
+Build the binary yourself:
+
+```sh
+cd journal && cargo build --release
+```
+
+The binary will be at `journal/target/release/journal`.
 
 ### Docker
 
-Use the prebuilt Docker container
+Use the prebuilt Docker image:
 
-`$ docker pull ghcr.io/sandialabs/sync-journal/journal-sdk`
+```sh
+docker pull ghcr.io/sandialabs/sync-web/journal-sdk
+```
 
 ## Run Tests
 
-You can now run the test by providing `test.sh` by passing in access to the SDK.
+Pass the journal SDK path or docker invocation to `test.sh`.
 
 ### Binary
 
-`$ ./test.sh <path/to/journal-sdk>`
+```sh
+./test.sh ../journal/target/release/journal
+```
 
 ### Docker
 
-`$ ./test.sh "docker run ghcr.io/sandialabs/sync-journal/journal-sdk"`
+```sh
+./test.sh "docker run ghcr.io/sandialabs/sync-web/journal-sdk"
+```
 
 ## Develop
 
