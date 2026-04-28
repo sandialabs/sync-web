@@ -23,11 +23,7 @@ fi
 VERSION="$(cat "$ROOT_DIR/VERSION")"
 SOCIAL_AGENT_LOCAL_TAG="sync-web/local-social-agent:$VERSION"
 
-CUSTOM_SETUP=""
-if [ -n "$CUSTOM_SETUP_FILE" ] && [ -x "$CUSTOM_SETUP_FILE" ]; then
-    CUSTOM_SETUP_SCRIPT="$("$CUSTOM_SETUP_FILE")"
-    CUSTOM_SETUP="$(printf "%s" "$CUSTOM_SETUP_SCRIPT")"
-fi
+CUSTOM_SETUP="${CUSTOM_SETUP:-}"
 
 build_social_agent() {
     echo "Building $SOCIAL_AGENT_LOCAL_TAG ..."

@@ -98,11 +98,7 @@ on_interrupt() {
 trap cleanup EXIT
 trap on_interrupt INT TERM
 
-CUSTOM_SETUP=""
-if [ -x "$CUSTOM_SETUP_FILE" ]; then
-    CUSTOM_SETUP_SCRIPT="$("$CUSTOM_SETUP_FILE")"
-    CUSTOM_SETUP="$(printf "%s" "$CUSTOM_SETUP_SCRIPT")"
-fi
+CUSTOM_SETUP="${CUSTOM_SETUP:-}"
 
 if [ "$LOCAL_COMPOSE_FORCE_HTTP" = "1" ]; then
     TLS_STUB_DIR="/tmp/sync-services-local-compose"
