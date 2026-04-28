@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 15s
+
+  external_labels:
+    monitor: 'sync-web-monitor'
+
+scrape_configs:
+  - job_name: "journal-monitor"
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets.json
+  - job_name: "agent-monitor"
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/agent_targets.json

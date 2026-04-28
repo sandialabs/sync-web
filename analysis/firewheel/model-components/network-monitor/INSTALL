@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Create a flag for verifying installation
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+INSTALL_FLAG=$SCRIPT_DIR/.synchronic_web.network_monitor.installed
+
+#######################################################
+# Checking if this script has already been complete.
+#######################################################
+function check_flag() {
+    if [[ -f "$INSTALL_FLAG" ]]; then
+        echo >&2 "synchronic_web.network_monitor is already installed!"
+        exit 117;  # Structure needs cleaning
+    fi
+}
+
+#######################################################
+# A function to help users clean up a partial installation
+# in the event of an error.
+#######################################################
+function cleanup() {
+    echo "Cleaning up synchronic_web.network_monitor install"
+    rm -rf $INSTALL_FLAG
+    exit 1
+}
+trap cleanup ERR
+
+# Start to run the script
+
+# Ensure we only complete the script once
+check_flag
+
+# Pull latest updates from repo
+COMPOSE=monitor-compose/docker-compose.yml
+
+mkdir monitor-images
+SECRET=/ docker compose -f $COMPOSE pull
+SECRET=/ docker compose -f $COMPOSE build
+SECRET=/ docker compose -f $COMPOSE config --images | while read -r image; do
+    docker save -o "monitor-images/$( echo $image | sha256sum | cut -d " " -f1).tar" $image;
+done
+
+wget https://github.com/prometheus/node_exporter/releases/download/v1.9.1/node_exporter-1.9.1.linux-amd64.tar.gz
+tar -xf node_exporter-1.9.1.linux-amd64.tar.gz
+mv node_exporter-1.9.1.linux-amd64/node_exporter vm_resources/
+rm node_exporter-1.9.1.linux-amd64.tar.gz node_exporter-1.9.1.linux-amd64 -rf
+
+rm vm_resources/monitor-compose.tar -rf
+rm vm_resources/monitor-images.tar -rf
+tar -cf vm_resources/monitor-compose.tar monitor-compose
+tar -cf vm_resources/monitor-images.tar monitor-images
+
+rm monitor-images -rf
+rm sync-services -rf
+
+# Set the flag to notify of successful completion
+touch $INSTALL_FLAG

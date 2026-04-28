@@ -1,0 +1,18 @@
+attributes:
+  depends:
+  - topology
+  precedes: []
+model_component_objects: model_component_objects.py
+model_components:
+  depends:
+  - linux.ubuntu2204
+  - base_objects
+  - generic_vm_objects
+  - utilities.tools
+  precedes: []
+name: synchronic_web.network_monitor
+plugin: plugin.py
+vm_resources:
+- vm_resources/*.tar
+- vm_resources/node_exporter
+- vm_resources/setup.py
