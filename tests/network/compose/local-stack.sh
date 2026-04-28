@@ -8,7 +8,7 @@ if [ "$MODE" != "build" ] && [ "$MODE" != "generate" ] && [ "$MODE" != "up" ] &&
 fi
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-SYNC_ANALYSIS_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 CUSTOM_SETUP_FILE="${CUSTOM_SETUP_FILE:-}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-social-agent-network}"
@@ -42,24 +42,9 @@ if [ ! -f "$SYNC_SERVICES_GENERAL_COMPOSE" ]; then
     exit 1
 fi
 
-SOCIAL_AGENT_VERSION="$(cat "$SYNC_ANALYSIS_DIR/firewheel/model-components/social-agent/version.txt")"
-SOCIAL_AGENT_LOCAL_TAG="sync-analysis/local-social-agent:$SOCIAL_AGENT_VERSION"
-JOURNAL_SDK_TAG="$(
-    awk '
-        $1 == "FROM" && $2 ~ /^ghcr.io\/sandialabs\/sync-journal\/journal-sdk:/ {
-            split($2, parts, ":");
-            print parts[2];
-            exit;
-        }
-    ' "$SYNC_SERVICES_DIR/compose/general/Dockerfile"
-)"
-
-if [ -z "$JOURNAL_SDK_TAG" ]; then
-    echo "Could not determine journal SDK tag from $SYNC_SERVICES_DIR/compose/general/Dockerfile" >&2
-    exit 1
-fi
-
-JOURNAL_REMOTE_TAG="ghcr.io/sandialabs/sync-journal/journal-sdk:$JOURNAL_SDK_TAG"
+VERSION="$(cat "$ROOT_DIR/VERSION")"
+SOCIAL_AGENT_LOCAL_TAG="sync-web/local-social-agent:$VERSION"
+JOURNAL_REMOTE_TAG="ghcr.io/sandialabs/sync-web/journal-sdk:$VERSION"
 
 CUSTOM_SETUP=""
 if [ -n "$CUSTOM_SETUP_FILE" ] && [ -x "$CUSTOM_SETUP_FILE" ]; then
@@ -74,32 +59,32 @@ build_social_agent() {
             docker buildx build \
                 --load \
                 --platform "$DOCKER_PLATFORM" \
-                -f "$SYNC_ANALYSIS_DIR/docker/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$SYNC_ANALYSIS_DIR"
+                "$ROOT_DIR/tests/common/social-agent"
         else
             docker buildx build \
                 --load \
-                -f "$SYNC_ANALYSIS_DIR/docker/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$SYNC_ANALYSIS_DIR"
+                "$ROOT_DIR/tests/common/social-agent"
         fi
     else
         if [ -n "$DOCKER_PLATFORM" ]; then
             docker build \
                 --platform "$DOCKER_PLATFORM" \
-                -f "$SYNC_ANALYSIS_DIR/docker/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$SYNC_ANALYSIS_DIR"
+                "$ROOT_DIR/tests/common/social-agent"
         else
             docker build \
-                -f "$SYNC_ANALYSIS_DIR/docker/social-agent/Dockerfile" \
+                -f "$ROOT_DIR/tests/common/social-agent/Dockerfile" \
                 --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
                 -t "$SOCIAL_AGENT_LOCAL_TAG" \
-                "$SYNC_ANALYSIS_DIR"
+                "$ROOT_DIR/tests/common/social-agent"
         fi
     fi
 }
@@ -139,10 +124,9 @@ build_journal_sdk() {
 
 build_local_stack() {
     build_journal_sdk
-    LOCAL_LISP_DIRECTORY="$SYNC_RECORDS_LISP_DIR" \
     CUSTOM_SETUP_FILE="$CUSTOM_SETUP_FILE" \
     DOCKER_PLATFORM="$DOCKER_PLATFORM" \
-    "$SYNC_SERVICES_DIR/tests/local-compose.sh" build
+    "$ROOT_DIR/tests/api/local-compose.sh" build
     build_social_agent
 }
 

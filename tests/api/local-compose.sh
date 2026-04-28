@@ -26,26 +26,22 @@ CUSTOM_SETUP_FILE="${CUSTOM_SETUP_FILE:-}"
 
 cleanup_mode="down"
 
-GENERAL_VERSION="$(cat "$ROOT_DIR/deploy/compose/general/version.txt")"
-GATEWAY_VERSION="$(cat "$ROOT_DIR/services/gateway/version.txt")"
-EXPLORER_VERSION="$(cat "$ROOT_DIR/services/explorer/version.txt")"
-WORKBENCH_VERSION="$(cat "$ROOT_DIR/services/workbench/version.txt")"
-ROUTER_VERSION="$(cat "$ROOT_DIR/services/router/version.txt")"
-FILE_SYSTEM_VERSION="$(cat "$ROOT_DIR/services/file-system/version.txt")"
+VERSION="$(cat "$ROOT_DIR/VERSION")"
+SYNC_WEB_VERSION="$VERSION"
 
-GENERAL_REMOTE_TAG="ghcr.io/sandialabs/sync-services/general:$GENERAL_VERSION"
-GATEWAY_REMOTE_TAG="ghcr.io/sandialabs/sync-services/gateway:$GATEWAY_VERSION"
-EXPLORER_REMOTE_TAG="ghcr.io/sandialabs/sync-services/explorer:$EXPLORER_VERSION"
-WORKBENCH_REMOTE_TAG="ghcr.io/sandialabs/sync-services/workbench:$WORKBENCH_VERSION"
-ROUTER_REMOTE_TAG="ghcr.io/sandialabs/sync-services/router:$ROUTER_VERSION"
-FILE_SYSTEM_REMOTE_TAG="ghcr.io/sandialabs/sync-services/file-system:$FILE_SYSTEM_VERSION"
+GENERAL_REMOTE_TAG="ghcr.io/sandialabs/sync-services/general:$VERSION"
+GATEWAY_REMOTE_TAG="ghcr.io/sandialabs/sync-services/gateway:$VERSION"
+EXPLORER_REMOTE_TAG="ghcr.io/sandialabs/sync-services/explorer:$VERSION"
+WORKBENCH_REMOTE_TAG="ghcr.io/sandialabs/sync-services/workbench:$VERSION"
+ROUTER_REMOTE_TAG="ghcr.io/sandialabs/sync-services/router:$VERSION"
+FILE_SYSTEM_REMOTE_TAG="ghcr.io/sandialabs/sync-services/file-system:$VERSION"
 
-GENERAL_LOCAL_TAG="sync-services/local-general:$GENERAL_VERSION"
-GATEWAY_LOCAL_TAG="sync-services/local-gateway:$GATEWAY_VERSION"
-EXPLORER_LOCAL_TAG="sync-services/local-explorer:$EXPLORER_VERSION"
-WORKBENCH_LOCAL_TAG="sync-services/local-workbench:$WORKBENCH_VERSION"
-ROUTER_LOCAL_TAG="sync-services/local-router:$ROUTER_VERSION"
-FILE_SYSTEM_LOCAL_TAG="sync-services/local-file-system:$FILE_SYSTEM_VERSION"
+GENERAL_LOCAL_TAG="sync-web/local-general:$VERSION"
+GATEWAY_LOCAL_TAG="sync-web/local-gateway:$VERSION"
+EXPLORER_LOCAL_TAG="sync-web/local-explorer:$VERSION"
+WORKBENCH_LOCAL_TAG="sync-web/local-workbench:$VERSION"
+ROUTER_LOCAL_TAG="sync-web/local-router:$VERSION"
+FILE_SYSTEM_LOCAL_TAG="sync-web/local-file-system:$VERSION"
 FILE_SYSTEM_IMAGE="${FILE_SYSTEM_IMAGE:-$FILE_SYSTEM_REMOTE_TAG}"
 
 dc() {
@@ -158,7 +154,7 @@ if [ "$MODE" = "build" ]; then
     exit 0
 fi
 
-export SECRET PERIOD WINDOW PORT SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE
+export SECRET PERIOD WINDOW PORT SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
 
 confirm_volume_wipe_if_needed
 echo "Starting from scratch: removing compose stack + volumes..."
