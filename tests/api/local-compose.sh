@@ -7,17 +7,15 @@ if [ "$MODE" != "up" ] && [ "$MODE" != "smoke" ] && [ "$MODE" != "build" ]; then
     exit 1
 fi
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-COMPOSE_DIR="$ROOT_DIR/compose/general"
-COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+ROOT_DIR="$(git -C "$(dirname -- "$0")" rev-parse --show-toplevel)"
+COMPOSE_DIR="$ROOT_DIR/deploy/compose/general"
+COMPOSE_FILE="$COMPOSE_DIR/compose.yaml"
 
 PORT="${PORT:-8192}"
 SMB_PORT="${SMB_PORT:-445}"
 SECRET="${SECRET:-password}"
 PERIOD="${PERIOD:-2}"
 WINDOW="${WINDOW:-1024}"
-SCHEME_HTTP_PORT="${SCHEME_HTTP_PORT:-8765}"
-LOCAL_LISP_DIRECTORY="${LOCAL_LISP_DIRECTORY:-}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 CONNECT_TIMEOUT_SECONDS="${CONNECT_TIMEOUT_SECONDS:-2}"
 REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-5}"
@@ -27,9 +25,8 @@ DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 CUSTOM_SETUP_FILE="${CUSTOM_SETUP_FILE:-}"
 
 cleanup_mode="down"
-server_pid=""
 
-GENERAL_VERSION="$(cat "$ROOT_DIR/compose/general/version.txt")"
+GENERAL_VERSION="$(cat "$ROOT_DIR/deploy/compose/general/version.txt")"
 GATEWAY_VERSION="$(cat "$ROOT_DIR/services/gateway/version.txt")"
 EXPLORER_VERSION="$(cat "$ROOT_DIR/services/explorer/version.txt")"
 WORKBENCH_VERSION="$(cat "$ROOT_DIR/services/workbench/version.txt")"
@@ -50,43 +47,6 @@ WORKBENCH_LOCAL_TAG="sync-services/local-workbench:$WORKBENCH_VERSION"
 ROUTER_LOCAL_TAG="sync-services/local-router:$ROUTER_VERSION"
 FILE_SYSTEM_LOCAL_TAG="sync-services/local-file-system:$FILE_SYSTEM_VERSION"
 FILE_SYSTEM_IMAGE="${FILE_SYSTEM_IMAGE:-$FILE_SYSTEM_REMOTE_TAG}"
-
-resolve_directory() {
-    input_path="$1"
-    if [ -z "$input_path" ]; then
-        return 1
-    fi
-
-    case "$input_path" in
-        /*)
-            candidate="$input_path"
-            ;;
-        *)
-            candidate="$PWD/$input_path"
-            ;;
-    esac
-
-    if [ -d "$candidate" ]; then
-        (CDPATH= cd -- "$candidate" && pwd -P)
-        return 0
-    fi
-
-    return 1
-}
-
-validate_local_lisp_directory() {
-    directory="$1"
-    missing=""
-    for required in root.scm standard.scm log-chain.scm linear-chain.scm tree.scm ledger.scm interface.scm; do
-        if [ ! -f "$directory/$required" ]; then
-            missing="$missing $required"
-        fi
-    done
-    if [ -n "$missing" ]; then
-        echo "Missing required Lisp files in $directory:$missing" >&2
-        exit 1
-    fi
-}
 
 dc() {
     docker compose -f "$COMPOSE_FILE" "$@"
@@ -127,10 +87,6 @@ confirm_volume_wipe_if_needed() {
 
 cleanup() {
     set +e
-    if [ -n "$server_pid" ]; then
-        kill "$server_pid" >/dev/null 2>&1 || true
-        wait "$server_pid" >/dev/null 2>&1 || true
-    fi
     if [ "$cleanup_mode" = "down" ]; then
         dc down -v --remove-orphans >/dev/null 2>&1
     fi
@@ -150,28 +106,6 @@ if [ -x "$CUSTOM_SETUP_FILE" ]; then
     CUSTOM_SETUP="$(printf "%s" "$CUSTOM_SETUP_SCRIPT")"
 fi
 
-LISP_REPOSITORY_ARG=""
-if [ -n "$LOCAL_LISP_DIRECTORY" ]; then
-    if ! LOCAL_LISP_DIRECTORY="$(resolve_directory "$LOCAL_LISP_DIRECTORY")"; then
-        echo "LOCAL_LISP_DIRECTORY does not exist: ${LOCAL_LISP_DIRECTORY}" >&2
-        exit 1
-    fi
-
-    validate_local_lisp_directory "$LOCAL_LISP_DIRECTORY"
-    echo "Using local Lisp directory: $LOCAL_LISP_DIRECTORY"
-
-    echo "Starting temporary local Scheme HTTP server on port $SCHEME_HTTP_PORT..."
-    python3 -m http.server "$SCHEME_HTTP_PORT" --bind 127.0.0.1 --directory "$LOCAL_LISP_DIRECTORY" >/tmp/sync-local-lisp-http.log 2>&1 &
-    server_pid=$!
-    sleep 1
-    if ! kill -0 "$server_pid" >/dev/null 2>&1; then
-        echo "Failed to start local Scheme HTTP server. See /tmp/sync-local-lisp-http.log" >&2
-        exit 1
-    fi
-
-    LISP_REPOSITORY_ARG="http://host.docker.internal:${SCHEME_HTTP_PORT}/"
-fi
-
 if [ "$LOCAL_COMPOSE_FORCE_HTTP" = "1" ]; then
     TLS_STUB_DIR="/tmp/sync-services-local-compose"
     TLS_STUB_CERT="$TLS_STUB_DIR/http-only.crt"
@@ -187,94 +121,30 @@ build_and_retag() {
     context="$1"
     local_tag="$2"
     remote_tag="$3"
-    lisp_repository="${4:-}"
-    build_platform="${5:-$DOCKER_PLATFORM}"
-    no_cache=""
-
-    if [ -n "$lisp_repository" ]; then
-        no_cache="--no-cache"
-    fi
+    build_platform="${4:-$DOCKER_PLATFORM}"
+    dockerfile="${5:-}"
 
     echo "Building $local_tag ..."
+
+    set -- --build-arg "CUSTOM_SETUP=$CUSTOM_SETUP" -t "$local_tag"
+    if [ -n "$build_platform" ]; then
+        set -- --platform "$build_platform" "$@"
+    fi
+    if [ -n "$dockerfile" ]; then
+        set -- -f "$dockerfile" "$@"
+    fi
+
     if docker buildx version >/dev/null 2>&1; then
-        if [ -n "$lisp_repository" ]; then
-            if [ -n "$build_platform" ]; then
-                docker buildx build \
-                    --load \
-                    $no_cache \
-                    --platform "$build_platform" \
-                    --add-host host.docker.internal:host-gateway \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    --build-arg LISP_REPOSITORY="$lisp_repository" \
-                    -t "$local_tag" \
-                    "$context"
-            else
-                docker buildx build \
-                    --load \
-                    $no_cache \
-                    --add-host host.docker.internal:host-gateway \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    --build-arg LISP_REPOSITORY="$lisp_repository" \
-                    -t "$local_tag" \
-                    "$context"
-            fi
-        else
-            if [ -n "$build_platform" ]; then
-                docker buildx build \
-                    --load \
-                    --platform "$build_platform" \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    -t "$local_tag" \
-                    "$context"
-            else
-                docker buildx build \
-                    --load \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    -t "$local_tag" \
-                    "$context"
-            fi
-        fi
+        docker buildx build --load "$@" "$context"
     else
-        if [ -n "$lisp_repository" ]; then
-            if [ -n "$build_platform" ]; then
-                docker build \
-                    $no_cache \
-                    --platform "$build_platform" \
-                    --add-host host.docker.internal:host-gateway \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    --build-arg LISP_REPOSITORY="$lisp_repository" \
-                    -t "$local_tag" \
-                    "$context"
-            else
-                docker build \
-                    $no_cache \
-                    --add-host host.docker.internal:host-gateway \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    --build-arg LISP_REPOSITORY="$lisp_repository" \
-                    -t "$local_tag" \
-                    "$context"
-            fi
-        else
-            if [ -n "$build_platform" ]; then
-                docker build \
-                    --platform "$build_platform" \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    -t "$local_tag" \
-                    "$context"
-            else
-                docker build \
-                    --build-arg CUSTOM_SETUP="$CUSTOM_SETUP" \
-                    -t "$local_tag" \
-                    "$context"
-            fi
-        fi
+        docker build "$@" "$context"
     fi
 
     echo "Tagging $local_tag as $remote_tag ..."
     docker tag "$local_tag" "$remote_tag"
 }
 
-build_and_retag "$COMPOSE_DIR" "$GENERAL_LOCAL_TAG" "$GENERAL_REMOTE_TAG" "$LISP_REPOSITORY_ARG"
+build_and_retag "$ROOT_DIR" "$GENERAL_LOCAL_TAG" "$GENERAL_REMOTE_TAG" "" "$COMPOSE_DIR/Dockerfile"
 build_and_retag "$ROOT_DIR/services/gateway" "$GATEWAY_LOCAL_TAG" "$GATEWAY_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
