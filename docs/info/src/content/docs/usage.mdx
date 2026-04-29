@@ -84,7 +84,7 @@ Typical File System workflow:
 2. Browse `/ledger/state` for current committed content.
 3. Traverse `/ledger/previous/<index>/state` for prior committed states.
 4. Traverse `/ledger/bridge/<name>/...` for recursively bridged ledger state.
-5. Use `/root/pin` for explicit pin and unpin directives on discovered ledger paths.
+5. Use `/control/pin` for explicit pin and unpin directives on discovered ledger paths.
 
 The File System service is best for shell tools, editors, archives, source trees, and other workflows that already expect a hierarchical filesystem.
 
@@ -107,7 +107,7 @@ Filesystem projection overview:
 │           ├── state/
 │           ├── bridge/
 │           └── previous/
-└── root/
+└── control/
     └── pin
 ```
 
@@ -116,7 +116,7 @@ Key semantics:
 - `/stage` is mutable.
 - `/ledger/...` is readable but content-immutable.
 - once you enter any `state/` subtree, remaining path segments are ordinary file and directory names.
-- `/root/pin` is a synthetic UTF-8 root file for pin and unpin directives against discovered `/ledger/...` paths.
+- `/control/pin` is a synthetic UTF-8 file for pin and unpin directives against discovered `/ledger/...` paths.
 
 ## Programmatic API
 
