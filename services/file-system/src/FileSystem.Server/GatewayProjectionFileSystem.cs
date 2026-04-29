@@ -2071,7 +2071,69 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             normalized = normalized.Replace("\\\\", "\\", StringComparison.Ordinal);
         }
 
-        return normalized.Length > 1 ? normalized.TrimEnd('\\') : normalized;
+        if (normalized.Length > 1)
+        {
+            normalized = normalized.TrimEnd('\\');
+        }
+
+        return CanonicalizeProjectedPath(normalized);
+    }
+
+    // Inserts explicit -1 index segments wherever ledger paths rely on the implicit
+    // current-head default, so that /ledger/state and /ledger/-1/state share one cache key.
+    private static string CanonicalizeProjectedPath(string normalized)
+    {
+        var segments = normalized.TrimStart('\\').Split('\\');
+        if (segments.Length < 2 ||
+            !string.Equals(segments[0], "ledger", StringComparison.OrdinalIgnoreCase))
+            return normalized;
+
+        var result = new List<string>(segments.Length + 4) { segments[0] };
+        var cursor = 1;
+        var needsIndex = true;
+
+        while (cursor < segments.Length)
+        {
+            var seg = segments[cursor];
+            var isState = string.Equals(seg, "state", StringComparison.OrdinalIgnoreCase);
+            var isBridge = string.Equals(seg, "bridge", StringComparison.OrdinalIgnoreCase);
+
+            if (needsIndex && (isState || isBridge))
+            {
+                result.Add("-1");
+                needsIndex = false;
+            }
+
+            result.Add(seg);
+
+            if (isState)
+            {
+                for (var i = cursor + 1; i < segments.Length; i++)
+                    result.Add(segments[i]);
+                break;
+            }
+
+            if (isBridge)
+            {
+                cursor++;
+                if (cursor < segments.Length)
+                {
+                    result.Add(segments[cursor]);
+                    needsIndex = true;
+                }
+                cursor++;
+                continue;
+            }
+
+            if (int.TryParse(seg, out _))
+            {
+                needsIndex = false;
+            }
+
+            cursor++;
+        }
+
+        return "\\" + string.Join("\\", result);
     }
 
     private bool CanWriteStagePath(string path)
