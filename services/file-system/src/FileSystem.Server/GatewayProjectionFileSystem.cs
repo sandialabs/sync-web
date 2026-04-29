@@ -27,8 +27,8 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
         _cache = new InMemoryFileSystem($"{name}-cache", isWritablePath: _ => false);
         SeedSyntheticDirectory(@"\stage");
         SeedSyntheticDirectory(@"\ledger");
-        SeedSyntheticDirectory(@"\root");
-        _cache.SeedFile(@"\root\pin", Array.Empty<byte>());
+        SeedSyntheticDirectory(@"\control");
+        _cache.SeedFile(@"\control\pin", Array.Empty<byte>());
     }
 
     public string Name => _name;
@@ -629,15 +629,15 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             case ProjectedPathKind.Root:
                 SeedSyntheticDirectory(@"\stage");
                 SeedSyntheticDirectory(@"\ledger");
-                SeedSyntheticDirectory(@"\root");
+                SeedSyntheticDirectory(@"\control");
                 return;
             case ProjectedPathKind.RootSyntheticRoot:
-                SeedSyntheticDirectory(@"\root");
-                _cache.SeedFile(@"\root\pin", Array.Empty<byte>());
+                SeedSyntheticDirectory(@"\control");
+                _cache.SeedFile(@"\control\pin", Array.Empty<byte>());
                 return;
             case ProjectedPathKind.RootPinFile:
-                SeedSyntheticDirectory(@"\root");
-                _cache.SeedFile(@"\root\pin", Array.Empty<byte>());
+                SeedSyntheticDirectory(@"\control");
+                _cache.SeedFile(@"\control\pin", Array.Empty<byte>());
                 return;
             case ProjectedPathKind.StageSyntheticRoot:
                 SeedSyntheticDirectory(@"\stage");
@@ -1029,8 +1029,8 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
 
     private FileSystemEntry BuildPinRootFileEntry()
     {
-        _cache.SeedFile(@"\root\pin", RenderPinRootFileBytes());
-        return _cache.GetEntry(@"\root\pin");
+        _cache.SeedFile(@"\control\pin", RenderPinRootFileBytes());
+        return _cache.GetEntry(@"\control\pin");
     }
 
     private byte[] RenderPinRootFileBytes()
@@ -1255,21 +1255,21 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
     private InMemoryFileSystem BuildPinRootView(string normalizedRootPath)
     {
         var view = new InMemoryFileSystem($"{_name}-pin-view");
-        view.SeedDirectory(@"\root");
-        view.SeedDirectory(@"\root\pin");
-        view.SeedDirectory(@"\root\pin\ledger");
+        view.SeedDirectory(@"\control");
+        view.SeedDirectory(@"\control\pin");
+        view.SeedDirectory(@"\control\pin\ledger");
 
-        if (string.Equals(normalizedRootPath, @"\root", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalizedRootPath, @"\control", StringComparison.OrdinalIgnoreCase))
         {
             return view;
         }
 
-        if (string.Equals(normalizedRootPath, @"\root\pin", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalizedRootPath, @"\control\pin", StringComparison.OrdinalIgnoreCase))
         {
             return view;
         }
 
-        if (string.Equals(normalizedRootPath, @"\root\pin\ledger", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalizedRootPath, @"\control\pin\ledger", StringComparison.OrdinalIgnoreCase))
         {
             PopulatePinRootDirectoryChildren(view, normalizedRootPath, @"\ledger");
             return view;
@@ -1429,7 +1429,7 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
         foreach (var child in GetMirroredChildren(mirroredDirectoryPath))
         {
             var childMirroredPath = CombinePath(mirroredDirectoryPath, child.Name);
-            var rootChildPath = CombinePath(@"\root\pin", childMirroredPath.TrimStart('\\'));
+            var rootChildPath = CombinePath(@"\control\pin", childMirroredPath.TrimStart('\\'));
             var childInfo = ParsePath(rootChildPath);
             if (childInfo.Kind != ProjectedPathKind.RootPinMirror)
             {
@@ -1937,7 +1937,7 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
                 journal);
         }
 
-        if (string.Equals(segments[0], "root", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(segments[0], "control", StringComparison.OrdinalIgnoreCase))
         {
             if (segments.Length == 1)
             {

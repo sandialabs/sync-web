@@ -903,12 +903,12 @@ public sealed class SymlinkAwareFileStore : INTFileStore
     private static bool IsRootPinFilePath(string path)
     {
         var normalized = NormalizePath(path);
-        return string.Equals(normalized, @"\root\pin", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(normalized, @"\control\pin", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TraceRootPath(string message)
     {
-        if (!message.Contains(@"\root\pin", StringComparison.OrdinalIgnoreCase))
+        if (!message.Contains(@"\control\pin", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

@@ -14,7 +14,7 @@ public sealed class GatewayProjectionFileSystemTests
         var gateway = new RecordingGatewayClient();
         var fileSystem = new GatewayProjectionFileSystem("projection-pin-read", gateway);
 
-        using (var beforeDiscover = fileSystem.OpenFile(@"\root\pin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.None))
+        using (var beforeDiscover = fileSystem.OpenFile(@"\control\pin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.None))
         using (var reader = new StreamReader(beforeDiscover, Encoding.UTF8, leaveOpen: false))
         {
             Assert.Equal(string.Empty, reader.ReadToEnd());
@@ -26,7 +26,7 @@ public sealed class GatewayProjectionFileSystemTests
             _ = reader.ReadToEnd();
         }
 
-        using var afterDiscover = fileSystem.OpenFile(@"\root\pin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.None);
+        using var afterDiscover = fileSystem.OpenFile(@"\control\pin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.None);
         using var afterReader = new StreamReader(afterDiscover, Encoding.UTF8, leaveOpen: false);
         var afterText = afterReader.ReadToEnd();
 
@@ -39,7 +39,7 @@ public sealed class GatewayProjectionFileSystemTests
         var gateway = new RecordingGatewayClient();
         var fileSystem = new GatewayProjectionFileSystem("projection-pin-write", gateway);
 
-        using (var writeStream = fileSystem.OpenFile(@"\root\pin", FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite, FileOptions.None))
+        using (var writeStream = fileSystem.OpenFile(@"\control\pin", FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite, FileOptions.None))
         using (var writer = new StreamWriter(writeStream, new UTF8Encoding(false), 1024, leaveOpen: false))
         {
             writer.WriteLine("pinned /ledger/-1/state/hello.txt");
@@ -50,7 +50,7 @@ public sealed class GatewayProjectionFileSystemTests
         Assert.Equal("""[-1,["*state*","docs"]]""", gateway.LastPinPathJson);
         Assert.Equal("""[-1,["*state*","written.txt"]]""", gateway.LastUnpinPathJson);
 
-        using var readBack = fileSystem.OpenFile(@"\root\pin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.None);
+        using var readBack = fileSystem.OpenFile(@"\control\pin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.None);
         using var reader = new StreamReader(readBack, Encoding.UTF8, leaveOpen: false);
         var rendered = reader.ReadToEnd();
 
@@ -67,7 +67,7 @@ public sealed class GatewayProjectionFileSystemTests
 
         var exception = Assert.Throws<InvalidDataException>(() =>
         {
-            using var invalidStream = fileSystem.OpenFile(@"\root\pin", FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite, FileOptions.None);
+            using var invalidStream = fileSystem.OpenFile(@"\control\pin", FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite, FileOptions.None);
             using var writer = new StreamWriter(invalidStream, new UTF8Encoding(false), 1024, leaveOpen: false);
             writer.WriteLine("pinndded /ledger/-1/state/hello.txt");
         });

@@ -271,7 +271,7 @@ if [ "$elapsed" -ge "$TIMEOUT_SECONDS" ]; then
 fi
 
 fs_root_listing="$(cat /tmp/sync-services-fs-root-ls.log)"
-for required in stage ledger root; do
+for required in stage ledger control; do
     if ! printf "%s" "$fs_root_listing" | grep -q " $required "; then
         echo "FAIL: expected SMB root listing to contain '$required'"
         printf "%s\n" "$fs_root_listing"
