@@ -33,4 +33,4 @@ jobs:
         working-directory: journal
         run: cargo build --release
       - name: Run records tests
-        run: records/tests/test.sh journal/target/release/journal
+        run: records/tests/test.sh journal/target/release/journal-sdk

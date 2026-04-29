@@ -1,6 +1,7 @@
 name: Deploy General
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["deploy/**", "records/**", "journal/**"]
