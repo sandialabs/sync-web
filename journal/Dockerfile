@@ -49,18 +49,18 @@ COPY --from=planner /srv/recipe.json recipe.json
 
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/srv/target \
     cargo chef cook --release --recipe-path recipe.json
 
 # --- Application build ---
 
 FROM chef AS builder
 
+COPY --from=cacher /srv/target target
+
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/srv/target \
     cargo build --release && \
     cp /srv/target/release/journal-sdk /tmp/journal-sdk
 
