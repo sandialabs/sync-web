@@ -81,9 +81,9 @@ Use it when existing tools should interact with Synchronic Web data through ordi
 Typical File System workflow:
 
 1. Mount the share and work in `/stage` for ordinary mutable file operations.
-2. Browse `/ledger/state` for current committed content.
-3. Traverse `/ledger/previous/<index>/state` for prior committed states.
-4. Traverse `/ledger/bridge/<name>/...` for recursively bridged ledger state.
+2. Browse `/ledger/-1/state` for current committed content (`-1` always refers to the current head).
+3. Browse `/ledger/<index>/state` for a specific prior committed snapshot.
+4. Traverse `/ledger/-1/bridge/<name>/state` for a bridged peer's current committed state.
 5. Use `/control/pin` for explicit pin and unpin directives on discovered ledger paths.
 
 The File System service is best for shell tools, editors, archives, source trees, and other workflows that already expect a hierarchical filesystem.
@@ -95,18 +95,18 @@ Filesystem projection overview:
 ├── stage/
 │   └── ...
 ├── ledger/
-│   ├── state/
-│   │   └── ...
-│   ├── previous/
-│   │   └── <index>/
-│   │       ├── state/
-│   │       ├── bridge/
-│   │       └── previous/
-│   └── bridge/
-│       └── <name>/
-│           ├── state/
-│           ├── bridge/
-│           └── previous/
+│   └── <index>/          (-1 = current head; positive integers = historical snapshots)
+│       ├── state/
+│       │   └── ...
+│       └── bridge/
+│           └── <name>/
+│               ├── state/
+│               │   └── ...
+│               ├── bridge/
+│               │   └── ...
+│               └── <index>/
+│                   ├── state/
+│                   └── ...
 └── control/
     └── pin
 ```
