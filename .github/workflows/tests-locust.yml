@@ -1,6 +1,7 @@
 name: Locust Tests
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["tests/load/locust/**"]

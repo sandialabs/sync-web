@@ -1,6 +1,7 @@
 name: Router Service
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["services/router/**"]

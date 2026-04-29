@@ -1,6 +1,7 @@
 name: Records
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["records/**", "journal/**"]

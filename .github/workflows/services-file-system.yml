@@ -1,6 +1,7 @@
 name: File System Service
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["services/file-system/**"]

@@ -1,6 +1,7 @@
 name: Social Agent
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["tests/network/common/social-agent/**"]

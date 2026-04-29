@@ -1,6 +1,7 @@
 name: Journal
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
     paths: ["journal/**"]
