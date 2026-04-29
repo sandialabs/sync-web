@@ -32,6 +32,13 @@ public sealed class SymlinkAwareFileStore : INTFileStore
 
         var normalized = NormalizePath(path);
         TraceRootPath($"CreateFile path={normalized} disposition={createDisposition} access={desiredAccess} options={createOptions}");
+        if (HasNamedStreamPath(normalized))
+        {
+            return IsCreateLikeDisposition(createDisposition)
+                ? NTStatus.STATUS_ACCESS_DENIED
+                : NTStatus.STATUS_OBJECT_NAME_NOT_FOUND;
+        }
+
         if (IsRootPinFilePath(normalized) && IsCreateLikeDisposition(createDisposition))
         {
             try
@@ -1091,6 +1098,24 @@ public sealed class SymlinkAwareFileStore : INTFileStore
             or CreateDisposition.FILE_OPEN_IF
             or CreateDisposition.FILE_OVERWRITE_IF
             or CreateDisposition.FILE_SUPERSEDE;
+    }
+
+    private static bool HasNamedStreamPath(string path)
+    {
+        var normalized = NormalizePath(path);
+        var segments = normalized.Trim('\\')
+            .Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var segment in segments)
+        {
+            if (segment.Contains(':', StringComparison.Ordinal))
+            {
+                // SMB named streams are not modeled by the projected journal filesystem.
+                return true;
+            }
+        }
+
+        return false;
     }
 
 }
