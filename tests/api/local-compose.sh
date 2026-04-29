@@ -22,7 +22,6 @@ REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-5}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$COMPOSE_DIR")}"
 LOCAL_COMPOSE_FORCE_HTTP="${LOCAL_COMPOSE_FORCE_HTTP:-1}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
-CUSTOM_SETUP_FILE="${CUSTOM_SETUP_FILE:-}"
 
 cleanup_mode="down"
 
@@ -132,11 +131,7 @@ build_and_retag() {
         set -- -f "$dockerfile" "$@"
     fi
 
-    if docker buildx version >/dev/null 2>&1; then
-        docker buildx build --load "$@" "$context"
-    else
-        docker build "$@" "$context"
-    fi
+    docker build "$@" "$context"
 
     echo "Tagging $local_tag as $remote_tag ..."
     docker tag "$local_tag" "$remote_tag"

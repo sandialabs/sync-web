@@ -22,7 +22,7 @@ COPY test ./test
 RUN npm run build
 
 FROM build AS test
-RUN node --test --import tsx test/**/*.test.ts
+RUN npm test
 
 FROM node:20-alpine AS runtime
 

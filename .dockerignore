@@ -1,0 +1,4 @@
+.git
+journal/target
+services/*/node_modules
+**/env
