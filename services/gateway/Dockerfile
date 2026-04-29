@@ -18,7 +18,11 @@ RUN npm install
 COPY tsconfig.json ./
 COPY assets ./assets
 COPY src ./src
+COPY test ./test
 RUN npm run build
+
+FROM build AS test
+RUN node --test --import tsx test/**/*.test.ts
 
 FROM node:20-alpine AS runtime
 

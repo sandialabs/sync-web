@@ -15,12 +15,19 @@ RUN set -eu; \
 COPY Directory.Build.props ./
 COPY FileSystem.sln ./
 COPY src/FileSystem.Server/FileSystem.Server.csproj src/FileSystem.Server/
+COPY tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj tests/FileSystem.Server.Tests/
 
-RUN dotnet restore src/FileSystem.Server/FileSystem.Server.csproj
+RUN dotnet restore FileSystem.sln
 
 COPY src ./src
+COPY tests ./tests
 
-RUN dotnet publish src/FileSystem.Server/FileSystem.Server.csproj -c Release -o /app/publish
+RUN dotnet build FileSystem.sln -c Release --no-restore
+RUN dotnet publish src/FileSystem.Server/FileSystem.Server.csproj -c Release --no-build -o /app/publish
+
+FROM build AS test
+
+RUN dotnet test FileSystem.sln -c Release --no-build
 
 FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
 

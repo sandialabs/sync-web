@@ -1,5 +1,4 @@
-# Build stage
-FROM node:20-alpine3.20 AS builder
+FROM node:20-alpine3.20 AS deps
 
 WORKDIR /app
 
@@ -13,23 +12,20 @@ RUN set -eu; \
       rm -f /tmp/custom-setup.sh; \
     fi
 
-# Copy package files
 COPY package*.json ./
-
-# Install dependencies
 RUN npm install
 
-# Copy source code
-COPY . .
+FROM deps AS test
 
-# Run tests
+COPY . .
 RUN npm test -- --watchAll=false --passWithNoTests
 
-# Build the application
+FROM deps AS build
+
+COPY . .
 RUN npm run build
 
-# Production stage
-FROM node:20-alpine3.20
+FROM node:20-alpine3.20 AS runtime
 
 WORKDIR /app
 
@@ -43,13 +39,10 @@ RUN set -eu; \
       rm -f /tmp/custom-setup.sh; \
     fi
 
-# Install serve globally
 RUN npm install -g serve
 
-# Copy built assets from builder stage
-COPY --from=builder /app/build ./build
+COPY --from=build /app/build ./build
 
-# Copy entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

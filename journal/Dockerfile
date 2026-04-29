@@ -64,9 +64,17 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     cargo build --release && \
     cp /srv/target/release/journal-sdk /tmp/journal-sdk
 
+# --- Test ---
+
+FROM builder AS test
+
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    cargo test
+
 # --- Deploy ---
 
-FROM alpine:3.23.3
+FROM alpine:3.23.3 AS runtime
 
 WORKDIR /srv
 ARG CUSTOM_SETUP=""

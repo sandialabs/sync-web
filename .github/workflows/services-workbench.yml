@@ -29,16 +29,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install workbench dependencies
-        working-directory: services/workbench
-        run: npm ci
-      - name: Run workbench tests
-        working-directory: services/workbench
-        run: npm test -- --watchAll=false
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Run unit tests
+        run: docker build --target test services/workbench
       - name: Resolve version
         id: version
         run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
@@ -47,6 +43,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: services/workbench
+          target: runtime
           platforms: linux/amd64
           push: false
           tags: ghcr.io/${{ github.repository }}/workbench:${{ steps.version.outputs.value }}
@@ -55,6 +52,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: services/workbench
+          target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
