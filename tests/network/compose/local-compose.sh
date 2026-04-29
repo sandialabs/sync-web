@@ -9,7 +9,6 @@ fi
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-CUSTOM_SETUP_FILE="${CUSTOM_SETUP_FILE:-}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-social-agent-network}"
 export COMPOSE_PROJECT_NAME
@@ -63,7 +62,7 @@ build_social_agent() {
 }
 
 build_local_stack() {
-    CUSTOM_SETUP_FILE="$CUSTOM_SETUP_FILE" \
+    CUSTOM_SETUP="$CUSTOM_SETUP" \
     DOCKER_PLATFORM="$DOCKER_PLATFORM" \
     "$ROOT_DIR/tests/api/local-compose.sh" build
     build_social_agent
