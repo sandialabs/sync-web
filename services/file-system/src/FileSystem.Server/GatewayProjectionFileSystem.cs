@@ -54,12 +54,12 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             return ExecuteRead(path, () => _cache.GetEntry(normalized));
         }
 
-        return ExecuteRead(path, () =>
+        return ExecuteRead(normalized, () =>
         {
             lock (_gate)
             {
-                EnsurePathMaterialized(path);
-                return _cache.GetEntry(path);
+                EnsurePathMaterialized(normalized);
+                return _cache.GetEntry(normalized);
             }
         });
     }
@@ -302,12 +302,12 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             return ExecuteRead(path, () => _cache.ListEntriesInDirectory(normalized));
         }
 
-        return ExecuteRead(path, () =>
+        return ExecuteRead(normalized, () =>
         {
             lock (_gate)
             {
-                EnsureDirectoryMaterialized(path);
-                return _cache.ListEntriesInDirectory(path)
+                EnsureDirectoryMaterialized(normalized);
+                return _cache.ListEntriesInDirectory(normalized)
                     .Where(entry => !IsDeletedChild(normalized, entry.Name))
                     .ToList();
             }
@@ -321,11 +321,12 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
 
     public bool TryGetSymlink(string path, out SymlinkEntryInfo symlink)
     {
+        var normalized = NormalizePath(path);
         lock (_gate)
         {
             try
             {
-                EnsurePathMaterialized(path);
+                EnsurePathMaterialized(normalized);
             }
             catch
             {
@@ -333,7 +334,7 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
                 return false;
             }
 
-            return _cache.TryGetSymlink(path, out symlink);
+            return _cache.TryGetSymlink(normalized, out symlink);
         }
     }
 
@@ -403,12 +404,12 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             throw CreateReadOnlyPathException(path);
         }
 
-        return ExecuteRead(path, () =>
+        return ExecuteRead(normalized, () =>
         {
             lock (_gate)
             {
-                EnsurePathMaterialized(path);
-                return _cache.OpenFile(path, FileMode.Open, FileAccess.Read, share, options);
+                EnsurePathMaterialized(normalized);
+                return _cache.OpenFile(normalized, FileMode.Open, FileAccess.Read, share, options);
             }
         });
     }
@@ -655,6 +656,11 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
                 MaterializeContentPath(info, normalized);
                 return;
             case ProjectedPathKind.LedgerSyntheticRoot:
+                SeedSyntheticDirectory(normalized);
+                // Seed display stubs so ls /ledger shows state and bridge.
+                // Actual content is fetched lazily via the canonical \ledger\-1\... paths.
+                SeedSyntheticDirectory(CombinePath(normalized, "state"));
+                SeedSyntheticDirectory(CombinePath(normalized, "bridge"));
                 return;
             case ProjectedPathKind.LedgerNodeRoot:
                 SeedChainNode(normalized);
