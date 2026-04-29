@@ -2082,34 +2082,7 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             normalized = normalized.TrimEnd('\\');
         }
 
-        return CanonicalizeProjectedPath(CollapseDotSegments(normalized));
-    }
-
-    private static string CollapseDotSegments(string normalized)
-    {
-        var segments = normalized.Trim('\\')
-            .Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var stack = new List<string>(segments.Length);
-        foreach (var segment in segments)
-        {
-            if (segment == ".")
-            {
-                continue;
-            }
-
-            if (segment == "..")
-            {
-                if (stack.Count > 0)
-                {
-                    stack.RemoveAt(stack.Count - 1);
-                }
-                continue;
-            }
-
-            stack.Add(segment);
-        }
-
-        return stack.Count == 0 ? "\\" : "\\" + string.Join("\\", stack);
+        return CanonicalizeProjectedPath(normalized);
     }
 
     // Inserts explicit -1 index segments wherever ledger paths rely on the implicit

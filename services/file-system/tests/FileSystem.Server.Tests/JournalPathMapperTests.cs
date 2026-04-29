@@ -24,8 +24,6 @@ public sealed class JournalPathMapperTests
 
     [Theory]
     [InlineData(@"\stage\docs\guide.txt", """[["*state*","docs","guide.txt"]]""")]
-    [InlineData(@"\stage\docs\.", """[["*state*","docs"]]""")]
-    [InlineData(@"\stage\docs\..", """[["*state*"]]""")]
     [InlineData(@"\ledger\3\state\archive.txt", """[3,["*state*","archive.txt"]]""")]
     [InlineData(@"\ledger\-1\state\latest.txt", """[-1,["*state*","latest.txt"]]""")]
     [InlineData(@"\ledger\-1\bridge\alice\state\current-remote.txt", """[-1,["*bridge*","alice","chain"],["*state*","current-remote.txt"]]""")]

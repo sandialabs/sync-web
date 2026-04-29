@@ -298,38 +298,6 @@ public static class JournalPathMapper
             normalized = normalized.Replace("\\\\", "\\", StringComparison.Ordinal);
         }
 
-        if (normalized.Length > 1)
-        {
-            normalized = normalized.TrimEnd('\\');
-        }
-
-        return CollapseDotSegments(normalized);
-    }
-
-    private static string CollapseDotSegments(string normalized)
-    {
-        var segments = normalized.Trim('\\')
-            .Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var stack = new List<string>(segments.Length);
-        foreach (var segment in segments)
-        {
-            if (segment == ".")
-            {
-                continue;
-            }
-
-            if (segment == "..")
-            {
-                if (stack.Count > 0)
-                {
-                    stack.RemoveAt(stack.Count - 1);
-                }
-                continue;
-            }
-
-            stack.Add(segment);
-        }
-
-        return stack.Count == 0 ? "\\" : "\\" + string.Join("\\", stack);
+        return normalized.Length > 1 ? normalized.TrimEnd('\\') : normalized;
     }
 }
