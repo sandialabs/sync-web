@@ -10,7 +10,7 @@ import { TabItem, Tabs } from '@astrojs/starlight/components';
 
 This section is for operators running Synchronic Web infrastructure in real environments.
 It covers deployment, service roles, network API behavior, routine operations, and protocol specifications.
-Unless otherwise noted, examples target the `sync-services/compose/general` stack.
+Unless otherwise noted, examples target the `deploy/compose/general` stack.
 
 ## Deployment
 
@@ -30,25 +30,23 @@ Required/important environment variables:
 - `WINDOW` (default `1024`): retention window for unpinned history
 - `TLS_CERT_HOST_PATH` (optional): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (optional): host key file mounted into router
-- `LOCAL_LISP_DIRECTORY` (optional in test scripts): local override path for Lisp class files
-
 Start:
 
 ```bash
-SECRET=password ./tests/local-compose.sh up
+SECRET=password tests/api/local-compose.sh up
 ```
 
 Smoke validation:
 
 ```bash
-./tests/local-compose.sh smoke
+tests/api/local-compose.sh smoke
 ```
 
 Direct HTTP deployment (no TLS):
 
 ```bash
 SECRET=password PORT=80 \
-docker compose -f compose/general/docker-compose.yml up -d
+docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 Optional TLS with the same compose file:
@@ -58,13 +56,13 @@ TLS_CERT_HOST_PATH=/absolute/path/to/fullchain.pem \
 TLS_KEY_HOST_PATH=/absolute/path/to/privkey.pem \
 SECRET=password PORT=80 \
 HTTPS_PORT=443 \
-docker compose -f compose/general/docker-compose.yml up -d
+docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 Stop (`-v` to delete volumes):
 
 ```bash
-docker compose -f compose/general/docker-compose.yml down -v
+docker compose -f deploy/compose/general/compose.yaml down -v
 ```
 
 The default stack includes:
@@ -91,7 +89,7 @@ It serves runtime query routes and UI routes:
 | `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
 | `/explorer/` | Browser UI with dedicated `Ledger` and `Stage` modes for committed browsing and local staged editing. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
-| SMB share | File-system projection exposing `/stage`, `/ledger`, and `/root/pin`. |
+| SMB share | File-system projection exposing `/stage`, `/ledger`, and `/control/pin`. |
 
 Router mode is selected at startup:
 
@@ -100,7 +98,7 @@ Router mode is selected at startup:
 
 ## Network API
 
-Implemented by `sync-records/lisp/interface.scm` on top of `root.scm`, `standard.scm`, and `ledger.scm`.
+Implemented by `records/lisp/interface.scm` on top of `root.scm`, `standard.scm`, and `ledger.scm`.
 Permission boundaries are central to safe operation, so operators should treat function families as security domains.
 
 ### Function Families

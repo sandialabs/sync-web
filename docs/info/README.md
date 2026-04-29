@@ -40,7 +40,7 @@ The current Explorer screenshot flow captures the default landing view, which no
 
 Prerequisites:
 
-1. Bring up `sync-services` so `/explorer/` and `/workbench/` are live (default expected URL is `http://127.0.0.1:8192`).
+1. Bring up the compose stack so `/explorer/` and `/workbench/` are live (default expected URL is `http://127.0.0.1:8192`).
 2. Install screenshot tooling:
 
 ```bash
@@ -65,24 +65,23 @@ Optional environment variables:
 - `SYNC_BASE_URL` (default `http://127.0.0.1:8192`)
 - `SYNC_SCREENSHOT_DIR` (default `./public/images/screenshots`)
 - `SYNC_SCREENSHOT_SETTLE_MS` (default `1500`)
-- `SYNC_SERVICES_DIR` (required for `capture:screenshots:stack`)
-- `PORT`, `SECRET`, `PERIOD`, `WINDOW`, `LOCAL_LISP_PATH` (used by `capture:screenshots:stack`)
+- `SYNC_REPO_ROOT` (required for `capture:screenshots:stack`): absolute path to the sync-web repo root
+- `PORT`, `SECRET`, `PERIOD`, `WINDOW` (used by `capture:screenshots:stack`)
 
 Example:
 
 ```bash
-SYNC_SERVICES_DIR=/absolute/path/to/sync-services npm run capture:screenshots:stack
+SYNC_REPO_ROOT=/absolute/path/to/sync-web npm run capture:screenshots:stack
 ```
 
 ## Multi-Node Testing
 
-For local multi-node journal plus social-agent testing, use the compose harness in `sync-analysis`:
+For local multi-node journal plus social-agent testing, use the compose harness in `tests/network/compose`:
 
 ```bash
-cd /code/sync-analysis/compose/social-agent-network
-SYNC_SERVICES_GENERAL_COMPOSE=/code/sync-services/compose/general/docker-compose.yml \
+cd /absolute/path/to/sync-web/tests/network/compose
 python3 generate.py
 docker compose up
 ```
 
-That harness reuses the full `sync-services` general stack per node and is the current local path for testing bridge topology behavior without FIREWHEEL.
+That harness reuses the full general stack per node and is the current local path for testing bridge topology behavior without FIREWHEEL.

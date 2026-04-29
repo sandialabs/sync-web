@@ -2,8 +2,8 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-IMAGE_TAG="${IMAGE_TAG:-sync-services/file-system:dev}"
-CONTAINER_NAME="${CONTAINER_NAME:-sync-services-file-system-dev}"
+IMAGE_TAG="${IMAGE_TAG:-sync-web/file-system:dev}"
+CONTAINER_NAME="${CONTAINER_NAME:-sync-web-file-system-dev}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 SYNC_FS_MODE="${SYNC_FS_MODE:-static-smb}"
 SYNC_FS_BACKEND="${SYNC_FS_BACKEND:-}"

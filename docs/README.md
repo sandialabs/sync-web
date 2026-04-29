@@ -28,4 +28,4 @@ See `deploy/compose/general/README.md` for single-node deployment instructions.
 ## Testing
 
 - `tests/api/local-compose.sh smoke` — single-node full-stack smoke test
-- `tests/network/compose/local-stack.sh up` — multi-node social-agent network
+- `tests/network/compose/local-compose.sh up` — multi-node social-agent network

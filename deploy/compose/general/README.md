@@ -20,16 +20,16 @@ This compose stack runs one journal with gateway, explorer, workbench, router, a
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
 - `SMB_PORT` (default `445`): host port exposed by the `file-system` service
-- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-services/file-system:1.1.0`): image used by the optional `file-system` service
+- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.0.0`): image used by the optional `file-system` service
 - `SYNC_FS_Backend` (default `http-journal-stage`): file-system backend override
 - `SYNC_FS_JournalJsonUrl` (default `http://journal/interface/json`): direct journal JSON endpoint used by the default file-system backend
 - `SYNC_FS_GatewayBaseUrl` (default `http://gateway/api/v1`): gateway endpoint used only when gateway-backed file-system modes are selected
 
 Gateway note:
-- `ALLOW_ADMIN_ROUTES` is enabled by default in `compose/general/docker-compose.yml`.
+- `ALLOW_ADMIN_ROUTES` is enabled by default in `deploy/compose/general/compose.yaml`.
 - Public/client-facing API traffic should go to `gateway` under `/api/v1/general/*` and `/api/v1/root/*`.
 - The raw `/interface` endpoint is still present for direct journal transport use and bridge-oriented internals.
-- The journal's periodic scheduler uses the raw root-step call `(*step* "<secret>")`, which depends on the merged `sync-records` root-step pipeline.
+- The journal's periodic scheduler uses the raw root-step call `(*step* "<secret>")`, which depends on the merged `records/` root-step pipeline.
 
 ## TLS Behavior
 
@@ -38,8 +38,7 @@ This stack uses one compose file. Router auto-selects mode at startup:
 - HTTP mode: if TLS cert/key files are not present
 - TLS mode: if both `TLS_CERT_FILE` and `TLS_KEY_FILE` exist
 
-`./tests/local-compose.sh` runs in normal HTTP mode by default unless valid TLS files are present at the configured paths.
-`./tests/local-compose.sh` now forces HTTP mode by default (`LOCAL_COMPOSE_FORCE_HTTP=1`) for predictable local smoke runs.
+`tests/api/local-compose.sh` forces HTTP mode by default (`LOCAL_COMPOSE_FORCE_HTTP=1`) for predictable local smoke runs.
 Set `LOCAL_COMPOSE_FORCE_HTTP=0` if you explicitly want TLS behavior during local-compose execution.
 
 In TLS mode, router serves:
@@ -52,7 +51,7 @@ HTTP-only deployment (no TLS files configured):
 
 ```bash
 SECRET=password PORT=8192 \
-docker compose -f compose/general/docker-compose.yml up -d
+docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 The default compose stack now mounts ACME webroot to `/var/www/acme-challenge`.
@@ -65,7 +64,7 @@ TLS_CERT_HOST_PATH=/absolute/path/to/fullchain.pem \
 TLS_KEY_HOST_PATH=/absolute/path/to/privkey.pem \
 SECRET=password PORT=8192 \
 HTTPS_PORT=443 \
-docker compose -f compose/general/docker-compose.yml up -d
+docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 ## Local Runner
@@ -74,46 +73,23 @@ Use the local helper from repository root:
 
 ```bash
 # Interactive run
-./tests/local-compose.sh up
+tests/api/local-compose.sh up
 
 # Smoke test
-./tests/local-compose.sh smoke
+tests/api/local-compose.sh smoke
 ```
 
-The local compose helper enables the SMB file-system service by default:
+The local compose helper enables the SMB file-system service by default.
+
+To override the file-system image during local development:
 
 ```bash
-./tests/local-compose.sh up
-./tests/local-compose.sh smoke
+FILE_SYSTEM_IMAGE=sync-web/local-file-system:1.0.0 tests/api/local-compose.sh up
+FILE_SYSTEM_IMAGE=sync-web/local-file-system:1.0.0 tests/api/local-compose.sh smoke
 ```
-
-To override the published file-system image during local development:
-
-```bash
-FILE_SYSTEM_IMAGE=sync-services/file-system:dev ./tests/local-compose.sh up
-FILE_SYSTEM_IMAGE=sync-services/file-system:dev ./tests/local-compose.sh smoke
-```
-
-### Optional Local Scheme Sources
-
-If `LOCAL_LISP_DIRECTORY` is set, the runner serves that directory over a temporary local HTTP server and builds `compose/general` with `LISP_REPOSITORY` pointing at that local server.
-
-```bash
-LOCAL_LISP_DIRECTORY=/absolute/path/to/lisp ./tests/local-compose.sh up
-LOCAL_LISP_DIRECTORY=/absolute/path/to/lisp ./tests/local-compose.sh smoke
-```
-
-`LOCAL_LISP_DIRECTORY` must contain:
-- `root.scm`
-- `standard.scm`
-- `log-chain.scm`
-- `linear-chain.scm`
-- `tree.scm`
-- `ledger.scm`
-- `interface.scm`
 
 ## Manual Teardown
 
 ```bash
-docker compose -f compose/general/docker-compose.yml down -v
+docker compose -f deploy/compose/general/compose.yaml down -v
 ```

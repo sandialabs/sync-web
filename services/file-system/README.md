@@ -4,7 +4,7 @@ Native SMB server service for exposing Synchronic journal state as a network-mou
 
 ## Documents
 
-- [ai-spec.md](/code/sync-services/services/file-system/ai-spec.md): target behavior and MVP requirements
+- [ai-spec.md](ai-spec.md): target behavior and MVP requirements
 
 ## Docker-first workflow
 
@@ -112,21 +112,19 @@ Targeted local SMB integration checks:
 ./tests/json-projection-smoke.sh
 ./tests/symlink-smoke.sh
 ./tests/pin-control-smoke.sh
-./tests/symlink-smoke.sh
 ```
 
-Broader stack integration lives at the `sync-services` level:
+Broader stack integration lives at the repo root:
 
 ```bash
-cd /code/sync-services
-./tests/local-compose.sh smoke
+tests/api/local-compose.sh smoke
 ```
 
 Run SMBLibrary probe mode when you need API-surface diagnostics:
 
 ```bash
 SYNC_FS_MODE=probe SYNC_FS_EXIT_AFTER_STARTUP=true ./tests/docker-run.sh
-docker logs sync-services-file-system-dev
+docker logs sync-web-file-system-dev  # default CONTAINER_NAME in tests/docker-run.sh
 ```
 
 Symlink note:

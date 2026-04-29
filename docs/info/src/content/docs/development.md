@@ -25,7 +25,7 @@ The general stack boot flow is:
 4. Instantiate and store `ledger` object with inline config state.
 5. Install interface secret and query dispatcher.
 
-Concurrency behavior in `sync-journal` is optimistic:
+Concurrency behavior in the journal is optimistic:
 
 - queries run against a snapshot of root state
 - if state changed concurrently, evaluation is retried
@@ -43,7 +43,7 @@ Memory/persistence modes:
 Periodic stepping:
 
 - configured by `--step` and `--period`
-- used in `sync-services` to invoke `*step*` continuously
+- used in the compose stack to invoke `*step*` continuously
 
 ### Language
 
@@ -53,7 +53,7 @@ The result is a constrained but expressive execution environment intended for pr
 
 References:
 
-The s7 reference is in `sync-journal/external/s7/README.md`, and the removed primitive list is defined in `sync-journal/src/evaluator.rs` (`REMOVE`).
+The s7 reference is in `journal/external/s7/README.md`, and the removed primitive list is defined in `journal/src/evaluator.rs` (`REMOVE`).
 
 Extended evaluator primitives (examples):
 
@@ -96,7 +96,7 @@ Use this section as a reference when wiring local environments, reviewing pull r
 ### s7 Extended Primitives
 
 The runtime extends base s7 with utility and Synchronic primitives.
-These signatures are sourced from primitive registrations in `sync-journal/src/evaluator.rs` and `sync-journal/src/lib.rs`.
+These signatures are sourced from primitive registrations in `journal/src/evaluator.rs` and `journal/src/lib.rs`.
 
 #### Utility Primitives
 
@@ -276,32 +276,31 @@ Testing coverage is intentionally split across correctness, stress, and topology
 
 ### Synchronous Testing
 
-Use `sync-records/tests` for deterministic, script-driven correctness checks over simulated journals.
+Use `records/tests` for deterministic, script-driven correctness checks over simulated journals.
 
 Prerequisites:
 
-You need either a built `journal-sdk` binary from `sync-journal` or Docker access to run `ghcr.io/sandialabs/sync-journal/journal-sdk`, and you need a POSIX shell environment.
+You need either a built `journal-sdk` binary from `journal/` or Docker access to run `ghcr.io/sandialabs/sync-web/journal-sdk`, and you need a POSIX shell environment.
 
-Run with local binary:
+Run with local binary (from repo root):
 
 ```bash
-cd /code/sync-records/tests
-./test.sh /absolute/path/to/journal-sdk
+cargo build --release --manifest-path journal/Cargo.toml
+records/tests/test.sh journal/target/release/journal-sdk
 ```
 
 Run with Docker:
 
 ```bash
-cd /code/sync-records/tests
-docker pull ghcr.io/sandialabs/sync-journal/journal-sdk
-./test.sh "docker run ghcr.io/sandialabs/sync-journal/journal-sdk"
+docker pull ghcr.io/sandialabs/sync-web/journal-sdk
+records/tests/test.sh "docker run ghcr.io/sandialabs/sync-web/journal-sdk"
 ```
 
 These tests validate class behavior and cross-journal message scripts in a repeatable sequence.
 
 ### Service Stack Smoke Tests
 
-Use `sync-services/tests` when you need to validate the integrated runtime plus the primary operator surfaces:
+Use `tests/api/local-compose.sh` when you need to validate the integrated runtime plus the primary operator surfaces:
 
 - `/explorer`
 - `/workbench`
@@ -313,32 +312,23 @@ Prerequisites:
 
 You need Docker Engine with the `docker compose` plugin and `curl` for route and API checks.
 
-Run interactive stack:
+Run interactive stack (from repo root):
 
 ```bash
-cd /code/sync-services
-SECRET=password PORT=8192 ./tests/local-compose.sh up
+SECRET=password PORT=8192 tests/api/local-compose.sh up
 ```
 
 Run automated health/smoke checks:
 
 ```bash
-cd /code/sync-services
-./tests/local-compose.sh smoke
-```
-
-Optional local Lisp override (to test in-progress local bootstrap code):
-
-```bash
-cd /code/sync-services
-LOCAL_LISP_DIRECTORY=/absolute/path/to/lisp ./tests/local-compose.sh smoke
+tests/api/local-compose.sh smoke
 ```
 
 The smoke script verifies route readiness, key API behavior (for example `size` and authenticated `configuration` responses), and the compose-integrated file-system service.
 
 ### Service-Level Tests
 
-`sync-services/services/explorer` and `sync-services/services/workbench` include client-side unit tests, and `sync-services/services/file-system` includes .NET contract tests for filesystem projection behavior.
+`services/explorer` and `services/workbench` include client-side unit tests, and `services/file-system` includes .NET contract tests for filesystem projection behavior.
 
 Prerequisites:
 
@@ -347,34 +337,34 @@ You need Node.js 20+ and npm to run the Explorer and Workbench unit test suites.
 Run tests:
 
 ```bash
-cd /code/sync-services/services/explorer
+cd services/explorer
 npm install
 npm test
 ```
 
 ```bash
-cd /code/sync-services/services/workbench
+cd services/workbench
 npm install
 npm test
 ```
 
 ```bash
-cd /code/sync-services/services/file-system
+cd services/file-system
 dotnet test tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj
 ```
 
 ### Stress Testing
 
-Use `sync-analysis/locust` for HTTP load generation against gateway general endpoints.
+Use `tests/load/locust` for HTTP load generation against gateway general endpoints.
 
 Prerequisites:
 
-You need a running gateway endpoint (typically from `sync-services`), Python 3 with `pip` and Locust dependencies from `requirements.txt`, and a `SECRET` environment variable that matches server configuration.
+You need a running gateway endpoint (typically from `tests/api/local-compose.sh up`), Python 3 with `pip` and Locust dependencies from `requirements.txt`, and a `SECRET` environment variable that matches server configuration.
 
 Install and run:
 
 ```bash
-cd /code/sync-analysis/locust
+cd tests/load/locust
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
@@ -384,30 +374,29 @@ SECRET=pass locust --host=http://localhost:8192
 Headless example:
 
 ```bash
-cd /code/sync-analysis/locust
+cd tests/load/locust
 . .venv/bin/activate
 SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
 ```
 
 ### Multi-Node Compose Testing
 
-Use `sync-analysis/compose/social-agent-network` when you want a local multi-node network with one full `sync-services` stack and one social agent per node, without using FIREWHEEL.
+Use `tests/network/compose` when you want a local multi-node network with one full stack and one social agent per node, without using FIREWHEEL.
 
 Prerequisites:
 
 You need Docker Engine with the `docker compose` plugin, Python 3, and `PyYAML` available in the environment where you run the generator.
 
-Generate the stack:
+Build images and generate the stack (from repo root):
 
 ```bash
-cd /absolute/path/to/sync-analysis/compose/social-agent-network
-SYNC_SERVICES_GENERAL_COMPOSE=/absolute/path/to/sync-services/compose/general/docker-compose.yml \
-python3 generate.py
+tests/network/compose/local-compose.sh generate
 ```
 
 Run it:
 
 ```bash
+cd tests/network/compose
 docker compose up
 ```
 
@@ -432,7 +421,7 @@ Network model:
 
 Generated topology artifacts:
 
-- `docker-compose.yml`
+- `compose.yaml`
 - `peers.json`
 - `metrics/social-agent-*/`
 - `results/social-agent-*/benchmark.json`
@@ -462,21 +451,18 @@ Benchmark output:
 For local testing of an unpublished social-agent image, build a local tag and override it during generation:
 
 ```bash
-cd /absolute/path/to/sync-analysis
-docker build -t social-agent:dev -f docker/social-agent/Dockerfile .
+docker build -t social-agent:dev -f tests/network/common/social-agent/Dockerfile tests/network/common/social-agent
 ```
 
 ```bash
-cd /absolute/path/to/sync-analysis/compose/social-agent-network
-SYNC_SERVICES_GENERAL_COMPOSE=/absolute/path/to/sync-services/compose/general/docker-compose.yml \
-IMAGE_OVERRIDE_SOCIAL_AGENT=social-agent:dev \
-python3 generate.py
+cd tests/network/compose
+IMAGE_OVERRIDE_SOCIAL_AGENT=social-agent:dev python3 generate.py
 docker compose up
 ```
 
 ### Network Emulation
 
-Use `sync-analysis/firewheel` for topology-level distributed simulation across journals, agents, and monitoring components.
+Use `tests/network/firewheel` for topology-level distributed simulation across journals, agents, and monitoring components.
 
 Prerequisites:
 
@@ -485,7 +471,7 @@ You need the FIREWHEEL framework installed and configured, Docker available on t
 Example experiment:
 
 ```bash
-cd /code/sync-analysis/firewheel
+cd tests/network/firewheel
 firewheel experiment -r synchronic_web.ledger_journal:4:2 synchronic_web.social_agent:4:32:2:8 synchronic_web.network_monitor control_network minimega.launch
 ```
 
