@@ -136,9 +136,33 @@ public sealed class GatewayProjectionFileSystemTests
             gateway.LastBatchRequest.Requests[1].Arguments?["path"]?.ToJsonString());
     }
 
+    [Fact]
+    public void StagePath_WithCurrentDirectorySegment_DoesNotLeakDotIntoJournalPath()
+    {
+        var gateway = new RecordingGatewayClient();
+        var fileSystem = new GatewayProjectionFileSystem("projection-dot-current", gateway);
+
+        _ = fileSystem.ListEntriesInDirectory(@"\stage\docs\.");
+
+        Assert.Equal("""[["*state*","docs"]]""", gateway.LastGetPathJson);
+    }
+
+    [Fact]
+    public void StagePath_WithParentDirectorySegment_DoesNotLeakDotDotIntoJournalPath()
+    {
+        var gateway = new RecordingGatewayClient();
+        var fileSystem = new GatewayProjectionFileSystem("projection-dot-parent", gateway);
+
+        _ = fileSystem.ListEntriesInDirectory(@"\stage\docs\..");
+
+        Assert.Equal("""[["*state*"]]""", gateway.LastGetPathJson);
+    }
+
     private sealed class RecordingGatewayClient : IGeneralInterfaceClient
     {
         public int SetRequestCount { get; private set; }
+
+        public string? LastGetPathJson { get; private set; }
 
         public string? LastSetPathJson { get; private set; }
 
@@ -156,6 +180,7 @@ public sealed class GatewayProjectionFileSystemTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             var pathJson = JsonSerializer.Serialize(request.Path);
+            LastGetPathJson = pathJson;
 
             return Task.FromResult(pathJson switch
             {

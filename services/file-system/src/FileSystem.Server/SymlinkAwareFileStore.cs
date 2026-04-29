@@ -904,7 +904,12 @@ public sealed class SymlinkAwareFileStore : INTFileStore
             normalized = normalized.Replace("\\\\", "\\", StringComparison.Ordinal);
         }
 
-        return normalized.Length > 1 ? normalized.TrimEnd('\\') : normalized;
+        if (normalized.Length > 1)
+        {
+            normalized = normalized.TrimEnd('\\');
+        }
+
+        return CollapseDotSegmentsCore(normalized);
     }
 
     private static bool IsRootPinFilePath(string path)
@@ -1045,6 +1050,11 @@ public sealed class SymlinkAwareFileStore : INTFileStore
     private static string CollapseDotSegments(string path)
     {
         var normalized = NormalizePath(path);
+        return CollapseDotSegmentsCore(normalized);
+    }
+
+    private static string CollapseDotSegmentsCore(string normalized)
+    {
         var stack = new List<string>();
         foreach (var segment in normalized.Trim('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
