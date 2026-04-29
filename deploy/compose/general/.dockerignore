@@ -1,0 +1,5 @@
+# Keep build context minimal for compose/general image
+README.md
+compose.yaml
+.git
+.gitignore

@@ -1,13 +1,15 @@
-name: All
+name: Docs
 
 on:
   push:
-    branches: [ "**" ]
+    branches: ["**"]
+    paths: ["docs/**"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths: ["docs/**"]
 
 concurrency:
-  group: "all"
+  group: "docs-${{ github.ref }}"
   cancel-in-progress: false
 
 jobs:
@@ -25,13 +27,15 @@ jobs:
         with:
           node-version: 20
       - name: Install packages
-        run: cd info && npm install && cd ..
+        working-directory: docs/info
+        run: npm install
       - name: Create documents
-        run: cd info && npm run build && cd ..
+        working-directory: docs/info
+        run: npm run build
       - name: Upload documents artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './info/dist/'
+          path: './docs/info/dist/'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

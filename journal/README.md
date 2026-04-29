@@ -9,13 +9,10 @@ Please see the following two pages to install the build dependencies:
 * [Instructions](https://doc.rust-lang.org/cargo/getting-started/installation.html) to install Rust and Cargo
 * [Instructions](https://rust-lang.github.io/rust-bindgen/requirements.html) to install CLang for generating C/Rust bindings
 
-Currently, this code has only been confirmed to work on Linux, specifically, Windows Subsystem for Linux.
-However, there is no current reason to believe it won't compile elsewhere.
-
 # Run
 
-The recommended usage strategy for most users is the web server.
-Although the code can be run in any way that Rust/Cargo allows, there are useful ways for most developers:
+The recommended usage strategy for most users is the Docker-based compose stack in `deploy/compose/general/`.
+The journal binary can also be run directly for development and testing:
 
 * As a low-optimization single step for development:
   * `$ cargo run`
@@ -64,11 +61,13 @@ By leveraging the functionality and workflow specified below, it is possible to 
 
 The Scheme dialect used for Synchronic Web code is a lightly modified version of s7 Scheme.
 All source code and documentation is available in the [./external/s7](./external/s7) folder.
-Other basic modifcations include:
+Other basic modifications include:
 
 - Build flags found in [./build.rs](./build.rs)
 - Blacklisted functions found in [./evaluator.rs](./evaluator.rs)
 - Additional convenience functions found in [./evaluator.rs](./evaluator.rs)
+
+The Scheme record modules (standard, chain, ledger, interface, root) live in `records/lisp/` at the repo root.
 
 The following commands will be helpful in getting started:
 
@@ -99,9 +98,4 @@ For example, the default function is the following:
 
 This function simply evaluates any user query against the current state binding.
 From this highly generic and permissive functionality, it is possible to construct arbitrarily specific and controlled interfaces.
-The [./lisp](./lisp) folder provides some examples.
-  
-# Issues
-
-- [ ] Break inifinite sync-call loops
-- [ ] Add telemetry outputs
+The `records/lisp/` folder provides the production implementation.
