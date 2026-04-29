@@ -21,11 +21,14 @@ Expose journal-backed records as a network-mounted filesystem using a native SMB
   - `/control`: explicit non-content operational surface
 - Any ledger peer view exposes exactly three structural children:
   - `/state`: committed document tree for that ledger peer view
-  - `/peer/<name>`: related ledger peer
-  - `/previous/<index>`: prior ledger peer view by signed integer index
+  - `/bridge/<name>`: related ledger peer
+  - `/<index>`: prior ledger peer view by signed integer index
+- Omitting an explicit index at any ledger path level defaults to the current head (`-1`).
+  - `/ledger/state` is equivalent to `/ledger/-1/state`.
+  - `/ledger/bridge/<name>/state` is equivalent to `/ledger/-1/bridge/<name>/-1/state`.
 - Grammar terminates once `/state` is entered.
   - All path segments after `/stage/...` or `/ledger/.../state/...` are ordinary document names.
-  - Names like `stage`, `ledger`, `state`, `peer`, and `previous` are only structural before entering `state`.
+  - Names like `stage`, `ledger`, `state`, and `bridge` are only structural before entering `state`.
 - Mutability:
   - `/stage` is read-write.
   - Everything under `/ledger` is immutable for content mutation.

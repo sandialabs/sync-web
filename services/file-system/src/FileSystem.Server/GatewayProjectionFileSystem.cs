@@ -1966,11 +1966,7 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
             var segment = segments[cursor];
             if (string.Equals(segment, "state", StringComparison.OrdinalIgnoreCase))
             {
-                if (ledgerParts.Count == 0)
-                {
-                    return new ProjectedPathInfo(ProjectedPathKind.Invalid, null);
-                }
-
+                EnsureCurrentLedgerContext(ledgerParts);
                 EnsureCurrentBridgeContext(ledgerParts);
 
                 var stateBlock = new object[] { "*state*" }.Concat(segments.Skip(cursor + 1).Cast<object>()).ToArray();
@@ -1980,10 +1976,7 @@ public sealed class GatewayProjectionFileSystem : IFileSystem, ISymlinkAwareFile
 
             if (string.Equals(segment, "bridge", StringComparison.OrdinalIgnoreCase))
             {
-                if (ledgerParts.Count == 0)
-                {
-                    return new ProjectedPathInfo(ProjectedPathKind.Invalid, null);
-                }
+                EnsureCurrentLedgerContext(ledgerParts);
 
                 if (cursor == segments.Length - 1)
                 {
