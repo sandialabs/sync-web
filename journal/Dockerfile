@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # --- Build base ---
 
 FROM alpine:3.23.3 AS chef
@@ -27,9 +25,7 @@ RUN apk update && apk add --no-cache \
     linux-headers \
     openssl-dev
 
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
-    cargo install cargo-chef --locked
+RUN cargo install cargo-chef --locked
 
 WORKDIR /srv
 
@@ -47,9 +43,7 @@ FROM chef AS cacher
 
 COPY --from=planner /srv/recipe.json recipe.json
 
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
-    cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 
 # --- Application build ---
 
@@ -59,18 +53,14 @@ COPY --from=cacher /srv/target target
 
 COPY . .
 
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
-    cargo build --release && \
+RUN cargo build --release && \
     cp /srv/target/release/journal-sdk /tmp/journal-sdk
 
 # --- Test ---
 
 FROM builder AS test
 
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
-    cargo test
+RUN cargo test --release
 
 # --- Deploy ---
 
