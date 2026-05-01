@@ -318,13 +318,22 @@ const generalSchemeExamples: Record<string, string> = {
   trace:        "((index 0) (path (-1 (*state* mykey))))",
 };
 
-const rootOperationExamples: Record<string, string> = {
+const rootOperationExamples: Record<string, unknown> = {
+  eval:          [["+", 1, 2]],
+  call:          [["lambda", ["root"], [["root", { "*type/quoted*": "get" }], { "*type/quoted*": ["root", "object", "ledger"] }]]],
+  step:          [],
+  "set-secret":  [{ "*type/string*": "new-admin-secret" }],
+  "set-step":    [["lambda", ["root", "secret", "query"], "root"]],
+  "set-query":   [["lambda", ["root", "query"], "root"]],
+};
+
+const rootSchemeExamples: Record<string, string> = {
   eval:          "(+ 1 2)",
   call:          "(lambda (root) ((root 'get) '(root object ledger)))",
   step:          "",
-  "set-secret":  "new-admin-secret",
-  "set-step":    "(lambda (root secret query) ...)",
-  "set-query":   "(lambda (root query) ...)",
+  "set-secret":  '"new-admin-secret"',
+  "set-step":    "(lambda (root secret query) root)",
+  "set-query":   "(lambda (root query) root)",
 };
 
 
@@ -554,7 +563,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
               `Root operation '${operation}'`,
             description: `${rootOperationDocs[operation]?.description || "Root operation."} ${requestModeDescription}`,
             security: restrictedSecurity,
-            body: makeBodyContent(rootOperationExamples[operation], rootOperationExamples[operation]),
+            body: makeBodyContent(rootOperationExamples[operation], rootSchemeExamples[operation]),
           },
         },
         async (request) =>

@@ -405,13 +405,15 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
   assert.deepEqual(schemaExample("/api/v1/general/batch"), {
     queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }],
   });
-  assert.equal(schemaExample("/api/v1/root/step"), "");
-  assert.equal(schemaExample("/api/v1/root/eval"), "(+ 1 2)");
+  assert.deepEqual(schemaExample("/api/v1/root/step"), []);
+  assert.deepEqual(schemaExample("/api/v1/root/eval"), [["+", 1, 2]]);
 
   const schemeExample = (path: string) =>
     paths[path]?.post?.requestBody?.content?.["text/plain"]?.schema?.example;
 
   assert.equal(schemeExample("/api/v1/general/get"), "((path ((*state* mykey))))");
   assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (interface "http://peer-a/interface"))');
+  assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");
+  assert.equal(schemeExample("/api/v1/root/set-secret"), '"new-admin-secret"');
   assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");
 });
