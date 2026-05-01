@@ -179,7 +179,7 @@ test("POST /api/v1/general/get accepts Lisp payload and wraps expression", async
     mock.schemeCalls[0].expression,
     /\(arguments \(\(\(path \(\(\*state\* docs\)\)\)\)\)\)/
   );
-  assert.match(mock.schemeCalls[0].expression, /\(authentication "password"\)/);
+  assert.match(mock.schemeCalls[0].expression, /\(authentication \(\(identity \(self\)\) \(credentials \("password"\)\)\)\)/);
 });
 
 test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
@@ -251,7 +251,7 @@ test("POST /api/v1/general/batch accepts Lisp payload and wraps expression", asy
       "((function config))"
     )
   );
-  assert.match(mock.schemeCalls[0].expression, /\(authentication "password"\)/);
+  assert.match(mock.schemeCalls[0].expression, /\(authentication \(\(identity \(self\)\) \(credentials \("password"\)\)\)\)/);
 });
 
 test("returns 415 for unsupported content type", async (t) => {

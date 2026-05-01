@@ -139,7 +139,8 @@ public sealed class HttpGatewayClientTests
         Assert.Equal("http://journal/interface/json", handler.LastRequestUri);
         Assert.Null(handler.LastAuthorization);
         Assert.Equal("get", handler.LastBody?["function"]?.GetValue<string>());
-        Assert.Equal("secret-token", handler.LastBody?["authentication"]?["*type/string*"]?.GetValue<string>());
+        Assert.Equal("self", handler.LastBody?["authentication"]?["identity"]?[0]?.GetValue<string>());
+        Assert.Equal("secret-token", handler.LastBody?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>());
         Assert.Equal("""[["*state*","docs"]]""", handler.LastBody?["arguments"]?["path"]?.ToJsonString());
         Assert.Null(handler.LastBody?["arguments"]?["pinned?"]);
         Assert.Null(handler.LastBody?["arguments"]?["proof?"]);
@@ -177,7 +178,8 @@ public sealed class HttpGatewayClientTests
         Assert.Equal("batch!", handler.LastBody?["function"]?.GetValue<string>());
         Assert.Null(handler.LastBody?["authentication"]);
         Assert.Equal("set!", handler.LastBody?["arguments"]?["queries"]?[0]?["function"]?.GetValue<string>());
-        Assert.Equal("secret-token", handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["*type/string*"]?.GetValue<string>());
+        Assert.Equal("self", handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["identity"]?[0]?.GetValue<string>());
+        Assert.Equal("secret-token", handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>());
         Assert.Equal("config", handler.LastBody?["arguments"]?["queries"]?[1]?["function"]?.GetValue<string>());
         Assert.Null(handler.LastBody?["arguments"]?["queries"]?[1]?["authentication"]);
         Assert.Equal("batch", result?[0]?["ok"]?.GetValue<string>());
@@ -217,7 +219,8 @@ public sealed class HttpGatewayClientTests
 
         Assert.Equal("http://journal/interface/json", handler.LastRequestUri);
         Assert.Equal("set-batch!", handler.LastBody?["function"]?.GetValue<string>());
-        Assert.Equal("secret-token", handler.LastBody?["authentication"]?["*type/string*"]?.GetValue<string>());
+        Assert.Equal("self", handler.LastBody?["authentication"]?["identity"]?[0]?.GetValue<string>());
+        Assert.Equal("secret-token", handler.LastBody?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>());
         Assert.Equal("""[[["*state*","docs","a.txt"]],[["*state*","docs","b.txt"]]]""", handler.LastBody?["arguments"]?["paths"]?.ToJsonString());
         Assert.Equal("""[{"*type/string*":"a"},{"*type/string*":"b"}]""", handler.LastBody?["arguments"]?["values"]?.ToJsonString());
     }

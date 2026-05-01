@@ -324,7 +324,8 @@ public sealed class GrammarValidationWorker : BackgroundService
         Assert(string.Equals(handler.LastRequestUri, "http://journal/interface/json", StringComparison.Ordinal), "http journal get URI should match direct journal endpoint");
         Assert(handler.LastAuthorization == null, "http journal should not send bearer auth");
         Assert(string.Equals(handler.LastBody?["function"]?.GetValue<string>(), "get", StringComparison.Ordinal), "http journal get should use function envelope");
-        Assert(string.Equals(handler.LastBody?["authentication"]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal get should serialize authentication in the body");
+        Assert(string.Equals(handler.LastBody?["authentication"]?["identity"]?[0]?.GetValue<string>(), "self", StringComparison.Ordinal), "http journal get should serialize identity in authentication");
+        Assert(string.Equals(handler.LastBody?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal get should serialize credentials in authentication");
         Assert(string.Equals(handler.LastBody?["arguments"]?["path"]?.ToJsonString(), """[["*state*","docs"]]""", StringComparison.Ordinal), "http journal get should serialize journal path");
         Assert(handler.LastBody?["arguments"]?["pinned?"] == null, "http journal stage get should omit pinned?");
         Assert(handler.LastBody?["arguments"]?["proof?"] == null, "http journal stage get should omit proof?");
@@ -350,7 +351,8 @@ public sealed class GrammarValidationWorker : BackgroundService
         Assert(string.Equals(handler.LastBody?["function"]?.GetValue<string>(), "batch!", StringComparison.Ordinal), "http journal batch should use batch!");
         Assert(handler.LastBody?["authentication"] == null, "http journal batch should not place auth at the outer batch level");
         Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["function"]?.GetValue<string>(), "set!", StringComparison.Ordinal), "http journal batch should preserve function names");
-        Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal batch should attach auth to restricted subqueries");
+        Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["identity"]?[0]?.GetValue<string>(), "self", StringComparison.Ordinal), "http journal batch should attach identity to restricted subqueries");
+        Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal batch should attach credentials to restricted subqueries");
         Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[1]?["function"]?.GetValue<string>(), "config", StringComparison.Ordinal), "http journal batch should preserve zero-argument requests");
         Assert(handler.LastBody?["arguments"]?["queries"]?[1]?["authentication"] == null, "http journal batch should not attach auth to public subqueries");
         Assert(string.Equals(batchResult?[0]?["ok"]?.GetValue<string>(), "batch", StringComparison.Ordinal), "http journal batch should parse array response");

@@ -49,7 +49,7 @@
     (sync-call query #t journal))
 
   (define (interface-query journal interface query)
-    (journal-query journal (append query `((authentication ,interface)))))
+    (journal-query journal (append query `((authentication ((identity (self)) (credentials (,interface))))))))
 
   (define (admin-step journal secret)
     (journal-query journal `(*step* ,secret)))

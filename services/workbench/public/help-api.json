@@ -13,8 +13,8 @@
   },
   "resolve": {
     "description": "Returns committed/indexed content for a specific path. Optional pinned? and proof? flags control whether metadata and serialized proof material are included.",
-    "template": "((function resolve) (arguments ((path <path>) (pinned? <pinned?>) (proof? <proof?>))) (authentication <secret>))",
-    "example": "((function resolve) (arguments ((path (-1 (*state* key))) (pinned? #t) (proof? #f))) (authentication \"mysecret\"))",
+    "template": "((function resolve) (arguments ((path <path>) (pinned? <pinned?>) (proof? <proof?>))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function resolve) (arguments ((path (-1 (*state* key))) (pinned? #t) (proof? #f))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "trace": {
@@ -31,50 +31,50 @@
   },
   "get": {
     "description": "Retrieves data from the current staging area only. Use resolve for committed/indexed reads.",
-    "template": "((function get) (arguments ((path <path>))) (authentication <secret>))",
-    "example": "((function get) (arguments ((path ((*state* *time*))))) (authentication \"mysecret\"))",
+    "template": "((function get) (arguments ((path <path>))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function get) (arguments ((path ((*state* *time*))))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "set!": {
     "description": "Sets a value at the specified path in the staging area. The path must start with a list beginning with '*state*'. Changes are staged until the next *step* commits them.",
-    "template": "((function set!) (arguments ((path <path>) (value <value>))) (authentication <secret>))",
-    "example": "((function set!) (arguments ((path ((*state* mykey))) (value \"myvalue\"))) (authentication \"mysecret\"))",
+    "template": "((function set!) (arguments ((path <path>) (value <value>))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function set!) (arguments ((path ((*state* mykey))) (value \"myvalue\"))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "pin!": {
     "description": "Pins data at the specified path to prevent it from being pruned. The path must include a chain index as the first element. Pinned data is preserved in the permanent chain.",
-    "template": "((function pin!) (arguments ((path <path>))) (authentication <secret>))",
-    "example": "((function pin!) (arguments ((path (-1 (*state* important-data))))) (authentication \"mysecret\"))",
+    "template": "((function pin!) (arguments ((path <path>))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function pin!) (arguments ((path (-1 (*state* important-data))))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "unpin!": {
     "description": "Unpins data at the specified path, allowing it to be pruned. The path must include a chain index as the first element.",
-    "template": "((function unpin!) (arguments ((path <path>))) (authentication <secret>))",
-    "example": "((function unpin!) (arguments ((path (-1 (*state* old-data))))) (authentication \"mysecret\"))",
+    "template": "((function unpin!) (arguments ((path <path>))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function unpin!) (arguments ((path (-1 (*state* old-data))))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "batch!": {
     "description": "Executes multiple general requests in order under one authenticated call. Each item in queries includes a function name and an optional arguments object.",
-    "template": "((function batch!) (arguments ((queries (((function <function-1>) (arguments ((<key-1> <value-1>) ...))) ((function <function-2>)) ...)))) (authentication <secret>))",
-    "example": "((function batch!) (arguments ((queries (((function get) (arguments ((path ((*state* *time*))))) ((function config)))))) (authentication \"mysecret\"))",
+    "template": "((function batch!) (arguments ((queries (((function <function-1>) (arguments ((<key-1> <value-1>) ...))) ((function <function-2>)) ...)))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function batch!) (arguments ((queries (((function get) (arguments ((path ((*state* *time*))))) ((function config)))))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "config": {
     "description": "Returns the full config of the ledger, including both public and private settings.",
-    "template": "((function config) (authentication <secret>))",
-    "example": "((function config) (authentication \"mysecret\"))",
+    "template": "((function config) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function config) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "bridge!": {
     "description": "Adds or updates a bridge with the given name and interface URL. The interface wires standard info, synchronize, and trace handlers for the remote peer.",
-    "template": "((function bridge!) (arguments ((name <name>) (interface <endpoint>))) (authentication <secret>))",
-    "example": "((function bridge!) (arguments ((name alice) (interface \"http://alice.example.com/api/v1/journal/interface\"))) (authentication \"mysecret\"))",
+    "template": "((function bridge!) (arguments ((name <name>) (interface <endpoint>))) (authentication ((identity (self)) (credentials (<secret>)))))",
+    "example": "((function bridge!) (arguments ((name alice) (interface \"http://alice.example.com/api/v1/journal/interface\"))) (authentication ((identity (self)) (credentials (\"mysecret\")))))",
     "permission": "user"
   },
   "*secret*": {
     "description": "Changes the user authentication secret. Requires the current user secret for authentication.",
-    "template": "((function *secret*) (arguments ((secret <new-secret>))) (authentication <old-secret>))",
-    "example": "((function *secret*) (arguments ((secret \"new-user-secret\"))) (authentication \"old-user-secret\"))",
+    "template": "((function *secret*) (arguments ((secret <new-secret>))) (authentication ((identity (self)) (credentials (<old-secret>)))))",
+    "example": "((function *secret*) (arguments ((secret \"new-user-secret\"))) (authentication ((identity (self)) (credentials (\"old-user-secret\")))))",
     "permission": "user"
   },
   "*eval*": {

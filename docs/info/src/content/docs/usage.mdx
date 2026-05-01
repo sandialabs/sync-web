@@ -148,7 +148,7 @@ That keeps client implementations simple and makes troubleshooting easier across
 | --- | --- | --- | --- |
 | `function` | symbol/string | Yes | API function name |
 | `arguments` | object / association list | Usually | Keyword-style fields for ledger calls |
-| `authentication` | string / `*type/string*` | Restricted calls | Interface secret |
+| `authentication` | alist / object | Restricted calls | `((identity (self)) (credentials (<secret>)))` — identity chain and matching credentials |
 
 > **Note:**
 >
@@ -169,7 +169,7 @@ You can copy them into Workbench first, then move them into automation once vali
  (arguments ((path ((*state* docs article hash)))
              (pinned? #t)
              (proof? #t)))
- (authentication "password"))
+ (authentication ((identity (self)) (credentials ("password")))))
 ```
 
   </TabItem>
@@ -183,7 +183,10 @@ You can copy them into Workbench first, then move them into automation once vali
     "pinned?": true,
     "proof?": true
   },
-  "authentication": {"*type/string*": "password"}
+  "authentication": {
+    "identity": ["self"],
+    "credentials": [{"*type/string*": "password"}]
+  }
 }
 ```
 
@@ -203,7 +206,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ((function set!)
  (arguments ((path ((*state* docs article hash)))
              (value "0xabc123")))
- (authentication "password"))
+ (authentication ((identity (self)) (credentials ("password")))))
 ```
 
   </TabItem>
@@ -216,7 +219,10 @@ You can copy them into Workbench first, then move them into automation once vali
     "path": [["*state*", "docs", "article", "hash"]],
     "value": {"*type/string*": "0xabc123"}
   },
-  "authentication": {"*type/string*": "password"}
+  "authentication": {
+    "identity": ["self"],
+    "credentials": [{"*type/string*": "password"}]
+  }
 }
 ```
 
@@ -231,7 +237,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function pin!)
  (arguments ((path (-1 (*state* docs article hash)))))
- (authentication "password"))
+ (authentication ((identity (self)) (credentials ("password")))))
 ```
 
   </TabItem>
@@ -241,7 +247,10 @@ You can copy them into Workbench first, then move them into automation once vali
 {
   "function": "pin!",
   "arguments": {"path": [-1, ["*state*", "docs", "article", "hash"]]},
-  "authentication": {"*type/string*": "password"}
+  "authentication": {
+    "identity": ["self"],
+    "credentials": [{"*type/string*": "password"}]
+  }
 }
 ```
 
@@ -257,7 +266,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ((function bridge!)
  (arguments ((name journal_b)
              (interface "http://journal-b.example.org/interface")))
- (authentication "password"))
+ (authentication ((identity (self)) (credentials ("password")))))
 ```
 
   </TabItem>
@@ -270,7 +279,10 @@ You can copy them into Workbench first, then move them into automation once vali
     "name": "journal_b",
     "interface": {"*type/string*": "http://journal-b.example.org/interface"}
   },
-  "authentication": {"*type/string*": "password"}
+  "authentication": {
+    "identity": ["self"],
+    "credentials": [{"*type/string*": "password"}]
+  }
 }
 ```
 

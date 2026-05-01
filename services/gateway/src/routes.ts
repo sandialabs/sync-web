@@ -79,7 +79,7 @@ const buildSchemeExpression = (
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    parts.push(`(authentication "${escapeLispString(authSecret)}")`);
+    parts.push(`(authentication ((identity (self)) (credentials ("${escapeLispString(authSecret)}"))))`);
   }
   return `(${parts.join(" ")})`;
 };
