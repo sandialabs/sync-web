@@ -110,6 +110,12 @@ const main = async (): Promise<void> => {
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
+  // Handle requests with no Content-Type header (e.g. sync-remote sends Scheme bodies
+  // without a Content-Type). The empty-string key matches only when the header is absent,
+  // so it does not override the built-in application/json parser.
+  app.addContentTypeParser("", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
 
   await app.register(fastifySwagger, {
     openapi: {
@@ -137,6 +143,11 @@ const main = async (): Promise<void> => {
           name: "Root API (Admin)",
           description:
             "High-privilege root-plane operations for runtime management and updates.",
+        },
+        {
+          name: "Journal (Proxy)",
+          description:
+            "Thin pass-through endpoints that forward directly to the journal interface without transformation.",
         },
       ],
       components: {

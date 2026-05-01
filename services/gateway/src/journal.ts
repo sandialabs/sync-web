@@ -12,6 +12,7 @@ export interface JournalClient {
   callScheme(input: { expression: string; functionName: string }): Promise<unknown>;
   callRootJson(input: JournalCall): Promise<unknown>;
   callRootScheme(input: { expression: string; functionName: string }): Promise<unknown>;
+  proxyJson(body: unknown): Promise<unknown>;
 }
 
 export interface JournalClientOptions {
@@ -453,6 +454,21 @@ export const createJournalClient = (
       functionName: string;
     }): Promise<unknown> {
       return callSchemeEndpoint(rootSchemeEndpoint, input);
+    },
+    async proxyJson(body: unknown): Promise<unknown> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        const response = await fetch(journalJsonEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        return parseResponse(await response.text());
+      } finally {
+        clearTimeout(timeout);
+      }
     },
   };
 };

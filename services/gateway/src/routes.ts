@@ -524,6 +524,37 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     async () => journal.callJson({ functionName: "info" })
   );
 
+  app.post(
+    "/api/v1/journal/interface",
+    {
+      schema: {
+        tags: ["Journal (Proxy)"],
+        summary: "Transparent journal interface proxy",
+        description:
+          "Thin pass-through to the journal interface. Scheme bodies (text/plain or application/scheme) are forwarded as-is to the journal Scheme endpoint. JSON bodies are forwarded as-is to the journal JSON endpoint. No authentication injection or body transformation. Intended for journal-to-journal bridge calls.",
+        body: makeBodyContent(
+          { function: "size" },
+          "((function size))"
+        ),
+      },
+    },
+    async (request, reply) => {
+      const contentType = getContentType(request);
+      // Treat missing content type as Scheme: sync-remote POSTs Scheme with no Content-Type.
+      if (isSchemeContentType(contentType) || contentType === "") {
+        const expression = extractSchemeArguments(request.body);
+        return journal.callScheme({ expression, functionName: "interface" });
+      }
+      if (isJsonContentType(contentType)) {
+        return journal.proxyJson(request.body);
+      }
+      return reply.code(415).send({
+        error: "unsupported_media_type",
+        message: "Use application/json, text/plain, or application/scheme.",
+      });
+    }
+  );
+
   for (const [operation, functionName] of Object.entries(generalAliases)) {
     const requiresAuth = !publicGeneralFunctions.has(functionName);
     app.post(

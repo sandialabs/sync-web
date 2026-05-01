@@ -72,4 +72,4 @@ if [ "$MODE" = "generate" ]; then
 fi
 
 cd "$SCRIPT_DIR"
-exec docker compose up
+exec docker-compose up

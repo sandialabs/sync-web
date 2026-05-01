@@ -49,6 +49,8 @@ services:
       ROOT_SCHEME_ENDPOINT: http://journal/interface
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-30000}
       ALLOW_ADMIN_ROUTES: "1"
+      # Peer bridges should target the gateway interface proxy, not /interface directly:
+      # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
 
   router:
     image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.0.0}

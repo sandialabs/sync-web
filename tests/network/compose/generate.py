@@ -116,7 +116,9 @@ def rewrite_service_environment(service_name, node_index, environment, secret, p
         env_map["WINDOW"] = str(window)
     elif service_name == "gateway":
         env_map["JOURNAL_JSON_ENDPOINT"] = f"http://journal-{node_index}/interface/json"
-        env_map["JOURNAL_LISP_ENDPOINT"] = f"http://journal-{node_index}/interface"
+        env_map["JOURNAL_SCHEME_ENDPOINT"] = f"http://journal-{node_index}/interface"
+        env_map["ROOT_JSON_ENDPOINT"] = f"http://journal-{node_index}/interface/json"
+        env_map["ROOT_SCHEME_ENDPOINT"] = f"http://journal-{node_index}/interface"
     elif service_name == "router":
         env_map["ROUTER_JOURNAL_HOST"] = f"journal-{node_index}"
         env_map["ROUTER_GATEWAY_HOST"] = f"gateway-{node_index}"

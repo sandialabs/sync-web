@@ -68,7 +68,7 @@
   "bridge!": {
     "description": "Adds or updates a bridge with the given name and interface URL. The interface wires standard info, synchronize, and trace handlers for the remote peer.",
     "template": "((function bridge!) (arguments ((name <name>) (interface <endpoint>))) (authentication <secret>))",
-    "example": "((function bridge!) (arguments ((name alice) (interface \"http://alice.example.com/interface\"))) (authentication \"mysecret\"))",
+    "example": "((function bridge!) (arguments ((name alice) (interface \"http://alice.example.com/api/v1/journal/interface\"))) (authentication \"mysecret\"))",
     "permission": "user"
   },
   "*secret*": {

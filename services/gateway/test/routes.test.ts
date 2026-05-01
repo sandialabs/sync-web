@@ -10,15 +10,18 @@ interface MockJournal {
   client: JournalClient;
   jsonCalls: JournalCall[];
   schemeCalls: Array<{ expression: string; functionName: string }>;
+  proxiedJsonBodies: unknown[];
 }
 
 const createMockJournal = (): MockJournal => {
   const jsonCalls: JournalCall[] = [];
   const schemeCalls: Array<{ expression: string; functionName: string }> = [];
+  const proxiedJsonBodies: unknown[] = [];
 
   return {
     jsonCalls,
     schemeCalls,
+    proxiedJsonBodies,
     client: {
       async callJson(input: JournalCall): Promise<unknown> {
         jsonCalls.push(input);
@@ -42,6 +45,10 @@ const createMockJournal = (): MockJournal => {
         schemeCalls.push(input);
         return { ok: true, mode: "scheme", function: input.functionName };
       },
+      async proxyJson(body: unknown): Promise<unknown> {
+        proxiedJsonBodies.push(body);
+        return { ok: true, mode: "proxy-json" };
+      },
     },
   };
 };
@@ -55,6 +62,9 @@ const createApp = async (input: {
     done(null, body)
   );
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
+  app.addContentTypeParser("", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
   await app.register(gatewayRoutes, {
@@ -363,6 +373,59 @@ test("relays journal semantic error payloads as HTTP errors (JSON mode)", async 
     ],
     source: "journal",
   });
+});
+
+test("POST /api/v1/journal/interface forwards Scheme body to journal", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/journal/interface",
+    headers: { "content-type": "text/plain" },
+    payload: "((function synchronize) (arguments ((index 0))))",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.schemeCalls.length, 1);
+  assert.equal(mock.schemeCalls[0].expression, "((function synchronize) (arguments ((index 0))))");
+  assert.equal(mock.schemeCalls[0].functionName, "interface");
+});
+
+test("POST /api/v1/journal/interface forwards JSON body to journal", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const body = { function: "synchronize", arguments: { index: 0 } };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/journal/interface",
+    headers: { "content-type": "application/json" },
+    payload: body,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.proxiedJsonBodies.length, 1);
+  assert.deepEqual(mock.proxiedJsonBodies[0], body);
+});
+
+test("POST /api/v1/journal/interface treats missing content-type as Scheme (sync-remote compat)", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/journal/interface",
+    payload: "((function info))",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.schemeCalls.length, 1);
+  assert.equal(mock.schemeCalls[0].expression, "((function info))");
+  assert.equal(mock.schemeCalls[0].functionName, "interface");
 });
 
 test("OpenAPI spec includes per-operation body examples", async (t) => {
