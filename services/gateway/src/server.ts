@@ -99,7 +99,7 @@ const main = async (): Promise<void> => {
   const app = Fastify({
     logger: true,
     bodyLimit: 64 * 1024 * 1024,
-    ajv: { customOptions: { keywords: ["example"] } },
+    ajv: { customOptions: { keywords: ["example"], allowUnionTypes: true } },
   });
   instrumentGatewayRequests(app);
   const logo = readGatewayLogo();

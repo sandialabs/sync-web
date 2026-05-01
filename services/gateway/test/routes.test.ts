@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import Fastify from "fastify";
+import fastifySwagger from "@fastify/swagger";
 import { gatewayRoutes } from "../src/routes";
 import { JournalSemanticError } from "../src/journal";
 import type { JournalCall, JournalClient } from "../src/journal";
@@ -49,7 +50,7 @@ const createApp = async (input: {
   allowAdminRoutes: boolean;
   journal?: JournalClient;
 }) => {
-  const app = Fastify({ ajv: { customOptions: { keywords: ["example"] } } });
+  const app = Fastify({ ajv: { customOptions: { keywords: ["example"], allowUnionTypes: true } } });
   app.addContentTypeParser("text/plain", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
@@ -362,4 +363,48 @@ test("relays journal semantic error payloads as HTTP errors (JSON mode)", async 
     ],
     source: "journal",
   });
+});
+
+test("OpenAPI spec includes per-operation body examples", async (t) => {
+  const app = Fastify({ ajv: { customOptions: { keywords: ["example"], allowUnionTypes: true } } });
+  app.addContentTypeParser("text/plain", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
+  app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
+  await app.register(fastifySwagger, {
+    openapi: {
+      info: { title: "test", version: "0" },
+      components: {
+        securitySchemes: {
+          bearerAuth: { type: "http", scheme: "bearer" },
+          syncHeader: { type: "apiKey", in: "header", name: "X-Sync-Auth" },
+        },
+      },
+    },
+  });
+  await app.register(gatewayRoutes, {
+    journal: createMockJournal().client,
+    allowAdminRoutes: true,
+  });
+  await app.ready();
+  t.after(async () => app.close());
+
+  type SchemaWithExample = { example?: unknown };
+  type MediaType = { schema?: SchemaWithExample };
+  type Operation = { requestBody?: { content?: Record<string, MediaType> } };
+  type PathItem = Record<string, Operation>;
+  const paths = (app.swagger() as { paths: Record<string, PathItem> }).paths;
+
+  const schemaExample = (path: string) =>
+    paths[path]?.post?.requestBody?.content?.["application/json"]?.schema?.example;
+
+  assert.deepEqual(schemaExample("/api/v1/general/get"), { path: [["*state*", "mykey"]] });
+  assert.deepEqual(schemaExample("/api/v1/general/bridge"), { name: "peer-a", interface: "http://peer-a/interface" });
+  assert.deepEqual(schemaExample("/api/v1/general/batch"), {
+    queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }],
+  });
+  assert.equal(schemaExample("/api/v1/root/step"), "");
+  assert.equal(schemaExample("/api/v1/root/eval"), "(+ 1 2)");
 });
