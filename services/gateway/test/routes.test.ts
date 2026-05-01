@@ -64,9 +64,12 @@ const createApp = async (input: {
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
-  app.addContentTypeParser("", { parseAs: "string" }, (_req, body, done) =>
-    done(null, body)
-  );
+  app.addHook("preParsing", async (request, _reply, payload) => {
+    if (!request.headers["content-type"]) {
+      request.headers["content-type"] = "text/plain";
+    }
+    return payload;
+  });
   await app.register(gatewayRoutes, {
     journal: input.journal || createMockJournal().client,
     allowAdminRoutes: input.allowAdminRoutes,

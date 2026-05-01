@@ -110,12 +110,15 @@ const main = async (): Promise<void> => {
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
-  // Handle requests with no Content-Type header (e.g. sync-remote sends Scheme bodies
-  // without a Content-Type). The empty-string key matches only when the header is absent,
-  // so it does not override the built-in application/json parser.
-  app.addContentTypeParser("", { parseAs: "string" }, (_req, body, done) =>
-    done(null, body)
-  );
+  // Default Content-Type to text/plain when the header is absent so that sync-remote's
+  // Scheme bodies (sent without a Content-Type) reach the text/plain parser instead of
+  // triggering a 415. Runs before body parsing; all other content types are unaffected.
+  app.addHook("preParsing", async (request, _reply, payload) => {
+    if (!request.headers["content-type"]) {
+      request.headers["content-type"] = "text/plain";
+    }
+    return payload;
+  });
 
   await app.register(fastifySwagger, {
     openapi: {
