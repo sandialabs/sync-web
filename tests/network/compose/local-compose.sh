@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 MODE="${1:-up}"
@@ -72,4 +72,4 @@ if [ "$MODE" = "generate" ]; then
 fi
 
 cd "$SCRIPT_DIR"
-exec docker-compose up
+docker compose up
