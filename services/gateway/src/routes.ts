@@ -144,13 +144,11 @@ const generalAliases = {
   pin: "pin!",
   unpin: "unpin!",
   batch: "batch!",
-  "general-batch": "batch!",
   info: "info",
   synchronize: "synchronize",
   resolve: "resolve",
   trace: "trace",
   bridge: "bridge!",
-  "general-bridge": "bridge!",
   config: "config",
   "set-secret": "*secret*",
 } as const;
@@ -172,7 +170,7 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
   get: {
     summary: "Read staged state",
     description:
-      "Calls general function `get`. Reads the current staged view only.",
+      "Calls general function `get`. Reads the current staged view only. Scheme mode example: `((path ((*state* mykey))))`",
   },
   set: {
     summary: "Stage a state write",
@@ -199,11 +197,6 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls public general function `info`. Returns public node metadata.",
   },
-  "general-batch": {
-    summary: "Execute multiple general requests in order",
-    description:
-      "Legacy alias for `batch` that still calls general function `batch!`. Accepts a `queries` list of request-shaped entries and executes them in order against the ledger.",
-  },
   synchronize: {
     summary: "Generate synchronization payload",
     description:
@@ -223,11 +216,6 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     summary: "Register or update a bridge",
     description:
       "Calls general function `bridge!` with a bridge name and interface URL so the journal can wire its standard info/synchronize/trace handlers.",
-  },
-  "general-bridge": {
-    summary: "Register a bridge using general defaults",
-    description:
-      "Legacy alias for `bridge` that still calls general function `bridge!` with the standard general interface URL pattern.",
   },
   config: {
     summary: "Read full node config",
@@ -274,11 +262,36 @@ const rootOperationDocs: Record<string, { summary: string; description: string }
   },
 };
 
-const argumentsBodySchema = {
+const makeBodySchema = (example?: unknown) => ({
   type: ["array", "object", "string"],
   description:
     "Object/array for JSON mode, or string for Scheme mode. Preferred JSON form uses keyword arguments as a direct object body.",
-} as const;
+  ...(example !== undefined ? { example } : {}),
+});
+
+const generalOperationExamples: Record<string, unknown> = {
+  get: { path: [["*state*", "mykey"]] },
+  set: { path: [["*state*", "mykey"]], value: "myvalue" },
+  pin: { path: [-1, ["*state*", "mykey"]] },
+  unpin: { path: [-1, ["*state*", "mykey"]] },
+  resolve: { path: [-1, ["*state*", "mykey"]], "pinned?": true, "proof?": false },
+  batch: { queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }] },
+  info: {},
+  bridge: { name: "peer-a", interface: "http://peer-a/interface" },
+  config: {},
+  "set-secret": { secret: "new-secret" },
+  synchronize: { index: 0 },
+  trace: { index: 0, path: [-1, ["*state*", "mykey"]] },
+};
+
+const rootOperationExamples: Record<string, unknown> = {
+  eval: "(+ 1 2)",
+  call: "(lambda (root) ((root 'get) '(root object ledger)))",
+  step: "",
+  "set-secret": "new-admin-secret",
+  "set-step": "(lambda (root secret query) ...)",
+  "set-query": "(lambda (root query) ...)",
+};
 
 export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   app,
@@ -482,7 +495,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           description: `${generalOperationDocs[operation]?.description || "General operation."} ${requestModeDescription}`,
           consumes: ["application/json", "text/plain", "application/scheme"],
           ...(requiresAuth ? { security: restrictedSecurity } : {}),
-          body: argumentsBodySchema,
+          body: makeBodySchema(generalOperationExamples[operation]),
         },
       },
       async (request) =>
@@ -508,7 +521,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             description: `${rootOperationDocs[operation]?.description || "Root operation."} ${requestModeDescription}`,
             consumes: ["application/json", "text/plain", "application/scheme"],
             security: restrictedSecurity,
-            body: argumentsBodySchema,
+            body: makeBodySchema(rootOperationExamples[operation]),
           },
         },
         async (request) =>

@@ -49,7 +49,7 @@ const createApp = async (input: {
   allowAdminRoutes: boolean;
   journal?: JournalClient;
 }) => {
-  const app = Fastify();
+  const app = Fastify({ ajv: { customOptions: { keywords: ["example"] } } });
   app.addContentTypeParser("text/plain", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
