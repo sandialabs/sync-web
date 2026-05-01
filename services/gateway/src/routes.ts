@@ -318,7 +318,7 @@ const generalSchemeExamples: Record<string, string> = {
   trace:        "((index 0) (path (-1 (*state* mykey))))",
 };
 
-const rootOperationExamples: Record<string, unknown> = {
+const rootOperationExamples: Record<string, string> = {
   eval:          "(+ 1 2)",
   call:          "(lambda (root) ((root 'get) '(root object ledger)))",
   step:          "",
@@ -327,14 +327,6 @@ const rootOperationExamples: Record<string, unknown> = {
   "set-query":   "(lambda (root query) ...)",
 };
 
-const rootSchemeExamples: Record<string, string> = {
-  eval:          "(+ 1 2)",
-  call:          "(lambda (root) ((root 'get) '(root object ledger)))",
-  step:          "",
-  "set-secret":  "new-admin-secret",
-  "set-step":    "(lambda (root secret query) ...)",
-  "set-query":   "(lambda (root query) ...)",
-};
 
 export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   app,
@@ -562,7 +554,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
               `Root operation '${operation}'`,
             description: `${rootOperationDocs[operation]?.description || "Root operation."} ${requestModeDescription}`,
             security: restrictedSecurity,
-            body: makeBodyContent(rootOperationExamples[operation], rootSchemeExamples[operation]),
+            body: makeBodyContent(rootOperationExamples[operation], rootOperationExamples[operation]),
           },
         },
         async (request) =>
