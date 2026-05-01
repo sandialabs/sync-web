@@ -25,7 +25,7 @@ const isSchemeContentType = (contentType: string): boolean =>
   contentType === "text/plain" || contentType === "application/scheme";
 
 const isJsonContentType = (contentType: string): boolean =>
-  contentType === "application/json" || contentType === "";
+  contentType === "application/json";
 
 const requireAuth = (request: FastifyRequest): string => {
   const secret = getAuthSecret(request);
@@ -540,8 +540,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     },
     async (request, reply) => {
       const contentType = getContentType(request);
-      // Treat missing content type as Scheme: sync-remote POSTs Scheme with no Content-Type.
-      if (isSchemeContentType(contentType) || contentType === "") {
+      if (isSchemeContentType(contentType)) {
         const expression = extractSchemeArguments(request.body);
         return journal.callScheme({ expression, functionName: "interface" });
       }
