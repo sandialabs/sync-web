@@ -170,7 +170,7 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
   get: {
     summary: "Read staged state",
     description:
-      "Calls general function `get`. Reads the current staged view only. Scheme mode example: `((path ((*state* mykey))))`",
+      "Calls general function `get`. Reads the current staged view only.",
   },
   set: {
     summary: "Stage a state write",
@@ -262,35 +262,78 @@ const rootOperationDocs: Record<string, { summary: string; description: string }
   },
 };
 
-const makeBodySchema = (example?: unknown) => ({
-  type: ["array", "object", "string"],
-  description:
-    "Object/array for JSON mode, or string for Scheme mode. Preferred JSON form uses keyword arguments as a direct object body.",
-  ...(example !== undefined ? { example } : {}),
+const makeBodyContent = (jsonExample?: unknown, schemeExample?: string) => ({
+  content: {
+    "application/json": {
+      schema: {
+        type: ["array", "object"],
+        description: "Keyword argument object (preferred) or legacy array.",
+        ...(jsonExample !== undefined ? { example: jsonExample } : {}),
+      },
+    },
+    "text/plain": {
+      schema: {
+        type: "string",
+        description: "Raw Scheme arguments expression.",
+        ...(schemeExample !== undefined ? { example: schemeExample } : {}),
+      },
+    },
+    "application/scheme": {
+      schema: {
+        type: "string",
+        description: "Raw Scheme arguments expression.",
+        ...(schemeExample !== undefined ? { example: schemeExample } : {}),
+      },
+    },
+  },
 });
 
 const generalOperationExamples: Record<string, unknown> = {
-  get: { path: [["*state*", "mykey"]] },
-  set: { path: [["*state*", "mykey"]], value: "myvalue" },
-  pin: { path: [-1, ["*state*", "mykey"]] },
-  unpin: { path: [-1, ["*state*", "mykey"]] },
-  resolve: { path: [-1, ["*state*", "mykey"]], "pinned?": true, "proof?": false },
-  batch: { queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }] },
-  info: {},
-  bridge: { name: "peer-a", interface: "http://peer-a/interface" },
-  config: {},
+  get:          { path: [["*state*", "mykey"]] },
+  set:          { path: [["*state*", "mykey"]], value: "myvalue" },
+  pin:          { path: [-1, ["*state*", "mykey"]] },
+  unpin:        { path: [-1, ["*state*", "mykey"]] },
+  resolve:      { path: [-1, ["*state*", "mykey"]], "pinned?": true, "proof?": false },
+  batch:        { queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }] },
+  info:         {},
+  bridge:       { name: "peer-a", interface: "http://peer-a/interface" },
+  config:       {},
   "set-secret": { secret: "new-secret" },
-  synchronize: { index: 0 },
-  trace: { index: 0, path: [-1, ["*state*", "mykey"]] },
+  synchronize:  { index: 0 },
+  trace:        { index: 0, path: [-1, ["*state*", "mykey"]] },
+};
+
+const generalSchemeExamples: Record<string, string> = {
+  get:          "((path ((*state* mykey))))",
+  set:          "((path ((*state* mykey))) (value myvalue))",
+  pin:          "((path (-1 (*state* mykey))))",
+  unpin:        "((path (-1 (*state* mykey))))",
+  resolve:      "((path (-1 (*state* mykey))) (pinned? #t) (proof? #f))",
+  batch:        "((queries (((function get) (arguments ((path ((*state* mykey))))) ((function config))))))",
+  info:         "()",
+  bridge:       "((name peer-a) (interface \"http://peer-a/interface\"))",
+  config:       "()",
+  "set-secret": "((secret new-secret))",
+  synchronize:  "((index 0))",
+  trace:        "((index 0) (path (-1 (*state* mykey))))",
 };
 
 const rootOperationExamples: Record<string, unknown> = {
-  eval: "(+ 1 2)",
-  call: "(lambda (root) ((root 'get) '(root object ledger)))",
-  step: "",
-  "set-secret": "new-admin-secret",
-  "set-step": "(lambda (root secret query) ...)",
-  "set-query": "(lambda (root query) ...)",
+  eval:          "(+ 1 2)",
+  call:          "(lambda (root) ((root 'get) '(root object ledger)))",
+  step:          "",
+  "set-secret":  "new-admin-secret",
+  "set-step":    "(lambda (root secret query) ...)",
+  "set-query":   "(lambda (root query) ...)",
+};
+
+const rootSchemeExamples: Record<string, string> = {
+  eval:          "(+ 1 2)",
+  call:          "(lambda (root) ((root 'get) '(root object ledger)))",
+  step:          "",
+  "set-secret":  "new-admin-secret",
+  "set-step":    "(lambda (root secret query) ...)",
+  "set-query":   "(lambda (root query) ...)",
 };
 
 export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
@@ -493,9 +536,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             generalOperationDocs[operation]?.summary ||
             `General operation '${operation}'`,
           description: `${generalOperationDocs[operation]?.description || "General operation."} ${requestModeDescription}`,
-          consumes: ["application/json", "text/plain", "application/scheme"],
           ...(requiresAuth ? { security: restrictedSecurity } : {}),
-          body: makeBodySchema(generalOperationExamples[operation]),
+          body: makeBodyContent(generalOperationExamples[operation], generalSchemeExamples[operation]),
         },
       },
       async (request) =>
@@ -519,9 +561,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
               rootOperationDocs[operation]?.summary ||
               `Root operation '${operation}'`,
             description: `${rootOperationDocs[operation]?.description || "Root operation."} ${requestModeDescription}`,
-            consumes: ["application/json", "text/plain", "application/scheme"],
             security: restrictedSecurity,
-            body: makeBodySchema(rootOperationExamples[operation]),
+            body: makeBodyContent(rootOperationExamples[operation], rootSchemeExamples[operation]),
           },
         },
         async (request) =>

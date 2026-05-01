@@ -407,4 +407,11 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
   });
   assert.equal(schemaExample("/api/v1/root/step"), "");
   assert.equal(schemaExample("/api/v1/root/eval"), "(+ 1 2)");
+
+  const schemeExample = (path: string) =>
+    paths[path]?.post?.requestBody?.content?.["text/plain"]?.schema?.example;
+
+  assert.equal(schemeExample("/api/v1/general/get"), "((path ((*state* mykey))))");
+  assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (interface "http://peer-a/interface"))');
+  assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");
 });
