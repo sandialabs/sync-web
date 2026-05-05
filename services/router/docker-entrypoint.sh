@@ -17,6 +17,10 @@ location /api/ {
     proxy_pass http://${GATEWAY_HOST};
 }
 
+location /auth/ {
+    proxy_pass http://${GATEWAY_HOST};
+}
+
 location = /docs {
     proxy_pass http://${GATEWAY_HOST}/docs;
 }

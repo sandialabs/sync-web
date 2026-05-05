@@ -52,6 +52,18 @@ services:
       # Peer bridges should target the gateway interface proxy, not /interface directly:
       # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
 
+  identity-provider:
+    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.0.0}
+    container_name: identity-provider
+    networks:
+      - docker
+    volumes:
+      - identity-provider-data:/var/lib/kratos
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}
+    restart: unless-stopped
+
   router:
     image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.0.0}
     container_name: router
@@ -67,6 +79,7 @@ services:
       - explorer
       - workbench
       - gateway
+      - identity-provider
     networks:
       - docker
     ports:
@@ -96,3 +109,4 @@ services:
 
 volumes:
   database:
+  identity-provider-data:
