@@ -5,6 +5,7 @@ export interface JournalCall {
   functionName: string;
   args?: unknown;
   authentication?: string;
+  identityId?: string;
 }
 
 export interface JournalClient {
@@ -82,7 +83,12 @@ const cloneBody = (body: Record<string, unknown>): Record<string, unknown> =>
 const redactAuth = (body: Record<string, unknown>): Record<string, unknown> => {
   const cloned = cloneBody(body);
   if ("authentication" in cloned) {
-    cloned.authentication = "***REDACTED***";
+    const auth = cloned.authentication;
+    if (auth && typeof auth === "object" && "credentials" in (auth as object)) {
+      cloned.authentication = { ...(auth as Record<string, unknown>), credentials: "***REDACTED***" };
+    } else {
+      cloned.authentication = "***REDACTED***";
+    }
   }
   return cloned;
 };
@@ -147,7 +153,17 @@ export const createJournalClient = (
     }
 
     if (input.authentication) {
-      requestBody.authentication = { "*type/string*": input.authentication };
+      if (input.identityId) {
+        requestBody.authentication = {
+          identity: ["self", input.identityId],
+          credentials: [{ "*type/string*": input.authentication }, false],
+        };
+      } else {
+        requestBody.authentication = {
+          identity: ["self"],
+          credentials: [{ "*type/string*": input.authentication }],
+        };
+      }
     }
 
     const controller = new AbortController();

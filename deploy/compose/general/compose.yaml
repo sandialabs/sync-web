@@ -49,6 +49,7 @@ services:
       ROOT_SCHEME_ENDPOINT: http://journal/interface
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-30000}
       ALLOW_ADMIN_ROUTES: "1"
+      JOURNAL_SECRET: ${SECRET:-}
       KRATOS_PUBLIC_URL: http://identity-provider:4433
       # Peer bridges should target the gateway interface proxy, not /interface directly:
       # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
@@ -92,7 +93,6 @@ services:
     container_name: file-system
     depends_on:
       - journal
-      - gateway
     networks:
       - docker
     environment:
@@ -101,10 +101,7 @@ services:
       SYNC_FS_Port: 445
       SYNC_FS_ShareName: sync
       SYNC_FS_AllowGuest: "true"
-      SYNC_FS_GatewayBaseUrl: ${SYNC_FS_GatewayBaseUrl:-http://gateway/api/v1}
       SYNC_FS_JournalJsonUrl: ${SYNC_FS_JournalJsonUrl:-http://journal/interface/json}
-      SYNC_FS_GatewayTimeoutMs: ${SYNC_FS_GatewayTimeoutMs:-30000}
-      SYNC_FS_GatewayAuthToken: ${SECRET:-}
     ports:
       - "${SMB_PORT:-445}:445"
 

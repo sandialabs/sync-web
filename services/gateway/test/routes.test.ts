@@ -5,6 +5,11 @@ import fastifySwagger from "@fastify/swagger";
 import { gatewayRoutes } from "../src/routes";
 import { JournalSemanticError } from "../src/journal";
 import type { JournalCall, JournalClient } from "../src/journal";
+import type { KratosClient } from "../src/kratos";
+
+const JOURNAL_SECRET = "test-journal-secret";
+const IDENTITY_ID = "test-user-id";
+const SESSION_COOKIE = "ory_kratos_session=test-session-token";
 
 interface MockJournal {
   client: JournalClient;
@@ -53,9 +58,17 @@ const createMockJournal = (): MockJournal => {
   };
 };
 
+const createMockKratos = (identityId = IDENTITY_ID): KratosClient => ({
+  async whoami(_cookie: string) {
+    return { identity: { id: identityId } };
+  },
+});
+
 const createApp = async (input: {
   allowAdminRoutes: boolean;
   journal?: JournalClient;
+  kratos?: KratosClient;
+  journalSecret?: string;
 }) => {
   const app = Fastify({ ajv: { customOptions: { keywords: ["example"], allowUnionTypes: true } } });
   app.addContentTypeParser("text/plain", { parseAs: "string" }, (_req, body, done) =>
@@ -73,6 +86,8 @@ const createApp = async (input: {
   await app.register(gatewayRoutes, {
     journal: input.journal || createMockJournal().client,
     allowAdminRoutes: input.allowAdminRoutes,
+    journalSecret: input.journalSecret ?? JOURNAL_SECRET,
+    kratos: input.kratos ?? createMockKratos(),
   });
   await app.ready();
   return app;
@@ -89,7 +104,7 @@ test("GET /api/v1/general/size forwards to size without auth", async (t) => {
   assert.deepEqual(mock.jsonCalls[0], { functionName: "size" });
 });
 
-test("restricted route returns 401 without auth", async (t) => {
+test("restricted route returns 401 without session cookie", async (t) => {
   const app = await createApp({ allowAdminRoutes: false });
   t.after(async () => app.close());
 
@@ -104,21 +119,33 @@ test("restricted route returns 401 without auth", async (t) => {
   assert.equal(body.error, "unauthorized");
 });
 
-test("POST /api/v1/general/get accepts JSON keyword-object payload", async (t) => {
+test("restricted route returns 401 when Kratos session is invalid", async (t) => {
+  const failingKratos: KratosClient = {
+    async whoami() { throw new Error("session invalid"); },
+  };
+  const app = await createApp({ allowAdminRoutes: false, kratos: failingKratos });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/get",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: [],
+  });
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.json().error, "unauthorized");
+});
+
+test("POST /api/v1/general/get accepts JSON keyword-object payload with Kratos session", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const args = {
-    path: [["*state*", "docs"]],
-  };
+  const args = { path: [["*state*", "docs"]] };
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/json",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: args,
   });
 
@@ -127,7 +154,8 @@ test("POST /api/v1/general/get accepts JSON keyword-object payload", async (t) =
   assert.deepEqual(mock.jsonCalls[0], {
     functionName: "get",
     args,
-    authentication: "password",
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
   });
 });
 
@@ -140,10 +168,7 @@ test("POST /api/v1/general/get accepts legacy JSON array payload", async (t) => 
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/json",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: args,
   });
 
@@ -152,11 +177,12 @@ test("POST /api/v1/general/get accepts legacy JSON array payload", async (t) => 
   assert.deepEqual(mock.jsonCalls[0], {
     functionName: "get",
     args,
-    authentication: "password",
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
   });
 });
 
-test("POST /api/v1/general/get accepts Lisp payload and wraps expression", async (t) => {
+test("POST /api/v1/general/get accepts Lisp payload and injects identity into expression", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
@@ -164,10 +190,7 @@ test("POST /api/v1/general/get accepts Lisp payload and wraps expression", async
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "text/plain",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
     payload: "(((path ((*state* docs)))))",
   });
 
@@ -179,7 +202,10 @@ test("POST /api/v1/general/get accepts Lisp payload and wraps expression", async
     mock.schemeCalls[0].expression,
     /\(arguments \(\(\(path \(\(\*state\* docs\)\)\)\)\)\)/
   );
-  assert.match(mock.schemeCalls[0].expression, /\(authentication \(\(identity \(self\)\) \(credentials \("password"\)\)\)\)/);
+  assert.match(
+    mock.schemeCalls[0].expression,
+    /\(authentication \(\(identity \(self "test-user-id"\)\) \(credentials \("test-journal-secret" #f\)\)\)\)/
+  );
 });
 
 test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
@@ -189,25 +215,15 @@ test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
 
   const args = {
     queries: [
-      {
-        function: "get",
-        arguments: {
-          path: [["*state*", "docs"]],
-        },
-      },
-      {
-        function: "config",
-      },
+      { function: "get", arguments: { path: [["*state*", "docs"]] } },
+      { function: "config" },
     ],
   };
 
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/batch",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/json",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: args,
   });
 
@@ -216,11 +232,12 @@ test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
   assert.deepEqual(mock.jsonCalls[0], {
     functionName: "batch!",
     args,
-    authentication: "password",
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
   });
 });
 
-test("POST /api/v1/general/batch accepts Lisp payload and wraps expression", async (t) => {
+test("POST /api/v1/general/batch accepts Lisp payload and injects identity into expression", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
@@ -228,10 +245,7 @@ test("POST /api/v1/general/batch accepts Lisp payload and wraps expression", asy
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/batch",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "text/plain",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
     payload:
       "(((queries (((function get) (arguments ((path ((*state* docs))))) ((function config))))))",
   });
@@ -246,12 +260,11 @@ test("POST /api/v1/general/batch accepts Lisp payload and wraps expression", asy
       "((function get) (arguments ((path ((*state* docs)))))"
     )
   );
-  assert.ok(
-    mock.schemeCalls[0].expression.includes(
-      "((function config))"
-    )
+  assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
+  assert.match(
+    mock.schemeCalls[0].expression,
+    /\(authentication \(\(identity \(self "test-user-id"\)\) \(credentials \("test-journal-secret" #f\)\)\)\)/
   );
-  assert.match(mock.schemeCalls[0].expression, /\(authentication \(\(identity \(self\)\) \(credentials \("password"\)\)\)\)/);
 });
 
 test("returns 415 for unsupported content type", async (t) => {
@@ -261,10 +274,7 @@ test("returns 415 for unsupported content type", async (t) => {
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/xml",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/xml" },
     payload: "<x/>",
   });
 
@@ -279,10 +289,7 @@ test("returns 400 for JSON arguments wrapper", async (t) => {
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/json",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: { arguments: "bad" },
   });
 
@@ -297,7 +304,7 @@ test("admin root routes are disabled unless explicitly enabled", async (t) => {
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/root/step",
-    headers: { authorization: "Bearer password", "content-type": "application/json" },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: [],
   });
 
@@ -312,10 +319,7 @@ test("admin root routes forward when enabled", async (t) => {
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/root/step",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/json",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: [],
   });
 
@@ -324,7 +328,7 @@ test("admin root routes forward when enabled", async (t) => {
   assert.deepEqual(mock.jsonCalls[0], {
     functionName: "*step*",
     args: [],
-    authentication: "password",
+    authentication: JOURNAL_SECRET,
   });
 });
 
@@ -350,6 +354,9 @@ test("relays journal semantic error payloads as HTTP errors (JSON mode)", async 
     async callRootScheme(): Promise<unknown> {
       return { ok: true };
     },
+    async proxyJson(): Promise<unknown> {
+      return { ok: true };
+    },
   };
 
   const app = await createApp({ allowAdminRoutes: false, journal });
@@ -358,10 +365,7 @@ test("relays journal semantic error payloads as HTTP errors (JSON mode)", async 
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
-    headers: {
-      authorization: "Bearer password",
-      "content-type": "application/json",
-    },
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
     payload: { path: [["*state*", "docs"]], "pinned?": true, "proof?": true },
   });
 
@@ -440,19 +444,13 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
     done(null, body)
   );
   await app.register(fastifySwagger, {
-    openapi: {
-      info: { title: "test", version: "0" },
-      components: {
-        securitySchemes: {
-          bearerAuth: { type: "http", scheme: "bearer" },
-          syncHeader: { type: "apiKey", in: "header", name: "X-Sync-Auth" },
-        },
-      },
-    },
+    openapi: { info: { title: "test", version: "0" } },
   });
   await app.register(gatewayRoutes, {
     journal: createMockJournal().client,
     allowAdminRoutes: true,
+    journalSecret: JOURNAL_SECRET,
+    kratos: createMockKratos(),
   });
   await app.ready();
   t.after(async () => app.close());

@@ -1,3 +1,10 @@
+// HTTP client for the sync-web gateway API (http-gateway-* backend modes).
+// The bearer token auth path (GatewayAuthToken) is removed — the gateway no longer accepts shared secrets.
+// This client is retained as the structural foundation for the planned Kratos session token path:
+// at SMB mount time the file-system will authenticate the user via a Kratos API flow, receive a
+// session_token, and forward it in an X-Session-Token header on every gateway request so the
+// gateway can enforce per-user journal permissions without the file-system holding a root credential.
+
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;

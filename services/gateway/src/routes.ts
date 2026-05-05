@@ -1,19 +1,15 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { getAuthSecret } from "./auth";
+import { resolveIdentity, UnauthorizedError } from "./auth";
+import type { KratosClient } from "./kratos";
 import type { JournalClient } from "./journal";
 import { JournalSemanticError } from "./journal";
 
 export interface GatewayRoutesOptions {
   journal: JournalClient;
   allowAdminRoutes: boolean;
+  journalSecret: string;
+  kratos: KratosClient;
 }
-
-type OpenApiSecurityRequirement = { [securityLabel: string]: readonly string[] };
-
-const restrictedSecurity: readonly OpenApiSecurityRequirement[] = [
-  { bearerAuth: [] },
-  { syncHeader: [] },
-];
 
 const getContentType = (request: FastifyRequest): string =>
   String(request.headers["content-type"] || "")
@@ -26,12 +22,6 @@ const isSchemeContentType = (contentType: string): boolean =>
 
 const isJsonContentType = (contentType: string): boolean =>
   contentType === "application/json";
-
-const requireAuth = (request: FastifyRequest): string => {
-  const secret = getAuthSecret(request);
-  if (!secret) throw new Error("Missing authentication header");
-  return secret;
-};
 
 const escapeLispString = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -75,11 +65,16 @@ const extractSchemeArguments = (body: unknown): string => {
 const buildSchemeExpression = (
   functionName: string,
   argsExpression: string,
-  authSecret?: string
+  authSecret?: string,
+  identityId?: string
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    parts.push(`(authentication ((identity (self)) (credentials ("${escapeLispString(authSecret)}"))))`);
+    if (identityId) {
+      parts.push(`(authentication ((identity (self "${escapeLispString(identityId)}")) (credentials ("${escapeLispString(authSecret)}" #f))))`);
+    } else {
+      parts.push(`(authentication ((identity (self)) (credentials ("${escapeLispString(authSecret)}"))))`);
+    }
   }
   return `(${parts.join(" ")})`;
 };
@@ -102,9 +97,15 @@ const callWithNegotiation = async (input: {
   functionName: string;
   requiresAuth: boolean;
   root?: boolean;
+  journalSecret: string;
+  kratos: KratosClient;
 }): Promise<unknown> => {
-  const { request, journal, functionName, requiresAuth, root = false } = input;
-  const authSecret = requiresAuth ? requireAuth(request) : undefined;
+  const { request, journal, functionName, requiresAuth, root = false, journalSecret, kratos } = input;
+  const resolved = requiresAuth
+    ? await resolveIdentity(request, journalSecret, kratos)
+    : undefined;
+  const authSecret = resolved?.journalSecret;
+  const identityId = resolved?.identityId;
   const contentType = getContentType(request);
 
   if (isSchemeContentType(contentType)) {
@@ -112,7 +113,7 @@ const callWithNegotiation = async (input: {
     const expression =
       root && authSecret
         ? buildRootSchemeExpression(functionName, argsExpression, authSecret)
-        : buildSchemeExpression(functionName, argsExpression, authSecret);
+        : buildSchemeExpression(functionName, argsExpression, authSecret, identityId);
     return root
       ? journal.callRootScheme({ expression, functionName })
       : journal.callScheme({ expression, functionName });
@@ -135,6 +136,7 @@ const callWithNegotiation = async (input: {
         functionName,
         args,
         authentication: authSecret,
+        identityId,
       });
 };
 
@@ -339,7 +341,7 @@ const rootSchemeExamples: Record<string, string> = {
 
 export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   app,
-  { journal, allowAdminRoutes }
+  { journal, allowAdminRoutes, journalSecret, kratos }
 ) => {
   const rootRoutePath = "/api/v1/root";
 
@@ -370,13 +372,48 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       ul { padding-left: 1.2rem; }
       a { text-decoration: none; }
       a:hover { text-decoration: underline; }
+      #auth-status {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        background: #f0f9ff;
+        border: 1px solid #bae6fd;
+        color: #0c4a6e;
+      }
+      #auth-status.logged-in { background: #f0fdf4; border-color: #bbf7d0; color: #14532d; }
+      #auth-status.logged-out { background: #fff7ed; border-color: #fed7aa; color: #7c2d12; }
+      @media (prefers-color-scheme: dark) {
+        #auth-status { background: #0c2235; border-color: #1e4a6e; color: #7dd3fc; }
+        #auth-status.logged-in { background: #052e16; border-color: #166534; color: #86efac; }
+        #auth-status.logged-out { background: #2c1004; border-color: #7c2d12; color: #fdba74; }
+      }
+      .auth-btn {
+        margin-left: auto;
+        padding: 0.2rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .auth-btn-login { background: #0ea5e9; color: #fff; border: none; }
+      .auth-btn-logout { background: transparent; color: inherit; border: 1px solid currentColor; }
     </style>
   </head>
   <body>
     <h1>Synchronic Gateway</h1>
+
+    <div id="auth-status">
+      <span id="auth-label">Checking session…</span>
+    </div>
+
     <p>
       Web-facing gateway for Synchronic <code>general</code> and optional <code>root</code> operations.
-      This service forwards operation calls to journal endpoints with header-based authentication.
+      This service forwards operation calls to journal endpoints with session-based authentication.
     </p>
     <p>
       Use this service when you want stable, versioned HTTP endpoints that map directly to function-level journal calls
@@ -406,7 +443,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       <h2>Common Patterns</h2>
       <ul>
         <li>Public reads: <code>GET /api/v1/general/size</code>, <code>GET /api/v1/general/info</code>.</li>
-        <li>Restricted operations: send <code>Authorization: Bearer &lt;secret&gt;</code> or <code>X-Sync-Auth: &lt;secret&gt;</code>.</li>
+        <li>Restricted operations require a valid Kratos session cookie — <a href="/auth/login">log in</a> first.</li>
         <li>Mutating calls are <code>POST</code> and accept either JSON or Scheme argument bodies.</li>
       </ul>
     </div>
@@ -423,23 +460,73 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       <h2>Quick Start</h2>
       <p>Public size call:</p>
       <pre><code>curl http://127.0.0.1:8180/api/v1/general/size</code></pre>
-      <p>Authenticated call:</p>
+      <p>Authenticated call (pass session cookie from browser):</p>
       <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
-  -H "Authorization: Bearer password" \\
+  -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: application/json" \\
   -d '{"path":[["*state*","docs"]]}'</code></pre>
       <p>Scheme body call:</p>
       <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
-  -H "Authorization: Bearer password" \\
+  -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: text/plain" \\
   -d '((path ((*state* docs))))'</code></pre>
-      <p>Batch call:</p>
-      <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/batch \\
-  -H "Authorization: Bearer password" \\
-  -H "Content-Type: application/json" \\
-  -d '{"queries":[{"function":"get","arguments":{"path":[["*state*","docs"]]}},{"function":"config"}]}'</code></pre>
     </div>
   </body>
+  <script>
+    (function () {
+      async function getSession() {
+        try {
+          const res = await fetch('/auth/.ory/sessions/whoami', {
+            credentials: 'include',
+            headers: { accept: 'application/json' },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            return { loggedIn: true, email: data?.identity?.traits?.email ?? '' };
+          }
+        } catch (_) {}
+        return { loggedIn: false };
+      }
+
+      async function logout() {
+        try {
+          const res = await fetch('/auth/.ory/self-service/logout/browser?return_to=' + encodeURIComponent(window.location.origin + '/api/v1/docs'), {
+            credentials: 'include',
+            headers: { accept: 'application/json' },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.logout_url) { window.location.href = data.logout_url; return; }
+          }
+        } catch (_) {}
+        window.location.href = '/auth/login';
+      }
+
+      getSession().then(function (session) {
+        const el = document.getElementById('auth-status');
+        const label = document.getElementById('auth-label');
+        if (!el || !label) return;
+        if (session.loggedIn) {
+          el.classList.add('logged-in');
+          const emailPart = session.email ? ' as <strong>' + session.email + '</strong>' : '';
+          label.innerHTML = 'Logged in' + emailPart;
+          const btn = document.createElement('button');
+          btn.className = 'auth-btn auth-btn-logout';
+          btn.textContent = 'Log out';
+          btn.addEventListener('click', logout);
+          el.appendChild(btn);
+        } else {
+          el.classList.add('logged-out');
+          label.textContent = 'Not logged in';
+          const a = document.createElement('a');
+          a.className = 'auth-btn auth-btn-login';
+          a.href = '/auth/.ory/self-service/login/browser?return_to=' + encodeURIComponent(window.location.origin + '/api/v1/docs');
+          a.textContent = 'Log in';
+          el.appendChild(a);
+        }
+      });
+    })();
+  </script>
 </html>`)
   );
 
@@ -567,7 +654,6 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             generalOperationDocs[operation]?.summary ||
             `General operation '${operation}'`,
           description: `${generalOperationDocs[operation]?.description || "General operation."} ${requestModeDescription}`,
-          ...(requiresAuth ? { security: restrictedSecurity } : {}),
           body: makeBodyContent(generalOperationExamples[operation], generalSchemeExamples[operation]),
         },
       },
@@ -577,6 +663,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           journal,
           functionName,
           requiresAuth,
+          journalSecret,
+          kratos,
         })
     );
   }
@@ -592,7 +680,6 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
               rootOperationDocs[operation]?.summary ||
               `Root operation '${operation}'`,
             description: `${rootOperationDocs[operation]?.description || "Root operation."} ${requestModeDescription}`,
-            security: restrictedSecurity,
             body: makeBodyContent(rootOperationExamples[operation], rootSchemeExamples[operation]),
           },
         },
@@ -603,6 +690,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             functionName,
             requiresAuth: true,
             root: true,
+            journalSecret,
+            kratos,
           })
       );
     }
@@ -630,14 +719,10 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         message: errorMessage,
       });
     }
-    if (errorMessage.includes("Missing authentication header")) {
+    if (error instanceof UnauthorizedError) {
       return reply.code(401).send({
         error: "unauthorized",
-        message: "Provide Authorization: Bearer <secret> or X-Sync-Auth header",
-        hints: {
-          hasAuthorizationHeader: Boolean(request.headers.authorization),
-          hasSyncHeader: Boolean(request.headers["x-sync-auth"]),
-        },
+        message: "Valid Kratos session cookie required",
       });
     }
     if (errorMessage.includes("Unsupported content-type")) {

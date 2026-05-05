@@ -13,6 +13,7 @@ export interface GatewayConfig {
   debugForwardingIncludeAuth: boolean;
   kratosPublicUrl: string;
   authUiDir: string;
+  journalSecret: string;
 }
 
 const toNumber = (value: string | undefined, fallback: number): number => {
@@ -51,4 +52,5 @@ export const getConfig = (): GatewayConfig => ({
     process.env.KRATOS_PUBLIC_URL || "http://identity-provider:4433",
   authUiDir:
     process.env.AUTH_UI_DIR || resolve(__dirname, "../ui/dist"),
+  journalSecret: process.env.JOURNAL_SECRET || "",
 });

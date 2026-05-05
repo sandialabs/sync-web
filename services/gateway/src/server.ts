@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getConfig } from "./config";
 import { createJournalClient } from "./journal";
+import { createKratosClient } from "./kratos";
 import { instrumentGatewayRequests } from "./metrics";
 import { gatewayRoutes } from "./routes";
 
@@ -46,8 +47,6 @@ const swaggerUiTheme = `
 }
 .swagger-ui a { color: #0076a9; }
 .swagger-ui .info .title { color: #1f2937; }
-.swagger-ui .btn.authorize { border-color: #00add0; color: #00add0; }
-.swagger-ui .btn.authorize svg { fill: #00add0; }
 .swagger-ui .opblock.opblock-get { border-color: #0076a9; background: #f2f9fc; }
 .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #0076a9; }
 .swagger-ui .opblock.opblock-post { border-color: #008e74; background: #f1fbf8; }
@@ -85,6 +84,96 @@ const swaggerUiTheme = `
   .swagger-ui .response-col_status,
   .swagger-ui .response-col_description { color: #d4d4d4; }
 }
+`;
+
+const swaggerUiAuthJs = `
+(function () {
+  async function getSession() {
+    try {
+      const res = await fetch('/auth/.ory/sessions/whoami', {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { loggedIn: true, email: data?.identity?.traits?.email ?? '' };
+      }
+    } catch (_) {}
+    return { loggedIn: false };
+  }
+
+  async function logout() {
+    try {
+      const res = await fetch('/auth/.ory/self-service/logout/browser?return_to=' + encodeURIComponent(window.location.origin + '/api/v1/docs'), {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logout_url) { window.location.href = data.logout_url; return; }
+      }
+    } catch (_) {}
+    window.location.href = '/auth/login';
+  }
+
+  function injectBadge(session) {
+    const topbar = document.querySelector('.swagger-ui .topbar-wrapper');
+    if (!topbar) return false;
+
+    let badge = document.getElementById('sync-auth-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'sync-auth-badge';
+      badge.style.cssText = [
+        'display:flex', 'align-items:center', 'gap:0.6rem',
+        'margin-left:auto', 'padding-right:1rem',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
+        'font-size:0.85rem', 'white-space:nowrap',
+      ].join(';');
+      topbar.appendChild(badge);
+    }
+
+    while (badge.firstChild) badge.removeChild(badge.firstChild);
+
+    if (session.loggedIn) {
+      if (session.email) {
+        const emailSpan = document.createElement('span');
+        emailSpan.style.color = '#e0f2fe';
+        emailSpan.textContent = session.email;
+        badge.appendChild(emailSpan);
+      }
+      const btn = document.createElement('button');
+      btn.style.cssText = 'background:transparent;border:1px solid #00add0;color:#00add0;padding:0.2rem 0.65rem;border-radius:4px;cursor:pointer;font-size:0.85rem;';
+      btn.textContent = 'Log out';
+      btn.addEventListener('click', logout);
+      badge.appendChild(btn);
+    } else {
+      const a = document.createElement('a');
+      a.href = '/auth/.ory/self-service/login/browser?return_to=' + encodeURIComponent(window.location.href);
+      a.style.cssText = 'background:#00add0;color:#fff;text-decoration:none;padding:0.25rem 0.75rem;border-radius:4px;font-weight:600;';
+      a.textContent = 'Log in';
+      badge.appendChild(a);
+    }
+    return true;
+  }
+
+  async function init() {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      if (document.querySelector('.swagger-ui .topbar-wrapper') || attempts++ > 100) {
+        clearInterval(interval);
+        const session = await getSession();
+        injectBadge(session);
+      }
+    }, 100);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
 `;
 
 const readGatewayLogo = (): Buffer | null => {
@@ -157,20 +246,6 @@ const main = async (): Promise<void> => {
             "Thin pass-through endpoints that forward directly to the journal interface without transformation.",
         },
       ],
-      components: {
-        securitySchemes: {
-          bearerAuth: {
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: "Password",
-          },
-          syncHeader: {
-            type: "apiKey",
-            in: "header",
-            name: "X-Sync-Auth",
-          },
-        },
-      },
     },
   });
 
@@ -189,12 +264,12 @@ const main = async (): Promise<void> => {
       : {}),
     theme: {
       css: [{ filename: "sync-gateway-swagger-theme.css", content: swaggerUiTheme }],
+      js: [{ filename: "sync-gateway-auth.js", content: swaggerUiAuthJs }],
     },
     uiConfig: {
       docExpansion: "list",
       deepLinking: true,
-      persistAuthorization: true,
-      displayRequestDuration: true,
+displayRequestDuration: true,
     },
   });
 
@@ -278,9 +353,13 @@ const main = async (): Promise<void> => {
     return reply.sendFile("index.html");
   });
 
+  const kratos = createKratosClient(config.kratosPublicUrl);
+
   await app.register(gatewayRoutes, {
     journal,
     allowAdminRoutes: config.allowAdminRoutes,
+    journalSecret: config.journalSecret,
+    kratos,
   });
 
   await app.listen({

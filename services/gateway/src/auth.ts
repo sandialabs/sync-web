@@ -1,24 +1,29 @@
 import type { FastifyRequest } from "fastify";
+import type { KratosClient } from "./kratos";
 
-const BEARER_PREFIX = "Bearer ";
-
-export const getAuthSecret = (request: FastifyRequest): string | null => {
-  const authorization = request.headers.authorization;
-  if (authorization) {
-    const trimmed = authorization.trim();
-    if (trimmed.toLowerCase().startsWith(BEARER_PREFIX.toLowerCase())) {
-      return trimmed.slice(BEARER_PREFIX.length).trim();
-    }
-    // Fallback: accept raw Authorization token value.
-    if (trimmed.length > 0) {
-      return trimmed;
-    }
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Unauthorized");
+    this.name = "UnauthorizedError";
   }
+}
 
-  const custom = request.headers["x-sync-auth"];
-  if (typeof custom === "string" && custom.trim().length > 0) {
-    return custom.trim();
+export interface ResolvedIdentity {
+  journalSecret: string;
+  identityId: string;
+}
+
+export const resolveIdentity = async (
+  request: FastifyRequest,
+  journalSecret: string,
+  kratos: KratosClient
+): Promise<ResolvedIdentity> => {
+  const cookie = request.headers.cookie ?? "";
+  if (!cookie.includes("ory_kratos_session")) throw new UnauthorizedError();
+  try {
+    const session = await kratos.whoami(cookie);
+    return { journalSecret, identityId: session.identity.id };
+  } catch {
+    throw new UnauthorizedError();
   }
-
-  return null;
 };

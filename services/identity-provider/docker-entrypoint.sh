@@ -39,6 +39,7 @@ selfservice:
   default_browser_return_url: ${SCHEME}://${DOMAIN}/
   allowed_return_urls:
     - ${SCHEME}://${DOMAIN}/
+    - ${SCHEME}://${DOMAIN}/api/v1/docs
 
   methods:
     password:
@@ -51,6 +52,10 @@ selfservice:
     registration:
       ui_url: ${SCHEME}://${DOMAIN}/auth/registration
       lifespan: 10m
+      after:
+        password:
+          hooks:
+            - hook: session
     recovery:
       enabled: true
       ui_url: ${SCHEME}://${DOMAIN}/auth/recovery
