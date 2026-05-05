@@ -5,6 +5,25 @@
   background-color: var(--bg-primary);
 }
 
+.session-checking {
+  align-items: center;
+  justify-content: center;
+}
+
+.session-spinner {
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--border-color, #ccc);
+  border-top-color: var(--accent-color, #0ea5e9);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .main-content {
   display: flex;
   flex: 1;

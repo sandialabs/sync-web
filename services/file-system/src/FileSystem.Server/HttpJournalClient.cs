@@ -13,7 +13,7 @@ public sealed class HttpJournalClient : IGeneralInterfaceClient, IDisposable
     private readonly string? _authToken;
 
     public HttpJournalClient(ServerOptions options)
-        : this(CreateHttpClient(options), options.GatewayAuthToken, ownsHttpClient: true)
+        : this(CreateHttpClient(options), null, ownsHttpClient: true)
     {
     }
 

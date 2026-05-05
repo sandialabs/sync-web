@@ -127,7 +127,7 @@ describe('JournalService API', () => {
   });
 
   beforeEach(() => {
-    service = new JournalService('http://test-endpoint.com/api/v1', 'test-password');
+    service = new JournalService('http://test-endpoint.com/api/v1');
     mockFetch = jest.fn();
     global.fetch = mockFetch;
   });
@@ -168,7 +168,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path }),
         })
@@ -189,7 +188,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path, 'pinned?': false, 'proof?': false }),
         })
@@ -211,7 +209,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path, value: { '*type/string*': 'test value' } }),
         })
@@ -231,7 +228,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path, value: true }),
         })
@@ -253,7 +249,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path }),
         })
@@ -275,7 +270,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path }),
         })
@@ -297,7 +291,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path, value: ['nothing'] }),
         })
@@ -318,7 +311,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({
             name: 'peer-name',
@@ -348,7 +340,6 @@ describe('JournalService API', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer test-password',
           },
           body: JSON.stringify({ path: ['private', 'bridge'] }),
         })

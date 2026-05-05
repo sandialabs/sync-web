@@ -37,7 +37,7 @@ public sealed class HttpGatewayClient : IGeneralInterfaceClient, IDisposable
     private readonly string? _authToken;
 
     public HttpGatewayClient(ServerOptions options)
-        : this(CreateHttpClient(options), options.GatewayAuthToken, ownsHttpClient: true)
+        : this(CreateHttpClient(options), null, ownsHttpClient: true)
     {
     }
 

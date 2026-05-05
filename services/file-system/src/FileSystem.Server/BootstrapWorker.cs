@@ -59,8 +59,5 @@ public sealed class BootstrapWorker : BackgroundService
         _logger.LogInformation("staticRoot={StaticRoot}", _options.StaticRoot);
         _logger.LogInformation("gatewayBaseUrl={GatewayBaseUrl}", _options.GatewayBaseUrl);
         _logger.LogInformation("journalJsonUrl={JournalJsonUrl}", _options.JournalJsonUrl);
-        _logger.LogInformation(
-            "gatewayAuthTokenConfigured={GatewayAuthTokenConfigured}",
-            !string.IsNullOrWhiteSpace(_options.GatewayAuthToken));
     }
 }

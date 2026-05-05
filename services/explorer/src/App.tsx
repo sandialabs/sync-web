@@ -43,7 +43,6 @@ const getInitialTheme = (): 'light' | 'dark' => {
 
 const createInitialAppState = (): AppState => ({
   endpoint: JOURNAL_ENDPOINT,
-  authentication: getEnvVar('SYNC_EXPLORER_PASSWORD'),
   rootIndex: -1,
   selectedPath: null,
   expandedNodes: new Set(),
@@ -119,6 +118,8 @@ const replaceStagePathPrefix = (
 };
 
 const App: React.FC = () => {
+  const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready'>('checking');
+  const [sessionEmail, setSessionEmail] = useState<string>('');
   const [appState, setAppState] = useState<AppState>(createInitialAppState);
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [mode, setMode] = useState<ExplorerMode>('ledger');
@@ -140,12 +141,25 @@ const App: React.FC = () => {
   }, [theme]);
 
   useEffect(() => {
-    if (JOURNAL_ENDPOINT && appState.authentication) {
-      setJournalService(new JournalService(JOURNAL_ENDPOINT, appState.authentication));
-    } else {
-      setJournalService(null);
-    }
-  }, [appState.authentication]);
+    fetch('/auth/.ory/sessions/whoami')
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setSessionEmail(data?.identity?.traits?.email ?? '');
+          if (JOURNAL_ENDPOINT) {
+            setJournalService(new JournalService(JOURNAL_ENDPOINT));
+          }
+          setSessionStatus('ready');
+        } else {
+          window.location.href =
+            '/auth/login?return_to=' + encodeURIComponent(window.location.href);
+        }
+      })
+      .catch(() => {
+        window.location.href =
+          '/auth/login?return_to=' + encodeURIComponent(window.location.href);
+      });
+  }, []);
 
   const setLoadingState = (isLoading: boolean, error: string | null = null) => {
     setAppState((prev) => ({ ...prev, isLoading, error }));
@@ -545,17 +559,22 @@ const App: React.FC = () => {
     }
   }, [mode, stageSelection, ledgerSelection, ledgerRootPath, ledgerHops, appState.rootIndex]);
 
+  if (sessionStatus === 'checking') {
+    return (
+      <div className="app session-checking">
+        <span className="session-spinner" aria-label="Checking session…" />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <ToolBar
-        authentication={appState.authentication}
+        email={sessionEmail}
         error={appState.error}
         isLoading={appState.isLoading}
         mode={mode}
         theme={theme}
-        onAuthenticationChange={(authentication) =>
-          setAppState((prev) => ({ ...prev, authentication }))
-        }
         onModeChange={handleModeChange}
         onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
       />

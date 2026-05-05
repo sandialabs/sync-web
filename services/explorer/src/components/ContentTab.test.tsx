@@ -21,7 +21,6 @@ const mockJournalService = {
 
 const createAppState = (overrides: Partial<AppState> = {}): AppState => ({
   endpoint: 'http://test.com',
-  authentication: 'password',
   rootIndex: 100,
   selectedPath: null,
   expandedNodes: new Set(),
