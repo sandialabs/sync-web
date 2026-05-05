@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-DOMAIN="${DOMAIN:-localhost}"
+DOMAIN="${DOMAIN:?DOMAIN is required}"
+COOKIE_DOMAIN="${DOMAIN%%:*}"
 KRATOS_COOKIE_SECRET="${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}"
 CERT_FILE="${TLS_CERT_FILE:-/etc/kratos/certs/tls.crt}"
 KEY_FILE="${TLS_KEY_FILE:-/etc/kratos/certs/tls.key}"
@@ -65,7 +66,7 @@ secrets:
     - ${KRATOS_COOKIE_SECRET}
 
 cookies:
-  domain: ${DOMAIN}
+  domain: ${COOKIE_DOMAIN}
   path: /
   same_site: Lax
 

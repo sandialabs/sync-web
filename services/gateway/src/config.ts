@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 export interface GatewayConfig {
   host: string;
   port: number;
@@ -9,6 +11,8 @@ export interface GatewayConfig {
   allowAdminRoutes: boolean;
   debugForwarding: boolean;
   debugForwardingIncludeAuth: boolean;
+  kratosPublicUrl: string;
+  authUiDir: string;
 }
 
 const toNumber = (value: string | undefined, fallback: number): number => {
@@ -43,4 +47,8 @@ export const getConfig = (): GatewayConfig => ({
     process.env.DEBUG_FORWARDING_INCLUDE_AUTH,
     false
   ),
+  kratosPublicUrl:
+    process.env.KRATOS_PUBLIC_URL || "http://identity-provider:4433",
+  authUiDir:
+    process.env.AUTH_UI_DIR || resolve(__dirname, "../ui/dist"),
 });

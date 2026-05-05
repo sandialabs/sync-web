@@ -49,6 +49,7 @@ services:
       ROOT_SCHEME_ENDPOINT: http://journal/interface
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-30000}
       ALLOW_ADMIN_ROUTES: "1"
+      KRATOS_PUBLIC_URL: http://identity-provider:4433
       # Peer bridges should target the gateway interface proxy, not /interface directly:
       # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
 
@@ -60,7 +61,7 @@ services:
     volumes:
       - identity-provider-data:/var/lib/kratos
     environment:
-      DOMAIN: ${DOMAIN:-localhost}
+      DOMAIN: ${DOMAIN:-localhost:8192}
       KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}
     restart: unless-stopped
 

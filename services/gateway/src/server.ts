@@ -1,8 +1,9 @@
 import Fastify from "fastify";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import fastifyStatic from "@fastify/static";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { getConfig } from "./config";
 import { createJournalClient } from "./journal";
 import { instrumentGatewayRequests } from "./metrics";
@@ -110,6 +111,9 @@ const main = async (): Promise<void> => {
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
   // Default Content-Type to text/plain when the header is absent so that sync-remote's
   // Scheme bodies (sent without a Content-Type) reach the text/plain parser instead of
   // triggering a 415. Runs before body parsing; all other content types are unaffected.
@@ -206,6 +210,73 @@ const main = async (): Promise<void> => {
       debugForwardingIncludeAuth: config.debugForwardingIncludeAuth,
     }
   );
+
+  // Auth UI: serve static files from ui/dist, with SPA fallback for client-side routes.
+  // The /auth/.ory/* proxy must be registered before the catch-all below.
+  await app.register(fastifyStatic, {
+    root: config.authUiDir,
+    prefix: "/auth/",
+    wildcard: false,
+    decorateReply: true,
+  });
+
+  // Kratos public API proxy: strips /auth/.ory prefix and forwards to Kratos.
+  // Handles browser redirects (redirect: manual), forwards cookies both ways.
+  app.route({
+    method: ["GET", "POST", "PUT", "DELETE"],
+    url: "/auth/.ory/*",
+    schema: { hide: true },
+    handler: async (request, reply) => {
+      const upstreamPath = request.url.replace(/^\/auth\/.ory/, "");
+      const url = `${config.kratosPublicUrl}${upstreamPath}`;
+
+      const headers: Record<string, string> = {
+        accept: (request.headers.accept as string) ?? "application/json",
+      };
+      if (request.headers.cookie) headers["cookie"] = request.headers.cookie as string;
+      if (request.headers["content-type"]) headers["content-type"] = request.headers["content-type"] as string;
+      if (request.headers["x-session-token"]) headers["x-session-token"] = request.headers["x-session-token"] as string;
+
+      let body: string | undefined;
+      if (request.method !== "GET" && request.method !== "HEAD" && request.body != null) {
+        body = typeof request.body === "string" ? request.body : JSON.stringify(request.body);
+        if (!headers["content-type"]) headers["content-type"] = "application/json";
+      }
+
+      const response = await fetch(url, {
+        method: request.method,
+        headers,
+        body,
+        redirect: "manual",
+      });
+
+      reply.code(response.status);
+
+      const contentType = response.headers.get("content-type");
+      if (contentType) reply.header("content-type", contentType);
+
+      const location = response.headers.get("location");
+      if (location) reply.header("location", location);
+
+      const setCookies = response.headers.getSetCookie?.() ?? [];
+      for (const cookie of setCookies) reply.header("set-cookie", cookie);
+
+      const text = await response.text();
+      return reply.send(text || null);
+    },
+  });
+
+  // SPA fallback: serve index.html for any /auth/* path not matched by a static file
+  // or the .ory proxy above. Enables client-side routing in the auth UI.
+  app.get("/auth/*", async (request, reply) => {
+    const pathname = request.url.split("?")[0];
+    const relPath = pathname.replace(/^\/auth\/?/, "") || "index.html";
+    const filePath = resolve(config.authUiDir, relPath);
+    if (filePath.startsWith(config.authUiDir) && existsSync(filePath)) {
+      return reply.sendFile(relPath);
+    }
+    return reply.sendFile("index.html");
+  });
 
   await app.register(gatewayRoutes, {
     journal,

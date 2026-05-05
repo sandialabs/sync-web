@@ -1,3 +1,13 @@
+FROM node:20-alpine AS ui-build
+
+WORKDIR /app/ui
+
+COPY ui/package*.json ./
+RUN npm install
+
+COPY ui/ ./
+RUN npm run build
+
 FROM node:20-alpine AS build
 
 WORKDIR /app
@@ -44,6 +54,7 @@ RUN npm install --omit=dev
 
 COPY assets ./assets
 COPY --from=build /app/dist ./dist
+COPY --from=ui-build /app/ui/dist ./ui/dist
 
 EXPOSE 8180
 
