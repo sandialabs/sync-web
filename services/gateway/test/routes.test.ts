@@ -59,7 +59,7 @@ const createMockJournal = (): MockJournal => {
 };
 
 const createMockKratos = (identityId = IDENTITY_ID): KratosClient => ({
-  async whoami(_cookie: string) {
+  async whoami(_opts) {
     return { identity: { id: identityId } };
   },
 });

@@ -40,8 +40,7 @@ public sealed class StaticSmbWorker : BackgroundService
             share
         };
 
-        var securityProvider = new GSSProvider(
-            new IndependentNTLMAuthenticationProvider(GetUserPassword));
+        var securityProvider = new GSSProvider(new IndependentNTLMAuthenticationProvider(GetUserPassword));
 
         _server = new SMBServer(shares, securityProvider);
         _server.ConnectionRequested += (_, args) =>
@@ -118,16 +117,6 @@ public sealed class StaticSmbWorker : BackgroundService
         {
             var gateway = new MockGatewayClient(_options.JsonFixturePath, _logger);
             return new GatewayProjectionFileSystem("syncfs-mock-gateway-readonly", gateway);
-        }
-
-        if (string.Equals(_options.Backend, "http-gateway-readonly", StringComparison.OrdinalIgnoreCase))
-        {
-            return new GatewayProjectionFileSystem("syncfs-http-gateway-readonly", new HttpGatewayClient(_options));
-        }
-
-        if (string.Equals(_options.Backend, "http-gateway-stage", StringComparison.OrdinalIgnoreCase))
-        {
-            return new GatewayProjectionFileSystem("syncfs-http-gateway-stage", new HttpGatewayClient(_options), enableStageWrites: true);
         }
 
         if (string.Equals(_options.Backend, "http-journal-readonly", StringComparison.OrdinalIgnoreCase))

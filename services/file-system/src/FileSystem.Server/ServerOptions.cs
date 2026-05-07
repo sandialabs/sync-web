@@ -38,12 +38,7 @@ public sealed class ServerOptions
 
     public string? Password { get; set; }
 
-    // GatewayBaseUrl and GatewayTimeoutMs are used by the http-gateway-* backends and are retained
-    // for the planned Kratos session token path (see HttpGatewayClient.cs).
-    // GatewayAuthToken is intentionally absent: the bearer token auth path has been removed from
-    // the gateway; per-user auth will use X-Session-Token obtained via a Kratos API flow instead.
-    [Required]
-    public string GatewayBaseUrl { get; set; } = "http://gateway/api/v1";
+    public string? Secret { get; set; }
 
     [Required]
     public string JournalJsonUrl { get; set; } = "http://journal/interface/json";

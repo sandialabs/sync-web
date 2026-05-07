@@ -13,7 +13,7 @@ public sealed class HttpJournalClient : IGeneralInterfaceClient, IDisposable
     private readonly string? _authToken;
 
     public HttpJournalClient(ServerOptions options)
-        : this(CreateHttpClient(options), null, ownsHttpClient: true)
+        : this(CreateHttpClient(options), options.Secret, ownsHttpClient: true)
     {
     }
 
@@ -134,7 +134,7 @@ public sealed class HttpJournalClient : IGeneralInterfaceClient, IDisposable
             },
             requiresAuth: true,
             cancellationToken);
-        return HttpGatewayClient.ExtractBridgeNames(result);
+        return ExtractBridgeNames(result);
     }
 
     public void Dispose()
@@ -306,6 +306,20 @@ public sealed class HttpJournalClient : IGeneralInterfaceClient, IDisposable
         {
             return JsonValue.Create(content);
         }
+    }
+
+    internal static IReadOnlyList<string> ExtractBridgeNames(JsonNode? body)
+    {
+        var obj = body as JsonObject ?? body?["private"]?["bridge"] as JsonObject;
+        if (obj is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        return obj.Select(pair => pair.Key)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static HttpClient CreateHttpClient(ServerOptions options)

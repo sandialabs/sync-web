@@ -1,6 +1,8 @@
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using DiskAccessLibrary.FileSystems.Abstractions;
 using SMBLibrary;
 using SMBLibrary.Adapters;
@@ -179,7 +181,12 @@ public sealed class SymlinkAwareFileStore : INTFileStore
 
     public NTStatus FlushFileBuffers(object handle)
     {
-        return handle is SymlinkHandle or PendingReparseHandle ? NTStatus.STATUS_SUCCESS : _inner.FlushFileBuffers(handle);
+        if (handle is SymlinkHandle or PendingReparseHandle)
+        {
+            return NTStatus.STATUS_SUCCESS;
+        }
+
+        return _inner.FlushFileBuffers(handle);
     }
 
     public NTStatus LockFile(object handle, long byteOffset, long length, bool exclusiveLock) => _inner.LockFile(handle, byteOffset, length, exclusiveLock);
@@ -544,6 +551,7 @@ public sealed class SymlinkAwareFileStore : INTFileStore
     public NTStatus DeviceIOControl(object handle, uint ctlCode, byte[] input, out byte[] output, int maxOutputLength)
     {
         TraceRootHandle($"DeviceIOControl ctlCode=0x{ctlCode:X8}", handle);
+
         if (handle is PendingReparseHandle pendingHandle &&
             _symlinkAware != null &&
             ctlCode == (uint)IoControlCode.FSCTL_SET_REPARSE_POINT)
