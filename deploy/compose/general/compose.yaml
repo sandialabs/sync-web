@@ -14,6 +14,7 @@ services:
       WINDOW: ${WINDOW:-1024}
       RUST_LOG: ${RUST_LOG:-INFO}
       JOURNAL_UPDATE: ${JOURNAL_UPDATE:-}
+      INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
     volumes:
       - database:/srv/database
 
@@ -51,7 +52,6 @@ services:
       ALLOW_ADMIN_ROUTES: "1"
       JOURNAL_SECRET: ${SECRET:-}
       KRATOS_PUBLIC_URL: http://identity-provider:4433
-      INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
       # Peer bridges should target the gateway interface proxy, not /interface directly:
       # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
 

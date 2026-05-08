@@ -1,4 +1,4 @@
-(macro (clear? secret-1 secret-2 window root standard chain tree ledger . classes)
+(macro (clear? secret-1 secret-2 admins window root standard chain tree ledger . classes)
 
   (if (or (not (string? secret-1)) (not (string? secret-2)))
       (error 'argument-error "Interface expects admin and interface secrets to be strings"))
@@ -62,9 +62,10 @@
                    ((ledger 'update-code!) 'chain (recode chain-class))
                    ((root 'set!) '(root object ledger) (ledger)))))))
 
-  ;; define secret store
+  ;; define secret store and admin list
   (call `(lambda (root)
-           ((root 'set!) '(interface secret) (sync-hash (expression->byte-vector ,secret-2)))))
+           ((root 'set!) '(interface secret) (sync-hash (expression->byte-vector ,secret-2)))
+           ((root 'set!) '(interface admins) ,admins)))
 
   (define query-once
     '(lambda (query)
@@ -88,12 +89,31 @@
          (define (~self-call function args blocking?)
            (sync-call (~with-auth `((function ,function) (arguments ,args))) blocking?))
 
-         (define (~authenticate)
-           (let ((identity (cadr (assoc 'identity (cadr auth))))
-                 (credentials (cadr (assoc 'credentials (cadr auth)))))
-             (if (or (not (eq? (car identity) 'self))
-                     (not (equal? (sync-hash (expression->byte-vector (car credentials))) ((root 'get) '(interface secret)))))
-                 (error 'authentication-error "Could not authenticate restricted interface call"))))
+         (define (~authenticate+authorize)
+           (let* ((auth-val (cadr auth))
+                  (identity (cadr (assoc 'identity auth-val)))
+                  (credentials (cadr (assoc 'credentials auth-val)))
+                  (admins ((root 'get) '(interface admins)))
+                  (admin? (or (equal? identity '()) (member identity admins))))
+             (if (not (equal? (sync-hash (expression->byte-vector (car credentials)))
+                              ((root 'get) '(interface secret))))
+                 (error 'authentication-error "Could not authenticate restricted interface call"))
+             (if (not admin?)
+                 (let ((segment (lambda (x) (cdr (if (list? (car x)) (car x) (cadr x))))))
+                   (case (cadr func)
+                     ((set!)
+                      (if (not (apply and (map eq? identity (segment (cadr (assoc 'path arg-list))))))
+                          (error 'permissions-error "User may only write to their own space")))
+                     ((set-batch!)
+                      (for-each (lambda (path)
+                                  (if (not (apply and (map eq? identity (segment path))))
+                                      (error 'permissions-error "User may only write to their own space")))
+                                (cadr (assoc 'paths arg-list))))
+                     ((get resolve pin! unpin!)
+                      (if (not (or (apply and (map eq? identity (segment (cadr (assoc 'path arg-list)))))
+                                   (not (apply or (map (lambda (x) (eq? x '*private*)) (segment (cadr (assoc 'path arg-list))))))))
+                          (error 'permissions-error "User may not read another user's private namespace")))
+                     (else (error 'permissions-error "Operation requires admin privileges")))))))
 
          (define (~bridge-path? path)
            (and (> (length path) 1)
@@ -137,6 +157,18 @@
            ;;   Returns:
            ;;     sync hash: stored secret hash.
            ((root 'set!) '(interface secret) (sync-hash (expression->byte-vector secret))))
+
+         (define (*admins-get*)
+           ;; Return the current admin username list.
+           ((root 'get) '(interface admins)))
+
+         (define* (*admins-set* (admins (error 'arg-error "Missing arg: admins")))
+           ;; Replace the admin username list wholesale.
+           ;;   Args:
+           ;;     admins (list of strings): new admin usernames.
+           ;;   Returns:
+           ;;     stored value.
+           ((root 'set!) '(interface admins) admins))
 
          (define* (resolve (path (error 'arg-error "Missing arg: path")) pinned? proof? head)
            ;; Resolve a path, optionally using a provided proof head or remote bridge fetch.
@@ -211,12 +243,14 @@
          ;; --- dispatch ---
 
          (let ((ret (case (cadr func)
-                      ((*secret*) (~authenticate) (apply *secret* keyword-args))
-                      ((resolve) (~authenticate) (apply resolve keyword-args))
+                      ((*secret*) (~authenticate+authorize) (apply *secret* keyword-args))
+                      ((*admins-get*) (~authenticate+authorize) (apply *admins-get* keyword-args))
+                      ((*admins-set*) (~authenticate+authorize) (apply *admins-set* keyword-args))
+                      ((resolve) (~authenticate+authorize) (apply resolve keyword-args))
                       ((trace) (apply trace keyword-args))
-                      ((pin!) (~authenticate) (apply pin! keyword-args))
-                      ((bridge!) (~authenticate) (apply bridge! keyword-args))
-                      ((get set! set-batch! unpin!) (~authenticate) (~method))
+                      ((pin!) (~authenticate+authorize) (apply pin! keyword-args))
+                      ((bridge!) (~authenticate+authorize) (apply bridge! keyword-args))
+                      ((get set! set-batch! unpin!) (~authenticate+authorize) (~method))
                       ((size synchronize info config) (~method))
                       (else (error 'api-error "Interface does not implement API endpoint")))))
            ((root 'set!) '(root object ledger) (ledger))

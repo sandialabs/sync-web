@@ -11,13 +11,13 @@ const req = (headers: Record<string, string | undefined>): FastifyRequest =>
   ({ headers } as unknown as FastifyRequest);
 
 const mockKratos = (identityId: string): KratosClient => ({
-  async whoami(_opts) {
+  async whoami(_cookie) {
     return { identity: { id: identityId, traits: { username: identityId } } };
   },
 });
 
 const failingKratos: KratosClient = {
-  async whoami(_opts) {
+  async whoami(_cookie) {
     throw new Error("session invalid");
   },
 };
@@ -63,42 +63,6 @@ test("throws UnauthorizedError when cookie exists but lacks ory_kratos_session",
   );
 });
 
-test("resolves identity from valid X-Session-Token header", async () => {
-  const result = await resolveIdentity(
-    req({ "x-session-token": "kratos-token-abc" }),
-    JOURNAL_SECRET,
-    mockKratos(IDENTITY_ID)
-  );
-  assert.equal(result.identityId, IDENTITY_ID);
-});
-
-test("prefers X-Session-Token over cookie when both present", async () => {
-  let capturedOpts: unknown;
-  const capturingKratos: KratosClient = {
-    async whoami(opts) {
-      capturedOpts = opts;
-      return { identity: { id: IDENTITY_ID, traits: { username: IDENTITY_ID } } };
-    },
-  };
-  await resolveIdentity(
-    req({ "x-session-token": "token-xyz", cookie: "ory_kratos_session=abc" }),
-    JOURNAL_SECRET,
-    capturingKratos
-  );
-  assert.deepEqual(capturedOpts, { xSessionToken: "token-xyz" });
-});
-
-test("throws UnauthorizedError when X-Session-Token Kratos call fails", async () => {
-  await assert.rejects(
-    () =>
-      resolveIdentity(
-        req({ "x-session-token": "bad-token" }),
-        JOURNAL_SECRET,
-        failingKratos
-      ),
-    UnauthorizedError
-  );
-});
 
 test("resolves identity from valid Authorization Bearer journal secret", async () => {
   const result = await resolveIdentity(

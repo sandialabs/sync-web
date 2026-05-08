@@ -14,7 +14,6 @@ export interface GatewayConfig {
   kratosPublicUrl: string;
   authUiDir: string;
   journalSecret: string;
-  interfaceAdmins: string[];
 }
 
 const toNumber = (value: string | undefined, fallback: number): number => {
@@ -54,8 +53,4 @@ export const getConfig = (): GatewayConfig => ({
   authUiDir:
     process.env.AUTH_UI_DIR || resolve(__dirname, "../ui/dist"),
   journalSecret: process.env.JOURNAL_SECRET || "",
-  interfaceAdmins: (process.env.INTERFACE_ADMINS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
 });

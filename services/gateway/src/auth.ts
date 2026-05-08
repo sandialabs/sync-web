@@ -22,12 +22,10 @@ export const resolveIdentity = async (
   if (authHeader?.startsWith("Bearer ") && authHeader.slice(7) === journalSecret) {
     return { journalSecret, identityId: "system" };
   }
-  const sessionToken = request.headers["x-session-token"] as string | undefined;
   const cookie = request.headers.cookie ?? "";
-  if (!sessionToken && !cookie.includes("ory_kratos_session")) throw new UnauthorizedError();
+  if (!cookie.includes("ory_kratos_session")) throw new UnauthorizedError();
   try {
-    const kratosOpts = sessionToken ? { xSessionToken: sessionToken } : { cookie };
-    const session = await kratos.whoami(kratosOpts);
+    const session = await kratos.whoami(cookie);
     return { journalSecret, identityId: session.identity.traits.username };
   } catch {
     throw new UnauthorizedError();

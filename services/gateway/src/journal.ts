@@ -155,7 +155,7 @@ export const createJournalClient = (
     if (input.authentication) {
       if (input.identityId) {
         requestBody.authentication = {
-          identity: ["self", input.identityId],
+          identity: [input.identityId],
           credentials: [{ "*type/string*": input.authentication }, false],
         };
       } else {

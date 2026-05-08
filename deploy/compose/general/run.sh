@@ -33,6 +33,17 @@ resolve_lisp_file() {
     echo "$filename"
 }
 
+build_admins_list() {
+    result=""
+    OLD_IFS="$IFS"
+    IFS=","
+    for name in ${INTERFACE_ADMINS:-}; do
+        result="$result (list 'self \"$name\")"
+    done
+    IFS="$OLD_IFS"
+    echo "(list$result)"
+}
+
 run_startup() {
     clear_flag="$1"
     root=$( cat "$(resolve_lisp_file root.scm)" )
@@ -41,7 +52,8 @@ run_startup() {
     tree=$( cat "$(resolve_lisp_file tree.scm)" )
     ledger=$( cat "$(resolve_lisp_file ledger.scm)" )
     interface=$( cat "$(resolve_lisp_file interface.scm)" )
-    expr="($interface $clear_flag \"$SECRET\" \"$SECRET\" $WINDOW $root '$standard '$chain '$tree '$ledger)"
+    admins=$( build_admins_list )
+    expr="($interface $clear_flag \"$SECRET\" \"$SECRET\" $admins $WINDOW $root '$standard '$chain '$tree '$ledger)"
     if [ "$clear_flag" = "#f" ]; then
         expr="(*eval* \"$SECRET\" $expr)"
     fi

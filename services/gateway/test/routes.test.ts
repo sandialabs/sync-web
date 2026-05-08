@@ -204,7 +204,7 @@ test("POST /api/v1/general/get accepts Lisp payload and injects identity into ex
   );
   assert.match(
     mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity \(self "test-user-id"\)\) \(credentials \("test-journal-secret" #f\)\)\)\)/
+    /\(authentication \(\(identity \("test-user-id"\)\) \(credentials \("test-journal-secret" #f\)\)\)\)/
   );
 });
 
@@ -263,7 +263,7 @@ test("POST /api/v1/general/batch accepts Lisp payload and injects identity into 
   assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
   assert.match(
     mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity \(self "test-user-id"\)\) \(credentials \("test-journal-secret" #f\)\)\)\)/
+    /\(authentication \(\(identity \("test-user-id"\)\) \(credentials \("test-journal-secret" #f\)\)\)\)/
   );
 });
 
