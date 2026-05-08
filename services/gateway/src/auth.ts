@@ -28,7 +28,7 @@ export const resolveIdentity = async (
   try {
     const kratosOpts = sessionToken ? { xSessionToken: sessionToken } : { cookie };
     const session = await kratos.whoami(kratosOpts);
-    return { journalSecret, identityId: session.identity.id };
+    return { journalSecret, identityId: session.identity.traits.username };
   } catch {
     throw new UnauthorizedError();
   }

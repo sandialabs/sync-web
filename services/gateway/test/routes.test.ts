@@ -60,7 +60,7 @@ const createMockJournal = (): MockJournal => {
 
 const createMockKratos = (identityId = IDENTITY_ID): KratosClient => ({
   async whoami(_opts) {
-    return { identity: { id: identityId } };
+    return { identity: { id: identityId, traits: { username: identityId } } };
   },
 });
 

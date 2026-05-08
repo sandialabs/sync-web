@@ -96,7 +96,7 @@ const swaggerUiAuthJs = `
       });
       if (res.ok) {
         const data = await res.json();
-        return { loggedIn: true, email: data?.identity?.traits?.email ?? '' };
+        return { loggedIn: true, email: data?.identity?.traits?.username ?? data?.identity?.traits?.email ?? '' };
       }
     } catch (_) {}
     return { loggedIn: false };
@@ -182,6 +182,40 @@ const readGatewayLogo = (): Buffer | null => {
   } catch {
     return null;
   }
+};
+
+const escapeLispString = (value: string): string =>
+  value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+const seedInterfaceAdmins = async (
+  journal: import("./journal").JournalClient,
+  admins: string[],
+  secret: string,
+  logger: import("fastify").FastifyBaseLogger
+): Promise<void> => {
+  if (admins.length === 0) return;
+
+  const escapedSecret = escapeLispString(secret);
+  const adminListScheme = admins.map((u) => `"${escapeLispString(u)}"`).join(" ");
+  const lambda = `(lambda (root) ((root 'set!) '(interface admins) (list ${adminListScheme})))`;
+  const escapedLambda = escapeLispString(lambda);
+  const expression = `((function *call*) (authentication ((identity (self)) (credentials ("${escapedSecret}")))) (arguments ("${escapedLambda}")))`;
+
+  const maxAttempts = 12;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await journal.callRootScheme({ expression, functionName: "*call*" });
+      logger.info({ admins }, "Interface admins seeded");
+      return;
+    } catch (err) {
+      if (i < maxAttempts - 1) {
+        const delayMs = Math.min(2000 * 2 ** i, 30000);
+        logger.warn({ attempt: i + 1, delayMs }, "Admin seeding attempt failed, retrying");
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  logger.error({ admins }, "Failed to seed interface admins after all retries");
 };
 
 const main = async (): Promise<void> => {
@@ -366,6 +400,10 @@ displayRequestDuration: true,
     host: config.host,
     port: config.port,
   });
+
+  seedInterfaceAdmins(journal, config.interfaceAdmins, config.journalSecret, app.log).catch(
+    (err) => app.log.error({ err }, "Admin seeding background task failed unexpectedly")
+  );
 };
 
 main().catch((error) => {

@@ -25,5 +25,16 @@ export default function Settings() {
   if (error) return <p>{error}</p>;
   if (!flow) return null;
 
-  return <UserSettingsCard flow={flow} flowType="settings" />;
+  // Username is immutable post-registration; hide it from the self-service settings UI.
+  const filteredFlow = {
+    ...flow,
+    ui: {
+      ...flow.ui,
+      nodes: flow.ui.nodes.filter(
+        (n) => !(n.group === "profile" && "name" in n.attributes && n.attributes.name === "traits.username")
+      ),
+    },
+  };
+
+  return <UserSettingsCard flow={filteredFlow} flowType="settings" />;
 }

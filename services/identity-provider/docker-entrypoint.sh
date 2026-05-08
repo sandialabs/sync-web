@@ -88,4 +88,46 @@ EOF
 
 kratos migrate sql -c /etc/config/kratos/kratos.yml -e -y
 
+ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-${SECRET:-}}"
+
+if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ]; then
+    echo "Seeding admin identity '${ADMIN_USERNAME}'..."
+
+    "$@" $DEV_FLAG &
+    KRATOS_SEED_PID=$!
+
+    # Wait for Kratos admin API (up to 60s)
+    ATTEMPTS=0
+    until wget -qO- http://localhost:4434/health/ready > /dev/null 2>&1; do
+        ATTEMPTS=$((ATTEMPTS + 1))
+        if [ "$ATTEMPTS" -ge 30 ]; then
+            echo "Timed out waiting for Kratos admin API; skipping admin seed" >&2
+            break
+        fi
+        sleep 2
+    done
+
+    if wget -qO- http://localhost:4434/health/ready > /dev/null 2>&1; then
+        EXISTING=$(wget -qO- "http://localhost:4434/admin/identities?credentials_identifier=${ADMIN_USERNAME}" 2>/dev/null || echo "[]")
+        if [ "$EXISTING" = "[]" ]; then
+            ESC_USER=$(printf '%s' "$ADMIN_USERNAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            ESC_EMAIL=$(printf '%s' "$ADMIN_EMAIL" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            ESC_PASS=$(printf '%s' "$ADMIN_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            BODY="{\"schema_id\":\"default\",\"traits\":{\"email\":\"${ESC_EMAIL}\",\"username\":\"${ESC_USER}\"},\"credentials\":{\"password\":{\"config\":{\"password\":\"${ESC_PASS}\"}}}}"
+            if wget -qO- --header="Content-Type: application/json" --post-data="$BODY" http://localhost:4434/admin/identities > /dev/null 2>&1; then
+                echo "Admin identity '${ADMIN_USERNAME}' created"
+            else
+                echo "Failed to create admin identity '${ADMIN_USERNAME}'" >&2
+            fi
+        else
+            echo "Admin identity '${ADMIN_USERNAME}' already exists"
+        fi
+    fi
+
+    kill "$KRATOS_SEED_PID" 2>/dev/null || true
+    wait "$KRATOS_SEED_PID" 2>/dev/null || true
+fi
+
 exec "$@" $DEV_FLAG

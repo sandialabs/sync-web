@@ -12,7 +12,7 @@ const req = (headers: Record<string, string | undefined>): FastifyRequest =>
 
 const mockKratos = (identityId: string): KratosClient => ({
   async whoami(_opts) {
-    return { identity: { id: identityId } };
+    return { identity: { id: identityId, traits: { username: identityId } } };
   },
 });
 
@@ -77,7 +77,7 @@ test("prefers X-Session-Token over cookie when both present", async () => {
   const capturingKratos: KratosClient = {
     async whoami(opts) {
       capturedOpts = opts;
-      return { identity: { id: IDENTITY_ID } };
+      return { identity: { id: IDENTITY_ID, traits: { username: IDENTITY_ID } } };
     },
   };
   await resolveIdentity(

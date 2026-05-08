@@ -51,6 +51,7 @@ services:
       ALLOW_ADMIN_ROUTES: "1"
       JOURNAL_SECRET: ${SECRET:-}
       KRATOS_PUBLIC_URL: http://identity-provider:4433
+      INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
       # Peer bridges should target the gateway interface proxy, not /interface directly:
       # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
 
@@ -64,6 +65,10 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-localhost:8192}
       KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SECRET: ${SECRET:-}
     restart: unless-stopped
 
   router:
