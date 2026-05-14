@@ -13,7 +13,7 @@
     "typecheck:server": "tsc --noEmit -p tsconfig.json",
     "typecheck:ui": "npm --prefix ui run typecheck",
     "test": "npm run test:server && npm run test:ui",
-    "test:server": "node --test --import tsx test/*.test.ts",
+    "test:server": "node --test --experimental-test-coverage --import tsx test/*.test.ts",
     "test:ui": "npm --prefix ui test"
   },
   "dependencies": {

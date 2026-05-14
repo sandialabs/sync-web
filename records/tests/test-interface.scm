@@ -296,4 +296,30 @@
   (let ((query '((function set!) (arguments ((path ((*state* alice foo *private*))) (value "my private data"))))))
     (assert (interface-query journal-1 interface-1 query 'alice) #t))
 
+  ; cross-user public read — bob can read alice's non-private data
+  (let ((query '((function get) (arguments ((path ((*state* alice data))))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) "public data"))
+
+  ; set-batch! with paths from mixed owners — fails when any path is not owned by identity
+  (let ((query '((function set-batch!)
+                 (arguments ((paths (((*state* bob stuff)) ((*state* alice stuff))))
+                             (values ("val1" "val2")))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (eq? (car x) 'error))))
+
+  ; non-admin user calling bridge! — operation requires admin privileges
+  (let ((query `((function bridge!) (arguments ((name journal-2) (interface ,interface-2))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) (lambda (x) (eq? (car x) 'error))))
+
+  ; *admins-get* with root identity returns current (empty) admin list
+  (let ((query '((function *admins-get*))))
+    (assert (interface-query journal-1 interface-1 query) '()))
+
+  ; *admins-set* promotes alice to admin
+  (let ((query '((function *admins-set*) (arguments ((admins (alice)))))))
+    (assert (interface-query journal-1 interface-1 query) #t))
+
+  ; promoted alice can now call *admins-get* — confirms admin list is enforced
+  (let ((query '((function *admins-get*))))
+    (assert (interface-query journal-1 interface-1 query 'alice) '(alice)))
+
   (append "Success (" (object->string asserted) " checks)"))

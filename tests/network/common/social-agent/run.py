@@ -445,7 +445,6 @@ def run(nodes, edges):
             "bridge",
             {
                 "name": peer_node,
-                # "interface": {"*type/string*": f"http://{peer_router_host}/api/v1/journal/interface"},
                 "interface": {"*type/string*": f"http://{peer_router_host}/interface"},
             },
             client_id="setup",

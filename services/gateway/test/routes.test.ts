@@ -204,7 +204,7 @@ test("POST /api/v1/general/get accepts Lisp payload and injects identity into ex
   );
   assert.match(
     mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity test-user-id\) \(credentials \("test-journal-secret"\)\)\)\)/
+    /\(authentication \(\(identity test-user-id\) \(credentials "test-journal-secret"\)\)\)/
   );
 });
 
@@ -263,7 +263,7 @@ test("POST /api/v1/general/batch accepts Lisp payload and injects identity into 
   assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
   assert.match(
     mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity test-user-id\) \(credentials \("test-journal-secret"\)\)\)\)/
+    /\(authentication \(\(identity test-user-id\) \(credentials "test-journal-secret"\)\)\)/
   );
 });
 
@@ -433,6 +433,133 @@ test("POST /api/v1/journal/interface treats missing content-type as Scheme (sync
   assert.equal(mock.schemeCalls.length, 1);
   assert.equal(mock.schemeCalls[0].expression, "((function info))");
   assert.equal(mock.schemeCalls[0].functionName, "interface");
+});
+
+test("GET /api/v1/general/info forwards to info without auth", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({ method: "GET", url: "/api/v1/general/info" });
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.jsonCalls.length, 1);
+  assert.deepEqual(mock.jsonCalls[0], { functionName: "info" });
+});
+
+test("bearer token auth uses *journal* identity in JSON mode", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const args = { path: [["*state*", "docs"]] };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/get",
+    headers: { authorization: `Bearer ${JOURNAL_SECRET}`, "content-type": "application/json" },
+    payload: args,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.jsonCalls.length, 1);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "get",
+    args,
+    authentication: JOURNAL_SECRET,
+    identityId: undefined,
+  });
+});
+
+test("bearer token auth uses *journal* identity in Scheme mode", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/get",
+    headers: { authorization: `Bearer ${JOURNAL_SECRET}`, "content-type": "text/plain" },
+    payload: "(((path ((*state* docs)))))",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.schemeCalls.length, 1);
+  assert.match(
+    mock.schemeCalls[0].expression,
+    /\(authentication \(\(identity \*journal\*\) \(credentials "test-journal-secret"\)\)\)/
+  );
+});
+
+test("non-semantic journal error becomes 502", async (t) => {
+  const journal: JournalClient = {
+    async callJson(): Promise<unknown> { throw new Error("connection refused"); },
+    async callScheme(): Promise<unknown> { return {}; },
+    async callRootJson(): Promise<unknown> { return {}; },
+    async callRootScheme(): Promise<unknown> { return {}; },
+    async proxyJson(): Promise<unknown> { return {}; },
+  };
+  const app = await createApp({ allowAdminRoutes: false, journal });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/get",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: { path: [["*state*", "docs"]] },
+  });
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.json().error, "gateway_error");
+});
+
+test("relays journal semantic error payloads as HTTP errors (Scheme mode)", async (t) => {
+  const journal: JournalClient = {
+    async callJson(): Promise<unknown> { return {}; },
+    async callScheme(): Promise<unknown> {
+      throw new JournalSemanticError({
+        code: "permissions-error",
+        message: "User may only write to their own space",
+        details: ["error", { "*type/quoted*": "permissions-error" }, { "*type/string*": "User may only write to their own space" }],
+      });
+    },
+    async callRootJson(): Promise<unknown> { return {}; },
+    async callRootScheme(): Promise<unknown> { return {}; },
+    async proxyJson(): Promise<unknown> { return {}; },
+  };
+  const app = await createApp({ allowAdminRoutes: false, journal });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/set",
+    headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
+    payload: "((path ((*state* alice foo))) (value bar))",
+  });
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error, "permissions-error");
+  assert.equal(res.json().source, "journal");
+});
+
+test("POST /api/v1/general/set forwards with auth in JSON mode", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const args = { path: [["*state*", "mykey"]], value: "myvalue" };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/set",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: args,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "set!",
+    args,
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  });
 });
 
 test("OpenAPI spec includes per-operation body examples", async (t) => {

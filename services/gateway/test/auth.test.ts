@@ -85,3 +85,18 @@ test("throws UnauthorizedError when Authorization Bearer is wrong secret", async
     UnauthorizedError
   );
 });
+
+test("resolves with undefined identityId when whoami returns no username", async () => {
+  const noUsernameKratos: KratosClient = {
+    async whoami(_cookie) {
+      return { identity: { id: "some-id", traits: {} as { username: string } } };
+    },
+  };
+  const result = await resolveIdentity(
+    req({ cookie: "ory_kratos_session=abc123" }),
+    JOURNAL_SECRET,
+    noUsernameKratos
+  );
+  assert.equal(result.journalSecret, JOURNAL_SECRET);
+  assert.equal(result.identityId, undefined);
+});

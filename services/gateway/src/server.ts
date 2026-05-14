@@ -17,7 +17,7 @@ Start here:
 - Use GET routes for simple read-only checks: /api/v1/general/size and /api/v1/general/info.
 - Use POST /api/v1/general/{operation} for function calls that take arguments.
 - Use POST /api/v1/general/batch for ordered multi-request workflows under one authenticated call.
-- For restricted routes, provide either Authorization bearer token or X-Sync-Auth header.
+- For restricted routes, provide an Authorization bearer token.
 
 Request bodies:
 - JSON mode uses application/json with keyword arguments as a direct object body.

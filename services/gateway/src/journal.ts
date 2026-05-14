@@ -80,7 +80,7 @@ const toSemanticError = (value: unknown): JournalSemanticError | null => {
 const cloneBody = (body: Record<string, unknown>): Record<string, unknown> =>
   JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
 
-const redactAuth = (body: Record<string, unknown>): Record<string, unknown> => {
+export const redactAuth = (body: Record<string, unknown>): Record<string, unknown> => {
   const cloned = cloneBody(body);
   if ("authentication" in cloned) {
     const auth = cloned.authentication;

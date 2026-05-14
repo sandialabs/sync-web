@@ -225,7 +225,7 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
 ```scheme
 ((function *secret*)
  (arguments ((secret "new-password")))
- (authentication ((identity (self)) (credentials ("old-password")))))
+ (authentication ((identity *journal*) (credentials "old-password"))))
 ```
 
   </TabItem>
@@ -238,8 +238,8 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
     "secret": {"*type/string*": "new-password"}
   },
   "authentication": {
-    "identity": ["self"],
-    "credentials": [{"*type/string*": "old-password"}]
+    "identity": "*journal*",
+    "credentials": {"*type/string*": "old-password"}
   }
 }
 ```
@@ -355,7 +355,7 @@ For step hook updates, use the same pattern with `*set-step*`.
 
 ```scheme
 ((function config)
- (authentication ((identity (self)) (credentials ("password")))))
+ (authentication ((identity *journal*) (credentials "password"))))
 ```
 
   </TabItem>
@@ -365,8 +365,8 @@ For step hook updates, use the same pattern with `*set-step*`.
 {
   "function": "config",
   "authentication": {
-    "identity": ["self"],
-    "credentials": [{"*type/string*": "password"}]
+    "identity": "*journal*",
+    "credentials": {"*type/string*": "password"}
   }
 }
 ```

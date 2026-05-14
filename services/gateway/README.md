@@ -137,12 +137,9 @@ This matters because `*step*`, `*set-step*`, and related admin operations are ra
 
 ## Authentication Headers
 
-Restricted routes accept either:
+Restricted routes accept:
 
 - `Authorization: Bearer <secret>`
-- `X-Sync-Auth: <secret>`
-
-If both are present, the `Authorization` header is used first.
 
 ## Route Summary
 

@@ -139,6 +139,65 @@ The two execution endpoints (`/interface`, `/interface/json`) are for runtime ca
 | `POST /interface/scheme-to-json` | Converts Scheme expressions into JSON payload representations. |
 | `POST /interface/json-to-scheme` | Converts JSON payloads back into Scheme forms for debugging and validation. |
 
+### Authentication and Authorization
+
+#### Authentication
+
+Restricted operations require an `authentication` field that identifies the caller and carries the interface secret.
+
+Two identities are recognized:
+
+- **Named user** (e.g. `alice`): a registered user. The gateway injects this automatically when you are logged in via Kratos. When calling the interface directly, you supply it yourself with your username and the interface secret.
+- **Root** (`*journal*`): the journal's own root identity. Used by the gateway itself and admin automation. Has no path restrictions.
+
+When calling through the **gateway** (`/api/v1/...`), you do not construct the authentication block — the gateway handles it from your session. When calling the interface **directly** (`/interface` or `/interface/json`), you supply it manually:
+
+<Tabs syncKey="lisp-json">
+  <TabItem label="Lisp">
+
+```scheme
+(authentication ((identity alice) (credentials "interface-secret")))
+```
+
+  </TabItem>
+  <TabItem label="JSON">
+
+```json
+"authentication": {
+  "identity": "alice",
+  "credentials": {"*type/string*": "interface-secret"}
+}
+```
+
+  </TabItem>
+</Tabs>
+
+#### User namespaces and write rules
+
+Each user's writable space is `(*state* <username> ...)`. A user may only write to paths whose first segment after `*state*` matches their own username:
+
+```
+(*state* alice notes)     ← alice can write; bob cannot
+(*state* bob notes)       ← bob can write; alice cannot
+```
+
+Reads are more permissive — any authenticated user can read another user's paths unless the path contains `*private*`:
+
+```
+(*state* alice notes)              ← any authenticated user can read
+(*state* alice *private* journal)  ← only alice (or root/admin) can read
+```
+
+#### Authorization tiers
+
+| Tier | Identity | Privileges |
+| --- | --- | --- |
+| Root | `*journal*` | All operations on all paths. |
+| Admin | Named user in the admin list | All operations on all paths. |
+| User | Named user not in the admin list | Namespace and visibility rules above apply. |
+
+Operations requiring admin or root: `bridge!`, `*secret*`, `*admins-get*`, `*admins-set*`. Regular users receive a `permissions-error` on these.
+
 ### Request Envelope
 
 Most JSON integrations can standardize on this envelope and only vary `function` and `arguments`.
@@ -148,7 +207,7 @@ That keeps client implementations simple and makes troubleshooting easier across
 | --- | --- | --- | --- |
 | `function` | symbol/string | Yes | API function name |
 | `arguments` | object / association list | Usually | Keyword-style fields for ledger calls |
-| `authentication` | alist / object | Restricted calls | `((identity (self)) (credentials (<secret>)))` — identity chain and matching credentials |
+| `authentication` | alist / object | Restricted calls | `((identity alice) (credentials "secret"))` — bare symbol identity and matching credentials |
 
 > **Note:**
 >
@@ -169,7 +228,7 @@ You can copy them into Workbench first, then move them into automation once vali
  (arguments ((path ((*state* docs article hash)))
              (pinned? #t)
              (proof? #t)))
- (authentication ((identity (self)) (credentials ("password")))))
+ (authentication ((identity alice) (credentials "password"))))
 ```
 
   </TabItem>
@@ -184,8 +243,8 @@ You can copy them into Workbench first, then move them into automation once vali
     "proof?": true
   },
   "authentication": {
-    "identity": ["self"],
-    "credentials": [{"*type/string*": "password"}]
+    "identity": "alice",
+    "credentials": {"*type/string*": "password"}
   }
 }
 ```
@@ -206,7 +265,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ((function set!)
  (arguments ((path ((*state* docs article hash)))
              (value "0xabc123")))
- (authentication ((identity (self)) (credentials ("password")))))
+ (authentication ((identity alice) (credentials "password"))))
 ```
 
   </TabItem>
@@ -220,8 +279,8 @@ You can copy them into Workbench first, then move them into automation once vali
     "value": {"*type/string*": "0xabc123"}
   },
   "authentication": {
-    "identity": ["self"],
-    "credentials": [{"*type/string*": "password"}]
+    "identity": "alice",
+    "credentials": {"*type/string*": "password"}
   }
 }
 ```
@@ -237,7 +296,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function pin!)
  (arguments ((path (-1 (*state* docs article hash)))))
- (authentication ((identity (self)) (credentials ("password")))))
+ (authentication ((identity alice) (credentials "password"))))
 ```
 
   </TabItem>
@@ -248,8 +307,8 @@ You can copy them into Workbench first, then move them into automation once vali
   "function": "pin!",
   "arguments": {"path": [-1, ["*state*", "docs", "article", "hash"]]},
   "authentication": {
-    "identity": ["self"],
-    "credentials": [{"*type/string*": "password"}]
+    "identity": "alice",
+    "credentials": {"*type/string*": "password"}
   }
 }
 ```
@@ -266,7 +325,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ((function bridge!)
  (arguments ((name journal_b)
              (interface "http://journal-b.example.org/interface")))
- (authentication ((identity (self)) (credentials ("password")))))
+ (authentication ((identity *journal*) (credentials "password"))))
 ```
 
   </TabItem>
@@ -280,8 +339,8 @@ You can copy them into Workbench first, then move them into automation once vali
     "interface": {"*type/string*": "http://journal-b.example.org/interface"}
   },
   "authentication": {
-    "identity": ["self"],
-    "credentials": [{"*type/string*": "password"}]
+    "identity": "*journal*",
+    "credentials": {"*type/string*": "password"}
   }
 }
 ```
