@@ -48,8 +48,8 @@
   (define (journal-query journal query)
     (sync-call query #t journal))
 
-  (define* (interface-query journal interface query (identity ()))
-    (journal-query journal (append query `((authentication ((identity ,identity) (credentials (,interface))))))))
+  (define* (interface-query journal interface query (identity '*journal*))
+    (journal-query journal (append query `((authentication ((identity ,identity) (credentials ,interface)))))))
 
   (define (admin-step journal secret)
     (journal-query journal `(*step* ,secret)))
@@ -276,24 +276,24 @@
     (assert (interface-query journal-1 interface-1 query) #t))
 
   (let ((query '((function set!) (arguments ((path ((*state* alice data))) (value "public data"))))))
-    (assert (interface-query journal-1 interface-1 query '(alice)) #t))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
 
   (let ((query '((function set!) (arguments ((path ((*state* alice *private* data))) (value "private data"))))))
-    (assert (interface-query journal-1 interface-1 query '(alice)) #t))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
 
   (let ((query '((function set!) (arguments ((path ((*state* alice data))) (value "bob's data"))))))
-    (assert (interface-query journal-1 interface-1 query '(bob)) (lambda (x) (eq? (car x) 'error))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (eq? (car x) 'error))))
 
   (let ((query '((function get) (arguments ((path ((*state* alice data))))))))
-    (assert (interface-query journal-1 interface-1 query '(alice)) "public data"))
+    (assert (interface-query journal-1 interface-1 query 'alice) "public data"))
 
   (let ((query '((function get) (arguments ((path ((*state* alice *private* data))))))))
-    (assert (interface-query journal-1 interface-1 query '(alice)) "private data"))
+    (assert (interface-query journal-1 interface-1 query 'alice) "private data"))
 
   (let ((query '((function get) (arguments ((path ((*state* alice *private* data))))))))
-    (assert (interface-query journal-1 interface-1 query '(bob)) (lambda (x) (eq? (car x) 'error))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (eq? (car x) 'error))))
 
   (let ((query '((function set!) (arguments ((path ((*state* alice foo *private*))) (value "my private data"))))))
-    (assert (interface-query journal-1 interface-1 query '(alice)) #t))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
 
   (append "Success (" (object->string asserted) " checks)"))

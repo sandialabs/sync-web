@@ -76,8 +76,8 @@ public sealed class HttpJournalClient : IGeneralInterfaceClient, IDisposable
             {
                 item["authentication"] = new JsonObject
                 {
-                    ["identity"] = new JsonArray { "self" },
-                    ["credentials"] = new JsonArray { new JsonObject { ["*type/string*"] = _authToken } },
+                    ["identity"] = "*journal*",
+                    ["credentials"] = new JsonObject { ["*type/string*"] = _authToken },
                 };
             }
 
@@ -166,8 +166,8 @@ public sealed class HttpJournalClient : IGeneralInterfaceClient, IDisposable
 
             body["authentication"] = new JsonObject
             {
-                ["identity"] = new JsonArray { "self" },
-                ["credentials"] = new JsonArray { new JsonObject { ["*type/string*"] = _authToken } },
+                ["identity"] = "*journal*",
+                ["credentials"] = new JsonObject { ["*type/string*"] = _authToken },
             };
         }
 

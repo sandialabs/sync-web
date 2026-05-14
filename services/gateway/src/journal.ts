@@ -153,17 +153,10 @@ export const createJournalClient = (
     }
 
     if (input.authentication) {
-      if (input.identityId) {
-        requestBody.authentication = {
-          identity: [input.identityId],
-          credentials: [{ "*type/string*": input.authentication }, false],
-        };
-      } else {
-        requestBody.authentication = {
-          identity: ["self"],
-          credentials: [{ "*type/string*": input.authentication }],
-        };
-      }
+      requestBody.authentication = {
+        identity: input.identityId ?? "*journal*",
+        credentials: { "*type/string*": input.authentication },
+      };
     }
 
     const controller = new AbortController();

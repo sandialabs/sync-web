@@ -38,7 +38,7 @@ build_admins_list() {
     OLD_IFS="$IFS"
     IFS=","
     for name in ${INTERFACE_ADMINS:-}; do
-        result="$result (list 'self \"$name\")"
+        result="$result '$name"
     done
     IFS="$OLD_IFS"
     echo "(list$result)"

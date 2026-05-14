@@ -71,7 +71,7 @@ test("resolves identity from valid Authorization Bearer journal secret", async (
     failingKratos
   );
   assert.equal(result.journalSecret, JOURNAL_SECRET);
-  assert.equal(result.identityId, "system");
+  assert.equal(result.identityId, undefined);
 });
 
 test("throws UnauthorizedError when Authorization Bearer is wrong secret", async () => {

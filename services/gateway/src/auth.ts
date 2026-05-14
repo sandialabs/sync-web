@@ -10,7 +10,7 @@ export class UnauthorizedError extends Error {
 
 export interface ResolvedIdentity {
   journalSecret: string;
-  identityId: string;
+  identityId?: string;
 }
 
 export const resolveIdentity = async (
@@ -20,7 +20,7 @@ export const resolveIdentity = async (
 ): Promise<ResolvedIdentity> => {
   const authHeader = request.headers["authorization"] as string | undefined;
   if (authHeader?.startsWith("Bearer ") && authHeader.slice(7) === journalSecret) {
-    return { journalSecret, identityId: "system" };
+    return { journalSecret };
   }
   const cookie = request.headers.cookie ?? "";
   if (!cookie.includes("ory_kratos_session")) throw new UnauthorizedError();
