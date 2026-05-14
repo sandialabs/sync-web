@@ -4,7 +4,7 @@ networks:
 
 services:
   journal:
-    image: ghcr.io/sandialabs/sync-web/general:${SYNC_WEB_VERSION:-1.0.0}
+    image: ghcr.io/sandialabs/sync-web/general:${SYNC_WEB_VERSION:-1.1.0}
     container_name: journal
     networks:
       - docker
@@ -19,7 +19,7 @@ services:
       - database:/srv/database
 
   explorer:
-    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.0.0}
+    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.1.0}
     container_name: explorer
     networks:
       - docker
@@ -27,7 +27,7 @@ services:
       SYNC_EXPLORER_ENDPOINT: /api/v1
 
   workbench:
-    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.0.0}
+    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.1.0}
     container_name: workbench
     networks:
       - docker
@@ -35,7 +35,7 @@ services:
       SYNC_WORKBENCH_ENDPOINT: /interface
 
   gateway:
-    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.0.0}
+    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.1.0}
     container_name: gateway
     networks:
       - docker
@@ -71,7 +71,7 @@ services:
     restart: unless-stopped
 
   router:
-    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.0.0}
+    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.1.0}
     container_name: router
     environment:
       TLS_CERT_FILE: ${TLS_CERT_FILE:-/etc/nginx/certs/tls.crt}
@@ -93,7 +93,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
 
   file-system:
-    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.0.0}
+    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.1.0}
     container_name: file-system
     depends_on:
       - gateway
