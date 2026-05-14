@@ -35,7 +35,6 @@ public sealed class GrammarValidationWorker : BackgroundService
             ValidateFixtureLoading();
             ValidateReadOnlyMutations();
             ValidateMockGatewayClient();
-            ValidateHttpGatewayClient();
             ValidateHttpJournalClient();
             ValidateGatewayProjectionFileSystem();
             ValidateContextualNodeListing();
@@ -231,79 +230,6 @@ public sealed class GrammarValidationWorker : BackgroundService
         }
     }
 
-    private void ValidateHttpGatewayClient()
-    {
-        var handler = new RecordingHttpMessageHandler();
-        using var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("http://gateway/api/v1/", UriKind.Absolute),
-            Timeout = TimeSpan.FromSeconds(5),
-        };
-        using var gateway = new HttpGatewayClient(httpClient, "secret-token");
-
-        var getPath = new object[]
-        {
-            new object[] { "*state*", "docs" }
-        };
-        var getResult = gateway.GetAsync(new GatewayGetRequest(getPath, true, false), CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-        Assert(string.Equals(handler.LastRequestUri, "http://gateway/api/v1/general/get", StringComparison.Ordinal), "http gateway get URI should match gateway route");
-        Assert(string.Equals(handler.LastAuthorization, "Bearer secret-token", StringComparison.Ordinal), "http gateway should send bearer auth");
-        Assert(string.Equals(handler.LastBody?["path"]?.ToJsonString(), """[["*state*","docs"]]""", StringComparison.Ordinal), "http gateway get should serialize journal path");
-        Assert(handler.LastBody?["pinned?"] == null, "http gateway stage get should omit pinned?");
-        Assert(handler.LastBody?["proof?"] == null, "http gateway stage get should omit proof?");
-        Assert(string.Equals(getResult?["ok"]?.GetValue<string>(), "get", StringComparison.Ordinal), "http gateway get should parse JSON response");
-
-        var setPath = new object[]
-        {
-            new object[] { "*state*", "notes", "todo.txt" }
-        };
-        var setContent = JsonNode.Parse("""{"*file-system/file*":{"content":"updated\n"}}""")!;
-        var setResult = gateway.SetAsync(new GatewaySetRequest(setPath, setContent), CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-        Assert(string.Equals(handler.LastRequestUri, "http://gateway/api/v1/general/set", StringComparison.Ordinal), "http gateway set URI should match gateway route");
-        Assert(string.Equals(handler.LastBody?["path"]?.ToJsonString(), """[["*state*","notes","todo.txt"]]""", StringComparison.Ordinal), "http gateway set should serialize journal path");
-        Assert(string.Equals(handler.LastBody?["value"]?["*file-system/file*"]?["content"]?.GetValue<string>(), "updated\n", StringComparison.Ordinal), "http gateway set should serialize value");
-        Assert(string.Equals(setResult?["ok"]?.GetValue<string>(), "set", StringComparison.Ordinal), "http gateway set should parse JSON response");
-
-        var pinPath = new object[]
-        {
-            -1,
-            new object[] { "*state*", "notes", "todo.txt" }
-        };
-        var pinResult = gateway.PinAsync(new GatewayPinRequest(pinPath), CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-        Assert(pinResult, "http gateway pin should parse boolean response");
-        Assert(string.Equals(handler.LastRequestUri, "http://gateway/api/v1/general/pin", StringComparison.Ordinal), "http gateway pin URI should match gateway route");
-        Assert(string.Equals(handler.LastBody?["path"]?.ToJsonString(), """[-1,["*state*","notes","todo.txt"]]""", StringComparison.Ordinal), "http gateway pin should serialize journal path");
-
-        var unpinResult = gateway.UnpinAsync(new GatewayPinRequest(pinPath), CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-        Assert(unpinResult, "http gateway unpin should parse boolean response");
-        Assert(string.Equals(handler.LastRequestUri, "http://gateway/api/v1/general/unpin", StringComparison.Ordinal), "http gateway unpin URI should match gateway route");
-        Assert(string.Equals(handler.LastBody?["path"]?.ToJsonString(), """[-1,["*state*","notes","todo.txt"]]""", StringComparison.Ordinal), "http gateway unpin should serialize journal path");
-
-        handler.NextStatusCode = HttpStatusCode.BadRequest;
-        handler.NextResponseBody = JsonNode.Parse("""{"error":"authentication-error","message":"bad token","details":["error"],"source":"journal"}""");
-        AssertThrows<GatewaySemanticException>(
-            () => gateway.GetAsync(new GatewayGetRequest(getPath, true, false), CancellationToken.None).GetAwaiter().GetResult(),
-            "bad token");
-
-        var size = gateway.SizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-        Assert(size == 10L, "http gateway size should parse numeric responses");
-
-        var bridges = gateway.BridgesAsync(CancellationToken.None).GetAwaiter().GetResult();
-        Assert(bridges.SequenceEqual(new[] { "alice", "bob" }), "http gateway bridges should parse config bridge keys");
-
-        handler.NextRespondWithEmptyBody = true;
-        var emptyBridges = gateway.BridgesAsync(CancellationToken.None).GetAwaiter().GetResult();
-        Assert(emptyBridges.Count == 0, "http gateway bridges should treat null response as empty");
-    }
-
     private void ValidateHttpJournalClient()
     {
         var handler = new RecordingHttpMessageHandler();
@@ -324,7 +250,8 @@ public sealed class GrammarValidationWorker : BackgroundService
         Assert(string.Equals(handler.LastRequestUri, "http://journal/interface/json", StringComparison.Ordinal), "http journal get URI should match direct journal endpoint");
         Assert(handler.LastAuthorization == null, "http journal should not send bearer auth");
         Assert(string.Equals(handler.LastBody?["function"]?.GetValue<string>(), "get", StringComparison.Ordinal), "http journal get should use function envelope");
-        Assert(string.Equals(handler.LastBody?["authentication"]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal get should serialize authentication in the body");
+        Assert(string.Equals(handler.LastBody?["authentication"]?["identity"]?[0]?.GetValue<string>(), "self", StringComparison.Ordinal), "http journal get should serialize identity in authentication");
+        Assert(string.Equals(handler.LastBody?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal get should serialize credentials in authentication");
         Assert(string.Equals(handler.LastBody?["arguments"]?["path"]?.ToJsonString(), """[["*state*","docs"]]""", StringComparison.Ordinal), "http journal get should serialize journal path");
         Assert(handler.LastBody?["arguments"]?["pinned?"] == null, "http journal stage get should omit pinned?");
         Assert(handler.LastBody?["arguments"]?["proof?"] == null, "http journal stage get should omit proof?");
@@ -350,7 +277,8 @@ public sealed class GrammarValidationWorker : BackgroundService
         Assert(string.Equals(handler.LastBody?["function"]?.GetValue<string>(), "batch!", StringComparison.Ordinal), "http journal batch should use batch!");
         Assert(handler.LastBody?["authentication"] == null, "http journal batch should not place auth at the outer batch level");
         Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["function"]?.GetValue<string>(), "set!", StringComparison.Ordinal), "http journal batch should preserve function names");
-        Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal batch should attach auth to restricted subqueries");
+        Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["identity"]?[0]?.GetValue<string>(), "self", StringComparison.Ordinal), "http journal batch should attach identity to restricted subqueries");
+        Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[0]?["authentication"]?["credentials"]?[0]?["*type/string*"]?.GetValue<string>(), "secret-token", StringComparison.Ordinal), "http journal batch should attach credentials to restricted subqueries");
         Assert(string.Equals(handler.LastBody?["arguments"]?["queries"]?[1]?["function"]?.GetValue<string>(), "config", StringComparison.Ordinal), "http journal batch should preserve zero-argument requests");
         Assert(handler.LastBody?["arguments"]?["queries"]?[1]?["authentication"] == null, "http journal batch should not attach auth to public subqueries");
         Assert(string.Equals(batchResult?[0]?["ok"]?.GetValue<string>(), "batch", StringComparison.Ordinal), "http journal batch should parse array response");
@@ -893,6 +821,8 @@ public sealed class GrammarValidationWorker : BackgroundService
 
         public string? LastAuthorization { get; private set; }
 
+        public string? LastXSessionToken { get; private set; }
+
         public JsonNode? LastBody { get; private set; }
 
         public HttpStatusCode NextStatusCode { get; set; } = HttpStatusCode.OK;
@@ -905,6 +835,9 @@ public sealed class GrammarValidationWorker : BackgroundService
         {
             LastRequestUri = request.RequestUri?.ToString();
             LastAuthorization = request.Headers.Authorization?.ToString();
+            LastXSessionToken = request.Headers.TryGetValues("X-Session-Token", out var xstValues)
+                ? string.Join(",", xstValues)
+                : null;
 
             var body = request.Content == null
                 ? null

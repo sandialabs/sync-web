@@ -26,6 +26,7 @@ It adds:
 
 ```bash
 npm install
+npm --prefix ui install
 ```
 
 ### Run (dev)
@@ -40,11 +41,15 @@ npm run dev
 npm run build
 ```
 
+Builds both the React auth UI and the Fastify server from the gateway parent package.
+
 ### Unit tests
 
 ```bash
 npm test
 ```
+
+Runs the server tests and the auth UI test script. The UI test currently typechecks the Vite app.
 
 ### Run (prod)
 
@@ -132,12 +137,9 @@ This matters because `*step*`, `*set-step*`, and related admin operations are ra
 
 ## Authentication Headers
 
-Restricted routes accept either:
+Restricted routes accept:
 
 - `Authorization: Bearer <secret>`
-- `X-Sync-Auth: <secret>`
-
-If both are present, the `Authorization` header is used first.
 
 ## Route Summary
 

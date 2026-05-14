@@ -43,7 +43,6 @@ const getInitialTheme = (): 'light' | 'dark' => {
 
 const createInitialAppState = (): AppState => ({
   endpoint: JOURNAL_ENDPOINT,
-  authentication: getEnvVar('SYNC_EXPLORER_PASSWORD'),
   rootIndex: -1,
   selectedPath: null,
   expandedNodes: new Set(),
@@ -119,6 +118,8 @@ const replaceStagePathPrefix = (
 };
 
 const App: React.FC = () => {
+  const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'unauthenticated' | 'error'>('checking');
+  const [sessionName, setSessionName] = useState<string>('');
   const [appState, setAppState] = useState<AppState>(createInitialAppState);
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [mode, setMode] = useState<ExplorerMode>('ledger');
@@ -140,12 +141,23 @@ const App: React.FC = () => {
   }, [theme]);
 
   useEffect(() => {
-    if (JOURNAL_ENDPOINT && appState.authentication) {
-      setJournalService(new JournalService(JOURNAL_ENDPOINT, appState.authentication));
-    } else {
-      setJournalService(null);
-    }
-  }, [appState.authentication]);
+    fetch('/auth/.ory/sessions/whoami')
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setSessionName(data?.identity?.traits?.username ?? '');
+          if (JOURNAL_ENDPOINT) {
+            setJournalService(new JournalService(JOURNAL_ENDPOINT));
+          }
+          setSessionStatus('ready');
+        } else {
+          setSessionStatus('unauthenticated');
+        }
+      })
+      .catch(() => {
+        setSessionStatus('error');
+      });
+  }, []);
 
   const setLoadingState = (isLoading: boolean, error: string | null = null) => {
     setAppState((prev) => ({ ...prev, isLoading, error }));
@@ -545,17 +557,57 @@ const App: React.FC = () => {
     }
   }, [mode, stageSelection, ledgerSelection, ledgerRootPath, ledgerHops, appState.rootIndex]);
 
+  if (sessionStatus === 'checking') {
+    return (
+      <div className="app session-checking">
+        <span className="session-spinner" aria-label="Checking session…" />
+      </div>
+    );
+  }
+
+  if (sessionStatus === 'unauthenticated' || sessionStatus === 'error') {
+    const signInUrl = '/auth/login?return_to=' + encodeURIComponent(window.location.href);
+    return (
+      <div className="app">
+        <ToolBar
+          sessionName=""
+          error={sessionStatus === 'error' ? 'Could not check session' : null}
+          isLoading={false}
+          mode={mode}
+          theme={theme}
+          onModeChange={handleModeChange}
+          onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
+        />
+
+        <div className="session-required">
+          <section className="session-required-panel">
+            <div className="session-required-kicker">Authentication</div>
+            <h1>Sign in to use Explorer</h1>
+            <p>
+              Explorer needs a Synchronic session before it can read or write journal state.
+            </p>
+            <div className="session-required-actions">
+              <a className="button button-primary" href={signInUrl}>Sign in</a>
+              {sessionStatus === 'error' && (
+                <button className="button button-secondary" onClick={() => window.location.reload()}>
+                  Retry
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <ToolBar
-        authentication={appState.authentication}
+        sessionName={sessionName}
         error={appState.error}
         isLoading={appState.isLoading}
         mode={mode}
         theme={theme}
-        onAuthenticationChange={(authentication) =>
-          setAppState((prev) => ({ ...prev, authentication }))
-        }
         onModeChange={handleModeChange}
         onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
       />

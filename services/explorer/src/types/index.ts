@@ -4,7 +4,6 @@
 
 export interface AppState {
   endpoint: string;
-  authentication: string;
   rootIndex: number;
   selectedPath: JournalPath | null;
   expandedNodes: Set<string>;
@@ -67,7 +66,6 @@ export interface HistoryEntry {
 export interface JournalRequest {
   function: string;
   arguments?: Record<string, any> | any[];
-  authentication?: string;
 }
 
 export interface SchemeString {

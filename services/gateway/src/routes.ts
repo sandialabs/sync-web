@@ -1,19 +1,15 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { getAuthSecret } from "./auth";
+import { resolveIdentity, UnauthorizedError } from "./auth";
+import type { KratosClient } from "./kratos";
 import type { JournalClient } from "./journal";
 import { JournalSemanticError } from "./journal";
 
 export interface GatewayRoutesOptions {
   journal: JournalClient;
   allowAdminRoutes: boolean;
+  journalSecret: string;
+  kratos: KratosClient;
 }
-
-type OpenApiSecurityRequirement = { [securityLabel: string]: readonly string[] };
-
-const restrictedSecurity: readonly OpenApiSecurityRequirement[] = [
-  { bearerAuth: [] },
-  { syncHeader: [] },
-];
 
 const getContentType = (request: FastifyRequest): string =>
   String(request.headers["content-type"] || "")
@@ -25,13 +21,7 @@ const isSchemeContentType = (contentType: string): boolean =>
   contentType === "text/plain" || contentType === "application/scheme";
 
 const isJsonContentType = (contentType: string): boolean =>
-  contentType === "application/json" || contentType === "";
-
-const requireAuth = (request: FastifyRequest): string => {
-  const secret = getAuthSecret(request);
-  if (!secret) throw new Error("Missing authentication header");
-  return secret;
-};
+  contentType === "application/json";
 
 const escapeLispString = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -75,11 +65,13 @@ const extractSchemeArguments = (body: unknown): string => {
 const buildSchemeExpression = (
   functionName: string,
   argsExpression: string,
-  authSecret?: string
+  authSecret?: string,
+  identityId?: string
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    parts.push(`(authentication "${escapeLispString(authSecret)}")`);
+    const identity = identityId ?? "*journal*";
+    parts.push(`(authentication ((identity ${identity}) (credentials "${escapeLispString(authSecret)}")))`);
   }
   return `(${parts.join(" ")})`;
 };
@@ -102,9 +94,15 @@ const callWithNegotiation = async (input: {
   functionName: string;
   requiresAuth: boolean;
   root?: boolean;
+  journalSecret: string;
+  kratos: KratosClient;
 }): Promise<unknown> => {
-  const { request, journal, functionName, requiresAuth, root = false } = input;
-  const authSecret = requiresAuth ? requireAuth(request) : undefined;
+  const { request, journal, functionName, requiresAuth, root = false, journalSecret, kratos } = input;
+  const resolved = requiresAuth
+    ? await resolveIdentity(request, journalSecret, kratos)
+    : undefined;
+  const authSecret = resolved?.journalSecret;
+  const identityId = resolved?.identityId;
   const contentType = getContentType(request);
 
   if (isSchemeContentType(contentType)) {
@@ -112,7 +110,7 @@ const callWithNegotiation = async (input: {
     const expression =
       root && authSecret
         ? buildRootSchemeExpression(functionName, argsExpression, authSecret)
-        : buildSchemeExpression(functionName, argsExpression, authSecret);
+        : buildSchemeExpression(functionName, argsExpression, authSecret, identityId);
     return root
       ? journal.callRootScheme({ expression, functionName })
       : journal.callScheme({ expression, functionName });
@@ -135,6 +133,7 @@ const callWithNegotiation = async (input: {
         functionName,
         args,
         authentication: authSecret,
+        identityId,
       });
 };
 
@@ -144,13 +143,11 @@ const generalAliases = {
   pin: "pin!",
   unpin: "unpin!",
   batch: "batch!",
-  "general-batch": "batch!",
   info: "info",
   synchronize: "synchronize",
   resolve: "resolve",
   trace: "trace",
   bridge: "bridge!",
-  "general-bridge": "bridge!",
   config: "config",
   "set-secret": "*secret*",
 } as const;
@@ -199,11 +196,6 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls public general function `info`. Returns public node metadata.",
   },
-  "general-batch": {
-    summary: "Execute multiple general requests in order",
-    description:
-      "Legacy alias for `batch` that still calls general function `batch!`. Accepts a `queries` list of request-shaped entries and executes them in order against the ledger.",
-  },
   synchronize: {
     summary: "Generate synchronization payload",
     description:
@@ -223,11 +215,6 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     summary: "Register or update a bridge",
     description:
       "Calls general function `bridge!` with a bridge name and interface URL so the journal can wire its standard info/synchronize/trace handlers.",
-  },
-  "general-bridge": {
-    summary: "Register a bridge using general defaults",
-    description:
-      "Legacy alias for `bridge` that still calls general function `bridge!` with the standard general interface URL pattern.",
   },
   config: {
     summary: "Read full node config",
@@ -274,15 +261,84 @@ const rootOperationDocs: Record<string, { summary: string; description: string }
   },
 };
 
-const argumentsBodySchema = {
-  type: ["array", "object", "string"],
-  description:
-    "Object/array for JSON mode, or string for Scheme mode. Preferred JSON form uses keyword arguments as a direct object body.",
-} as const;
+const makeBodyContent = (jsonExample?: unknown, schemeExample?: string) => ({
+  content: {
+    "application/json": {
+      schema: {
+        type: ["array", "object"],
+        description: "Keyword argument object (preferred) or legacy array.",
+        ...(jsonExample !== undefined ? { example: jsonExample } : {}),
+      },
+    },
+    "text/plain": {
+      schema: {
+        type: "string",
+        description: "Raw Scheme arguments expression.",
+        ...(schemeExample !== undefined ? { example: schemeExample } : {}),
+      },
+    },
+    "application/scheme": {
+      schema: {
+        type: "string",
+        description: "Raw Scheme arguments expression.",
+        ...(schemeExample !== undefined ? { example: schemeExample } : {}),
+      },
+    },
+  },
+});
+
+const generalOperationExamples: Record<string, unknown> = {
+  get:          { path: [["*state*", "mykey"]] },
+  set:          { path: [["*state*", "mykey"]], value: "myvalue" },
+  pin:          { path: [-1, ["*state*", "mykey"]] },
+  unpin:        { path: [-1, ["*state*", "mykey"]] },
+  resolve:      { path: [-1, ["*state*", "mykey"]], "pinned?": true, "proof?": false },
+  batch:        { queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }] },
+  info:         {},
+  bridge:       { name: "peer-a", interface: "http://peer-a/interface" },
+  config:       {},
+  "set-secret": { secret: "new-secret" },
+  synchronize:  { index: 0 },
+  trace:        { index: 0, path: [-1, ["*state*", "mykey"]] },
+};
+
+const generalSchemeExamples: Record<string, string> = {
+  get:          "((path ((*state* mykey))))",
+  set:          "((path ((*state* mykey))) (value myvalue))",
+  pin:          "((path (-1 (*state* mykey))))",
+  unpin:        "((path (-1 (*state* mykey))))",
+  resolve:      "((path (-1 (*state* mykey))) (pinned? #t) (proof? #f))",
+  batch:        "((queries (((function get) (arguments ((path ((*state* mykey))))) ((function config))))))",
+  info:         "()",
+  bridge:       "((name peer-a) (interface \"http://peer-a/interface\"))",
+  config:       "()",
+  "set-secret": "((secret new-secret))",
+  synchronize:  "((index 0))",
+  trace:        "((index 0) (path (-1 (*state* mykey))))",
+};
+
+const rootOperationExamples: Record<string, unknown> = {
+  eval:          [["+", 1, 2]],
+  call:          [["lambda", ["root"], [["root", { "*type/quoted*": "get" }], { "*type/quoted*": ["root", "object", "ledger"] }]]],
+  step:          [],
+  "set-secret":  [{ "*type/string*": "new-admin-secret" }],
+  "set-step":    [["lambda", ["root", "secret", "query"], "root"]],
+  "set-query":   [["lambda", ["root", "query"], "root"]],
+};
+
+const rootSchemeExamples: Record<string, string> = {
+  eval:          "(+ 1 2)",
+  call:          "(lambda (root) ((root 'get) '(root object ledger)))",
+  step:          "",
+  "set-secret":  '"new-admin-secret"',
+  "set-step":    "(lambda (root secret query) root)",
+  "set-query":   "(lambda (root query) root)",
+};
+
 
 export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   app,
-  { journal, allowAdminRoutes }
+  { journal, allowAdminRoutes, journalSecret, kratos }
 ) => {
   const rootRoutePath = "/api/v1/root";
 
@@ -294,47 +350,229 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Synchronic Gateway</title>
     <style>
-      :root { color-scheme: light dark; }
+      :root {
+        color-scheme: light;
+        --blue: #00add0;
+        --medium-blue: #0076a9;
+        --dark-blue: #002b4c;
+        --teal: #008e74;
+        --blue-gray: #7d8ea0;
+        --toolbar-bg: #171a1f;
+        --toolbar-text: #ffffff;
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8f8f8;
+        --text-primary: #002b4c;
+        --text-secondary: #7d8ea0;
+        --border-color: #e0e0e0;
+      }
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --toolbar-bg: #101318;
+        --toolbar-text: #f3f6fb;
+        --bg-primary: #181a1f;
+        --bg-secondary: #20242b;
+        --text-primary: #f0f3f8;
+        --text-secondary: #a1abb8;
+        --border-color: #343b46;
+      }
       body {
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         margin: 0;
-        padding: 2rem;
-        max-width: 880px;
         line-height: 1.45;
+        background: var(--bg-primary);
+        color: var(--text-primary);
       }
       code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      main {
+        max-width: 880px;
+        padding: 2rem;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 18px;
+        min-height: 58px;
+        box-sizing: border-box;
+        background-color: var(--toolbar-bg);
+        color: var(--toolbar-text);
+      }
+      .toolbar-left,
+      .toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .toolbar-logo {
+        width: 36px;
+        height: 36px;
+        object-fit: contain;
+      }
+      .toolbar-nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .toolbar-pill {
+        padding: 7px 15px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--toolbar-text);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+      }
+      .toolbar-pill.active {
+        background: rgba(255, 255, 255, 0.14);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+      .toolbar-pill:hover {
+        background: rgba(255, 255, 255, 0.1);
+        text-decoration: none;
+      }
       .card {
-        border: 1px solid #c7c7c7;
-        border-radius: 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
         padding: 1rem 1.2rem;
         margin: 1rem 0;
+        background: var(--bg-secondary);
       }
       h1 { margin-top: 0; }
       ul { padding-left: 1.2rem; }
-      a { text-decoration: none; }
+      a { color: var(--medium-blue); text-decoration: none; }
       a:hover { text-decoration: underline; }
+      #auth-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px 4px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        font-size: 0.85rem;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--toolbar-text);
+      }
+      .auth-btn {
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .auth-name-link {
+        color: var(--toolbar-text);
+        opacity: 0.85;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-decoration: none;
+      }
+      .auth-name-link:hover {
+        opacity: 1;
+        text-decoration: underline;
+      }
+      .auth-btn-login {
+        background: transparent;
+        color: var(--toolbar-text);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        padding: 7px 15px;
+        font-size: 13px;
+      }
+      #auth-status.logged-out {
+        padding: 0;
+        border: none;
+        background: transparent;
+      }
+      .toolbar-icon {
+        width: 36px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--toolbar-text);
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .toolbar-icon:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .auth-btn-logout {
+        background: transparent;
+        color: var(--toolbar-text);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        opacity: 0.8;
+      }
+      .auth-btn-logout:hover {
+        opacity: 1;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      @media (max-width: 640px) {
+        .toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .toolbar-right {
+          width: 100%;
+        }
+        .toolbar-nav {
+          flex-wrap: wrap;
+        }
+        #auth-status {
+          max-width: 100%;
+        }
+        main {
+          padding: 1.25rem;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>Synchronic Gateway</h1>
-    <p>
-      Web-facing gateway for Synchronic <code>general</code> and optional <code>root</code> operations.
-      This service forwards operation calls to journal endpoints with header-based authentication.
-    </p>
-    <p>
-      Use this service when you want stable, versioned HTTP endpoints that map directly to function-level journal calls
-      while preserving authentication and request-shape consistency across clients.
-    </p>
-
-    <div class="card">
-      <h2>API Docs</h2>
-      <ul>
-        <li><a href="/api/v1/docs">Swagger UI</a> (<code>/api/v1/docs</code>)</li>
-      </ul>
-      <p>
-        Start there for route-by-route schemas, authentication requirements, and JSON/Scheme request-body guidance.
-      </p>
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <img class="toolbar-logo" src="/gateway-logo.png" alt="Synchronic Web" />
+        <nav class="toolbar-nav" aria-label="Gateway sections">
+          <span class="toolbar-pill active">Gateway</span>
+          <a class="toolbar-pill" href="/api/v1/docs">API Reference</a>
+        </nav>
+      </div>
+      <div class="toolbar-right">
+        <div id="auth-status">
+          <span id="auth-label">Checking session…</span>
+        </div>
+        <button id="theme-toggle" class="toolbar-icon" type="button" title="Switch to dark mode" aria-label="Switch to dark mode">◐</button>
+      </div>
     </div>
+
+    <main>
+      <h1>Synchronic Gateway</h1>
+
+      <p>
+        Web-facing gateway for Synchronic <code>general</code> and optional <code>root</code> operations.
+        This service forwards operation calls to journal endpoints with session-based authentication.
+      </p>
+      <p>
+        Use this service when you want stable, versioned HTTP endpoints that map directly to function-level journal calls
+        while preserving authentication and request-shape consistency across clients.
+      </p>
+
+      <div class="card">
+        <h2>API Docs</h2>
+        <ul>
+          <li><a href="/api/v1/docs">Swagger UI</a> (<code>/api/v1/docs</code>)</li>
+        </ul>
+        <p>
+          Start there for route-by-route schemas, authentication requirements, and JSON/Scheme request-body guidance.
+        </p>
+      </div>
 
     <div class="card">
       <h2>Route Groups</h2>
@@ -349,7 +587,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       <h2>Common Patterns</h2>
       <ul>
         <li>Public reads: <code>GET /api/v1/general/size</code>, <code>GET /api/v1/general/info</code>.</li>
-        <li>Restricted operations: send <code>Authorization: Bearer &lt;secret&gt;</code> or <code>X-Sync-Auth: &lt;secret&gt;</code>.</li>
+        <li>Restricted operations require a valid Kratos session cookie — <a href="/auth/login">log in</a> first.</li>
         <li>Mutating calls are <code>POST</code> and accept either JSON or Scheme argument bodies.</li>
       </ul>
     </div>
@@ -366,23 +604,113 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       <h2>Quick Start</h2>
       <p>Public size call:</p>
       <pre><code>curl http://127.0.0.1:8180/api/v1/general/size</code></pre>
-      <p>Authenticated call:</p>
+      <p>Authenticated call (pass session cookie from browser):</p>
       <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
-  -H "Authorization: Bearer password" \\
+  -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: application/json" \\
   -d '{"path":[["*state*","docs"]]}'</code></pre>
       <p>Scheme body call:</p>
       <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
-  -H "Authorization: Bearer password" \\
+  -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: text/plain" \\
   -d '((path ((*state* docs))))'</code></pre>
-      <p>Batch call:</p>
-      <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/batch \\
-  -H "Authorization: Bearer password" \\
-  -H "Content-Type: application/json" \\
-  -d '{"queries":[{"function":"get","arguments":{"path":[["*state*","docs"]]}},{"function":"config"}]}'</code></pre>
     </div>
+    </main>
   </body>
+  <script>
+    (function () {
+      const THEME_KEY = 'sync-gateway-theme';
+
+      function getPreferredTheme() {
+        const stored = localStorage.getItem(THEME_KEY);
+        if (stored === 'light' || stored === 'dark') return stored;
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light';
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        const btn = document.getElementById('theme-toggle');
+        if (!btn) return;
+        const nextTheme = theme === 'light' ? 'dark' : 'light';
+        btn.textContent = theme === 'light' ? '◐' : '◑';
+        btn.title = 'Switch to ' + nextTheme + ' mode';
+        btn.setAttribute('aria-label', 'Switch to ' + nextTheme + ' mode');
+      }
+
+      applyTheme(getPreferredTheme());
+      const themeToggle = document.getElementById('theme-toggle');
+      if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+          const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          const next = current === 'light' ? 'dark' : 'light';
+          localStorage.setItem(THEME_KEY, next);
+          applyTheme(next);
+        });
+      }
+
+      async function getSession() {
+        try {
+          const res = await fetch('/auth/.ory/sessions/whoami', {
+            credentials: 'include',
+            headers: { accept: 'application/json' },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            return { loggedIn: true, name: data?.identity?.traits?.username ?? '' };
+          }
+        } catch (_) {}
+        return { loggedIn: false };
+      }
+
+      async function logout() {
+        try {
+          const res = await fetch('/auth/.ory/self-service/logout/browser?return_to=' + encodeURIComponent(window.location.origin + '/api/v1/docs'), {
+            credentials: 'include',
+            headers: { accept: 'application/json' },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.logout_url) { window.location.href = data.logout_url; return; }
+          }
+        } catch (_) {}
+        window.location.href = '/auth/login';
+      }
+
+      getSession().then(function (session) {
+        const el = document.getElementById('auth-status');
+        const label = document.getElementById('auth-label');
+        if (!el || !label) return;
+        if (session.loggedIn) {
+          el.classList.add('logged-in');
+          if (session.name) {
+            const accountLink = document.createElement('a');
+            accountLink.className = 'auth-name-link';
+            accountLink.href = '/auth/settings';
+            accountLink.title = 'Account settings';
+            accountLink.textContent = session.name;
+            label.replaceWith(accountLink);
+          } else {
+            label.textContent = 'Signed in';
+          }
+          const btn = document.createElement('button');
+          btn.className = 'auth-btn auth-btn-logout';
+          btn.textContent = 'Sign out';
+          btn.addEventListener('click', logout);
+          el.appendChild(btn);
+        } else {
+          el.classList.add('logged-out');
+          label.remove();
+          const a = document.createElement('a');
+          a.className = 'auth-btn auth-btn-login';
+          a.href = '/auth/.ory/self-service/login/browser?return_to=' + encodeURIComponent(window.location.origin + '/api/v1/docs');
+          a.textContent = 'Log in';
+          el.appendChild(a);
+        }
+      });
+    })();
+  </script>
 </html>`)
   );
 
@@ -467,6 +795,36 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     async () => journal.callJson({ functionName: "info" })
   );
 
+  app.post(
+    "/api/v1/journal/interface",
+    {
+      schema: {
+        tags: ["Journal (Proxy)"],
+        summary: "Transparent journal interface proxy",
+        description:
+          "Thin pass-through to the journal interface. Scheme bodies (text/plain or application/scheme) are forwarded as-is to the journal Scheme endpoint. JSON bodies are forwarded as-is to the journal JSON endpoint. No authentication injection or body transformation. Intended for journal-to-journal bridge calls.",
+        body: makeBodyContent(
+          { function: "size" },
+          "((function size))"
+        ),
+      },
+    },
+    async (request, reply) => {
+      const contentType = getContentType(request);
+      if (isSchemeContentType(contentType)) {
+        const expression = extractSchemeArguments(request.body);
+        return journal.callScheme({ expression, functionName: "interface" });
+      }
+      if (isJsonContentType(contentType)) {
+        return journal.proxyJson(request.body);
+      }
+      return reply.code(415).send({
+        error: "unsupported_media_type",
+        message: "Use application/json, text/plain, or application/scheme.",
+      });
+    }
+  );
+
   for (const [operation, functionName] of Object.entries(generalAliases)) {
     const requiresAuth = !publicGeneralFunctions.has(functionName);
     app.post(
@@ -480,9 +838,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             generalOperationDocs[operation]?.summary ||
             `General operation '${operation}'`,
           description: `${generalOperationDocs[operation]?.description || "General operation."} ${requestModeDescription}`,
-          consumes: ["application/json", "text/plain", "application/scheme"],
-          ...(requiresAuth ? { security: restrictedSecurity } : {}),
-          body: argumentsBodySchema,
+          body: makeBodyContent(generalOperationExamples[operation], generalSchemeExamples[operation]),
         },
       },
       async (request) =>
@@ -491,6 +847,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           journal,
           functionName,
           requiresAuth,
+          journalSecret,
+          kratos,
         })
     );
   }
@@ -506,9 +864,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
               rootOperationDocs[operation]?.summary ||
               `Root operation '${operation}'`,
             description: `${rootOperationDocs[operation]?.description || "Root operation."} ${requestModeDescription}`,
-            consumes: ["application/json", "text/plain", "application/scheme"],
-            security: restrictedSecurity,
-            body: argumentsBodySchema,
+            body: makeBodyContent(rootOperationExamples[operation], rootSchemeExamples[operation]),
           },
         },
         async (request) =>
@@ -518,6 +874,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             functionName,
             requiresAuth: true,
             root: true,
+            journalSecret,
+            kratos,
           })
       );
     }
@@ -545,14 +903,10 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         message: errorMessage,
       });
     }
-    if (errorMessage.includes("Missing authentication header")) {
+    if (error instanceof UnauthorizedError) {
       return reply.code(401).send({
         error: "unauthorized",
-        message: "Provide Authorization: Bearer <secret> or X-Sync-Auth header",
-        hints: {
-          hasAuthorizationHeader: Boolean(request.headers.authorization),
-          hasSyncHeader: Boolean(request.headers["x-sync-auth"]),
-        },
+        message: "Valid Kratos session cookie required",
       });
     }
     if (errorMessage.includes("Unsupported content-type")) {

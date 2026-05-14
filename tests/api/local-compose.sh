@@ -12,8 +12,10 @@ COMPOSE_DIR="$ROOT_DIR/deploy/compose/general"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yaml"
 
 PORT="${PORT:-8192}"
+DOMAIN="${DOMAIN:-localhost:$PORT}"
 SMB_PORT="${SMB_PORT:-445}"
 SECRET="${SECRET:-password}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
 PERIOD="${PERIOD:-2}"
 WINDOW="${WINDOW:-1024}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
@@ -34,6 +36,7 @@ GATEWAY_REMOTE_TAG="ghcr.io/sandialabs/sync-web/gateway:$VERSION"
 EXPLORER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/explorer:$VERSION"
 WORKBENCH_REMOTE_TAG="ghcr.io/sandialabs/sync-web/workbench:$VERSION"
 ROUTER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/router:$VERSION"
+IDENTITY_PROVIDER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/identity-provider:$VERSION"
 FILE_SYSTEM_REMOTE_TAG="ghcr.io/sandialabs/sync-web/file-system:$VERSION"
 
 JOURNAL_SDK_LOCAL_TAG="sync-web/local-journal-sdk:$VERSION"
@@ -42,6 +45,7 @@ GATEWAY_LOCAL_TAG="sync-web/local-gateway:$VERSION"
 EXPLORER_LOCAL_TAG="sync-web/local-explorer:$VERSION"
 WORKBENCH_LOCAL_TAG="sync-web/local-workbench:$VERSION"
 ROUTER_LOCAL_TAG="sync-web/local-router:$VERSION"
+IDENTITY_PROVIDER_LOCAL_TAG="sync-web/local-identity-provider:$VERSION"
 FILE_SYSTEM_LOCAL_TAG="sync-web/local-file-system:$VERSION"
 FILE_SYSTEM_IMAGE="${FILE_SYSTEM_IMAGE:-$FILE_SYSTEM_REMOTE_TAG}"
 
@@ -143,6 +147,7 @@ build_and_retag "$ROOT_DIR/services/gateway" "$GATEWAY_LOCAL_TAG" "$GATEWAY_REMO
 build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/router" "$ROUTER_LOCAL_TAG" "$ROUTER_REMOTE_TAG"
+build_and_retag "$ROOT_DIR/services/identity-provider" "$IDENTITY_PROVIDER_LOCAL_TAG" "$IDENTITY_PROVIDER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/file-system" "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_REMOTE_TAG"
 echo "Tagging $FILE_SYSTEM_LOCAL_TAG as $FILE_SYSTEM_IMAGE ..."
 docker tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
@@ -152,7 +157,7 @@ if [ "$MODE" = "build" ]; then
     exit 0
 fi
 
-export SECRET PERIOD WINDOW PORT SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
+export SECRET ADMIN_USERNAME PERIOD WINDOW PORT DOMAIN SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
 
 confirm_volume_wipe_if_needed
 echo "Starting from scratch: removing compose stack + volumes..."
@@ -172,6 +177,30 @@ wait_for_http() {
         elapsed=$((elapsed + 2))
     done
     echo "Timed out waiting for $url" >&2
+    return 1
+}
+
+wait_for_admin_seed() {
+    if [ -z "$ADMIN_USERNAME" ]; then
+        return 0
+    fi
+
+    elapsed=0
+    while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
+        logs="$(dc logs --no-color identity-provider 2>/dev/null || true)"
+        if printf "%s" "$logs" | grep -Fq "Admin identity '$ADMIN_USERNAME' created" \
+          || printf "%s" "$logs" | grep -Fq "Admin identity '$ADMIN_USERNAME' already exists"; then
+            return 0
+        fi
+        if printf "%s" "$logs" | grep -Fq "Failed to create admin identity '$ADMIN_USERNAME'"; then
+            echo "FAIL: identity-provider failed to seed admin identity '$ADMIN_USERNAME'" >&2
+            return 1
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    echo "FAIL: timed out waiting for identity-provider to seed admin identity '$ADMIN_USERNAME'" >&2
     return 1
 }
 
@@ -209,6 +238,8 @@ echo "Waiting for routes..."
 wait_for_http "http://127.0.0.1:$PORT/explorer/"
 wait_for_http "http://127.0.0.1:$PORT/workbench/"
 wait_for_http "http://127.0.0.1:$PORT/api/v1/docs"
+echo "Waiting for seeded admin identity..."
+wait_for_admin_seed
 
 echo "Running API smoke checks..."
 size_response="$(api_post '{"function":"size"}' | tr -d '[:space:]')"

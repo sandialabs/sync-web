@@ -1,3 +1,16 @@
+FROM node:20-alpine AS ui-build
+
+WORKDIR /app/ui
+
+COPY ui/package*.json ./
+RUN npm ci
+
+COPY ui/ ./
+RUN npm run build
+
+FROM ui-build AS ui-test
+RUN npm test
+
 FROM node:20-alpine AS build
 
 WORKDIR /app
@@ -13,16 +26,17 @@ RUN set -eu; \
     fi
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY assets ./assets
 COPY src ./src
 COPY test ./test
-RUN npm run build
+RUN npm run build:server
 
 FROM build AS test
-RUN npm test
+COPY --from=ui-test /app/ui/dist /tmp/auth-ui-dist
+RUN npm run test:server
 
 FROM node:20-alpine AS runtime
 
@@ -40,10 +54,11 @@ RUN set -eu; \
     fi
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY assets ./assets
 COPY --from=build /app/dist ./dist
+COPY --from=ui-build /app/ui/dist ./ui/dist
 
 EXPOSE 8180
 

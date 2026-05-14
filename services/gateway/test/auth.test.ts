@@ -1,27 +1,102 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FastifyRequest } from "fastify";
-import { getAuthSecret } from "../src/auth";
+import { resolveIdentity, UnauthorizedError } from "../src/auth";
+import type { KratosClient } from "../src/kratos";
+
+const JOURNAL_SECRET = "test-journal-secret";
+const IDENTITY_ID = "test-identity-id";
 
 const req = (headers: Record<string, string | undefined>): FastifyRequest =>
   ({ headers } as unknown as FastifyRequest);
 
-test("extracts Bearer token from Authorization header", () => {
-  const secret = getAuthSecret(req({ authorization: "Bearer password" }));
-  assert.equal(secret, "password");
+const mockKratos = (identityId: string): KratosClient => ({
+  async whoami(_cookie) {
+    return { identity: { id: identityId, traits: { username: identityId } } };
+  },
 });
 
-test("accepts raw Authorization token value", () => {
-  const secret = getAuthSecret(req({ authorization: "password" }));
-  assert.equal(secret, "password");
+const failingKratos: KratosClient = {
+  async whoami(_cookie) {
+    throw new Error("session invalid");
+  },
+};
+
+test("resolves identity from valid Kratos session cookie", async () => {
+  const result = await resolveIdentity(
+    req({ cookie: "ory_kratos_session=abc123" }),
+    JOURNAL_SECRET,
+    mockKratos(IDENTITY_ID)
+  );
+  assert.equal(result.journalSecret, JOURNAL_SECRET);
+  assert.equal(result.identityId, IDENTITY_ID);
 });
 
-test("falls back to X-Sync-Auth when Authorization missing", () => {
-  const secret = getAuthSecret(req({ "x-sync-auth": "password" }));
-  assert.equal(secret, "password");
+test("throws UnauthorizedError when Kratos whoami fails", async () => {
+  await assert.rejects(
+    () =>
+      resolveIdentity(
+        req({ cookie: "ory_kratos_session=expired" }),
+        JOURNAL_SECRET,
+        failingKratos
+      ),
+    UnauthorizedError
+  );
 });
 
-test("returns null when no supported auth headers are present", () => {
-  const secret = getAuthSecret(req({}));
-  assert.equal(secret, null);
+test("throws UnauthorizedError when no session cookie is present", async () => {
+  await assert.rejects(
+    () => resolveIdentity(req({}), JOURNAL_SECRET, failingKratos),
+    UnauthorizedError
+  );
+});
+
+test("throws UnauthorizedError when cookie exists but lacks ory_kratos_session", async () => {
+  await assert.rejects(
+    () =>
+      resolveIdentity(
+        req({ cookie: "some_other_cookie=value" }),
+        JOURNAL_SECRET,
+        failingKratos
+      ),
+    UnauthorizedError
+  );
+});
+
+
+test("resolves identity from valid Authorization Bearer journal secret", async () => {
+  const result = await resolveIdentity(
+    req({ authorization: `Bearer ${JOURNAL_SECRET}` }),
+    JOURNAL_SECRET,
+    failingKratos
+  );
+  assert.equal(result.journalSecret, JOURNAL_SECRET);
+  assert.equal(result.identityId, undefined);
+});
+
+test("throws UnauthorizedError when Authorization Bearer is wrong secret", async () => {
+  await assert.rejects(
+    () =>
+      resolveIdentity(
+        req({ authorization: "Bearer wrong-secret" }),
+        JOURNAL_SECRET,
+        failingKratos
+      ),
+    UnauthorizedError
+  );
+});
+
+test("resolves with undefined identityId when whoami returns no username", async () => {
+  const noUsernameKratos: KratosClient = {
+    async whoami(_cookie) {
+      return { identity: { id: "some-id", traits: {} as { username: string } } };
+    },
+  };
+  const result = await resolveIdentity(
+    req({ cookie: "ory_kratos_session=abc123" }),
+    JOURNAL_SECRET,
+    noUsernameKratos
+  );
+  assert.equal(result.journalSecret, JOURNAL_SECRET);
+  assert.equal(result.identityId, undefined);
 });

@@ -5,6 +5,7 @@ export interface JournalCall {
   functionName: string;
   args?: unknown;
   authentication?: string;
+  identityId?: string;
 }
 
 export interface JournalClient {
@@ -12,6 +13,7 @@ export interface JournalClient {
   callScheme(input: { expression: string; functionName: string }): Promise<unknown>;
   callRootJson(input: JournalCall): Promise<unknown>;
   callRootScheme(input: { expression: string; functionName: string }): Promise<unknown>;
+  proxyJson(body: unknown): Promise<unknown>;
 }
 
 export interface JournalClientOptions {
@@ -78,10 +80,15 @@ const toSemanticError = (value: unknown): JournalSemanticError | null => {
 const cloneBody = (body: Record<string, unknown>): Record<string, unknown> =>
   JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
 
-const redactAuth = (body: Record<string, unknown>): Record<string, unknown> => {
+export const redactAuth = (body: Record<string, unknown>): Record<string, unknown> => {
   const cloned = cloneBody(body);
   if ("authentication" in cloned) {
-    cloned.authentication = "***REDACTED***";
+    const auth = cloned.authentication;
+    if (auth && typeof auth === "object" && "credentials" in (auth as object)) {
+      cloned.authentication = { ...(auth as Record<string, unknown>), credentials: "***REDACTED***" };
+    } else {
+      cloned.authentication = "***REDACTED***";
+    }
   }
   return cloned;
 };
@@ -146,7 +153,10 @@ export const createJournalClient = (
     }
 
     if (input.authentication) {
-      requestBody.authentication = { "*type/string*": input.authentication };
+      requestBody.authentication = {
+        identity: input.identityId ?? "*journal*",
+        credentials: { "*type/string*": input.authentication },
+      };
     }
 
     const controller = new AbortController();
@@ -453,6 +463,21 @@ export const createJournalClient = (
       functionName: string;
     }): Promise<unknown> {
       return callSchemeEndpoint(rootSchemeEndpoint, input);
+    },
+    async proxyJson(body: unknown): Promise<unknown> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        const response = await fetch(journalJsonEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        return parseResponse(await response.text());
+      } finally {
+        clearTimeout(timeout);
+      }
     },
   };
 };

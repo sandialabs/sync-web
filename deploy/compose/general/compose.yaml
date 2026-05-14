@@ -14,6 +14,7 @@ services:
       WINDOW: ${WINDOW:-1024}
       RUST_LOG: ${RUST_LOG:-INFO}
       JOURNAL_UPDATE: ${JOURNAL_UPDATE:-}
+      INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
     volumes:
       - database:/srv/database
 
@@ -49,6 +50,25 @@ services:
       ROOT_SCHEME_ENDPOINT: http://journal/interface
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-30000}
       ALLOW_ADMIN_ROUTES: "1"
+      JOURNAL_SECRET: ${SECRET:-}
+      KRATOS_PUBLIC_URL: http://identity-provider:4433
+      # Peer bridges should target the gateway interface proxy, not /interface directly:
+      # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
+
+  identity-provider:
+    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.0.0}
+    container_name: identity-provider
+    networks:
+      - docker
+    volumes:
+      - identity-provider-data:/var/lib/kratos
+    environment:
+      DOMAIN: ${DOMAIN:-localhost:8192}
+      KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SECRET: ${SECRET:-}
+    restart: unless-stopped
 
   router:
     image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.0.0}
@@ -65,6 +85,7 @@ services:
       - explorer
       - workbench
       - gateway
+      - identity-provider
     networks:
       - docker
     ports:
@@ -75,8 +96,8 @@ services:
     image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.0.0}
     container_name: file-system
     depends_on:
-      - journal
       - gateway
+      - identity-provider
     networks:
       - docker
     environment:
@@ -84,13 +105,14 @@ services:
       SYNC_FS_Backend: ${SYNC_FS_Backend:-http-journal-stage}
       SYNC_FS_Port: 445
       SYNC_FS_ShareName: sync
-      SYNC_FS_AllowGuest: "true"
-      SYNC_FS_GatewayBaseUrl: ${SYNC_FS_GatewayBaseUrl:-http://gateway/api/v1}
-      SYNC_FS_JournalJsonUrl: ${SYNC_FS_JournalJsonUrl:-http://journal/interface/json}
+      SYNC_FS_AllowGuest: ${SYNC_FS_AllowGuest:-true}
+      SYNC_FS_UserName: ${SYNC_FS_UserName:-}
+      SYNC_FS_Password: ${SYNC_FS_Password:-}
+      SYNC_FS_Secret: ${SECRET:-}
       SYNC_FS_GatewayTimeoutMs: ${SYNC_FS_GatewayTimeoutMs:-30000}
-      SYNC_FS_GatewayAuthToken: ${SECRET:-}
     ports:
       - "${SMB_PORT:-445}:445"
 
 volumes:
   database:
+  identity-provider-data:

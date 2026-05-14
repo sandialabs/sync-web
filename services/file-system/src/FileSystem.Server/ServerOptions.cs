@@ -38,13 +38,10 @@ public sealed class ServerOptions
 
     public string? Password { get; set; }
 
-    [Required]
-    public string GatewayBaseUrl { get; set; } = "http://gateway/api/v1";
+    public string? Secret { get; set; }
 
     [Required]
     public string JournalJsonUrl { get; set; } = "http://journal/interface/json";
-
-    public string? GatewayAuthToken { get; set; }
 
     [Range(1, 60000)]
     public int GatewayTimeoutMs { get; set; } = 30000;

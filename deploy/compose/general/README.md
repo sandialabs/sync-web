@@ -27,6 +27,7 @@ This compose stack runs one journal with gateway, explorer, workbench, router, a
 
 Gateway note:
 - `ALLOW_ADMIN_ROUTES` is enabled by default in `deploy/compose/general/compose.yaml`.
+- Gateway landing page is exposed through the router at `/gateway`.
 - Public/client-facing API traffic should go to `gateway` under `/api/v1/general/*` and `/api/v1/root/*`.
 - The raw `/interface` endpoint is still present for direct journal transport use and bridge-oriented internals.
 - The journal's periodic scheduler uses the raw root-step call `(*step* "<secret>")`, which depends on the merged `records/` root-step pipeline.

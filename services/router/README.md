@@ -23,6 +23,8 @@ If either file is missing, router uses HTTP-only config.
 
 Canonical public paths:
 - `/api/` -> gateway API
+- `/auth/` -> gateway auth UI and Ory proxy
+- `/gateway` -> gateway landing page
 - `/docs` -> gateway docs
 - `/healthz` -> gateway health probe
 - `/readyz` -> gateway readiness probe

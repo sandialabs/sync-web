@@ -47,11 +47,9 @@ class GatewayRequestError extends Error {
 
 export class JournalService {
   private endpointBase: string;
-  private authentication: string;
 
-  constructor(endpoint: string, authentication: string) {
+  constructor(endpoint: string) {
     this.endpointBase = endpoint.replace(/\/+$/, '');
-    this.authentication = authentication;
   }
 
   /**
@@ -208,10 +206,9 @@ export class JournalService {
   private async request<T = any>(input: {
     method: 'GET' | 'POST';
     path: string;
-    requiresAuth?: boolean;
     args?: Record<string, any>;
   }): Promise<T> {
-    const { method, path, requiresAuth = true, args } = input;
+    const { method, path, args } = input;
     const url = this.buildGatewayUrl(path);
     const headers: Record<string, string> = {};
     let body: string | undefined;
@@ -221,10 +218,6 @@ export class JournalService {
       if (args && Object.keys(args).length > 0) {
         body = JSON.stringify(args);
       }
-    }
-
-    if (requiresAuth && this.authentication) {
-      headers.Authorization = `Bearer ${this.authentication}`;
     }
 
     const controller = new AbortController();
@@ -275,7 +268,6 @@ export class JournalService {
     return this.request<number>({
       method: 'GET',
       path: '/general/size',
-      requiresAuth: false,
     });
   }
 

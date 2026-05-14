@@ -4,27 +4,38 @@ import HelpModal from './HelpModal';
 import { ExplorerMode } from '../types';
 
 interface ToolBarProps {
-  authentication: string;
+  sessionName: string;
   error: string | null;
   isLoading: boolean;
   mode: ExplorerMode;
   theme: 'light' | 'dark';
-  onAuthenticationChange: (authentication: string) => void;
   onModeChange: (mode: ExplorerMode) => void;
   onThemeToggle: () => void;
 }
 
 const ToolBar: React.FC<ToolBarProps> = ({
-  authentication,
+  sessionName,
   error,
   isLoading,
   mode,
   theme,
-  onAuthenticationChange,
   onModeChange,
   onThemeToggle,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
+
+  const handleLogout = async () => {
+    const returnTo = encodeURIComponent(window.location.href);
+    const res = await fetch(
+      `/auth/.ory/self-service/logout/browser?return_to=${returnTo}`,
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.logout_url) {
+        window.location.href = data.logout_url;
+      }
+    }
+  };
 
   const handleLogoClick = () => {
     window.location.href = window.location.pathname + window.location.search;
@@ -58,13 +69,16 @@ const ToolBar: React.FC<ToolBarProps> = ({
         </div>
 
         <div className="toolbar-right">
-          <input
-            type="password"
-            className="input toolbar-password"
-            placeholder="Authentication password"
-            value={authentication}
-            onChange={(event) => onAuthenticationChange(event.target.value)}
-          />
+          {sessionName && (
+            <span className="toolbar-session">
+              <a className="toolbar-session-name" href="/auth/settings" title="Account settings">
+                {sessionName}
+              </a>
+              <button className="button toolbar-logout" onClick={handleLogout}>
+                Sign out
+              </button>
+            </span>
+          )}
           <button
             className="button button-icon"
             onClick={onThemeToggle}

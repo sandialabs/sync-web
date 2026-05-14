@@ -41,15 +41,15 @@
     (sync-hash (expression->byte-vector name)))
 
   (define (journal-install journal admin-secret interface-secret)
-    (sync-call `(,interface-src #t ,admin-secret ,interface-secret 4
+    (sync-call `(,interface-src #t ,admin-secret ,interface-secret '() 4
                                 ,root-src ',standard-src ',chain-src ',tree-src ',ledger-src)
                #t journal))
 
   (define (journal-query journal query)
     (sync-call query #t journal))
 
-  (define (interface-query journal interface query)
-    (journal-query journal (append query `((authentication ,interface)))))
+  (define* (interface-query journal interface query (identity '*journal*))
+    (journal-query journal (append query `((authentication ((identity ,identity) (credentials ,interface)))))))
 
   (define (admin-step journal secret)
     (journal-query journal `(*step* ,secret)))
@@ -250,7 +250,7 @@
   (let ((query '((function *secret*) (arguments ((secret "pass-1-new"))))))
     (assert (interface-query journal-1 interface-1 query) #t))
 
-  (let* ((expr `(,interface-src #f "pass-1" ,interface-1 2 ,root-src ',standard-src ',chain-src ',tree-src ',ledger-src))
+  (let* ((expr `(,interface-src #f "pass-1" ,interface-1 '() 2 ,root-src ',standard-src ',chain-src ',tree-src ',ledger-src))
          (query `(*eval* "pass-1" ,expr)))
     (assert (journal-query journal-1 query) "Installed interface"))
 
@@ -274,5 +274,52 @@
 
   (let ((query '((function unpin!) (arguments ((path (-1 (*state* hello))))))))
     (assert (interface-query journal-1 interface-1 query) #t))
+
+  (let ((query '((function set!) (arguments ((path ((*state* alice data))) (value "public data"))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
+
+  (let ((query '((function set!) (arguments ((path ((*state* alice *private* data))) (value "private data"))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
+
+  (let ((query '((function set!) (arguments ((path ((*state* alice data))) (value "bob's data"))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (eq? (car x) 'error))))
+
+  (let ((query '((function get) (arguments ((path ((*state* alice data))))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) "public data"))
+
+  (let ((query '((function get) (arguments ((path ((*state* alice *private* data))))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) "private data"))
+
+  (let ((query '((function get) (arguments ((path ((*state* alice *private* data))))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (eq? (car x) 'error))))
+
+  (let ((query '((function set!) (arguments ((path ((*state* alice foo *private*))) (value "my private data"))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
+
+  ; cross-user public read — bob can read alice's non-private data
+  (let ((query '((function get) (arguments ((path ((*state* alice data))))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) "public data"))
+
+  ; set-batch! with paths from mixed owners — fails when any path is not owned by identity
+  (let ((query '((function set-batch!)
+                 (arguments ((paths (((*state* bob stuff)) ((*state* alice stuff))))
+                             (values ("val1" "val2")))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (eq? (car x) 'error))))
+
+  ; non-admin user calling bridge! — operation requires admin privileges
+  (let ((query `((function bridge!) (arguments ((name journal-2) (interface ,interface-2))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) (lambda (x) (eq? (car x) 'error))))
+
+  ; *admins-get* with root identity returns current (empty) admin list
+  (let ((query '((function *admins-get*))))
+    (assert (interface-query journal-1 interface-1 query) '()))
+
+  ; *admins-set* promotes alice to admin
+  (let ((query '((function *admins-set*) (arguments ((admins (alice)))))))
+    (assert (interface-query journal-1 interface-1 query) #t))
+
+  ; promoted alice can now call *admins-get* — confirms admin list is enforced
+  (let ((query '((function *admins-get*))))
+    (assert (interface-query journal-1 interface-1 query 'alice) '(alice)))
 
   (append "Success (" (object->string asserted) " checks)"))

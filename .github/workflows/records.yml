@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["records/**", "journal/**"]
+    paths: ["records/**", "journal/**", "deploy/compose/general/**"]
   pull_request:
     branches: ["main"]
-    paths: ["records/**", "journal/**"]
+    paths: ["records/**", "journal/**", "deploy/compose/general/**"]
 
 concurrency:
   group: "records-${{ github.ref }}"

@@ -25,7 +25,6 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
           <section>
             <h3>Getting Started</h3>
             <ol>
-              <li>Enter your authentication password.</li>
               <li>Use Stage to browse and edit local files and folders.</li>
               <li>Use Ledger to synchronize and browse committed state.</li>
             </ol>
