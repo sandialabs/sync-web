@@ -7,4 +7,4 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod a+w /etc/config/kratos
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["kratos", "serve", "-c", "/etc/config/kratos/kratos.yml", "--watch-courier"]
+CMD ["kratos", "serve", "-c", "/etc/config/kratos/kratos.yml"]

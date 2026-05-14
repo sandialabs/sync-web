@@ -4,7 +4,7 @@ import HelpModal from './HelpModal';
 import { ExplorerMode } from '../types';
 
 interface ToolBarProps {
-  email: string;
+  sessionName: string;
   error: string | null;
   isLoading: boolean;
   mode: ExplorerMode;
@@ -14,7 +14,7 @@ interface ToolBarProps {
 }
 
 const ToolBar: React.FC<ToolBarProps> = ({
-  email,
+  sessionName,
   error,
   isLoading,
   mode,
@@ -69,9 +69,11 @@ const ToolBar: React.FC<ToolBarProps> = ({
         </div>
 
         <div className="toolbar-right">
-          {email && (
+          {sessionName && (
             <span className="toolbar-session">
-              <span className="toolbar-email" title={email}>{email}</span>
+              <a className="toolbar-session-name" href="/auth/settings" title="Account settings">
+                {sessionName}
+              </a>
               <button className="button toolbar-logout" onClick={handleLogout}>
                 Sign out
               </button>

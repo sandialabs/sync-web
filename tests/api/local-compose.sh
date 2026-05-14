@@ -12,8 +12,10 @@ COMPOSE_DIR="$ROOT_DIR/deploy/compose/general"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yaml"
 
 PORT="${PORT:-8192}"
+DOMAIN="${DOMAIN:-localhost:$PORT}"
 SMB_PORT="${SMB_PORT:-445}"
 SECRET="${SECRET:-password}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
 PERIOD="${PERIOD:-2}"
 WINDOW="${WINDOW:-1024}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
@@ -155,7 +157,7 @@ if [ "$MODE" = "build" ]; then
     exit 0
 fi
 
-export SECRET PERIOD WINDOW PORT SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
+export SECRET ADMIN_USERNAME PERIOD WINDOW PORT DOMAIN SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
 
 confirm_volume_wipe_if_needed
 echo "Starting from scratch: removing compose stack + volumes..."
@@ -175,6 +177,30 @@ wait_for_http() {
         elapsed=$((elapsed + 2))
     done
     echo "Timed out waiting for $url" >&2
+    return 1
+}
+
+wait_for_admin_seed() {
+    if [ -z "$ADMIN_USERNAME" ]; then
+        return 0
+    fi
+
+    elapsed=0
+    while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
+        logs="$(dc logs --no-color identity-provider 2>/dev/null || true)"
+        if printf "%s" "$logs" | grep -Fq "Admin identity '$ADMIN_USERNAME' created" \
+          || printf "%s" "$logs" | grep -Fq "Admin identity '$ADMIN_USERNAME' already exists"; then
+            return 0
+        fi
+        if printf "%s" "$logs" | grep -Fq "Failed to create admin identity '$ADMIN_USERNAME'"; then
+            echo "FAIL: identity-provider failed to seed admin identity '$ADMIN_USERNAME'" >&2
+            return 1
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    echo "FAIL: timed out waiting for identity-provider to seed admin identity '$ADMIN_USERNAME'" >&2
     return 1
 }
 
@@ -212,6 +238,8 @@ echo "Waiting for routes..."
 wait_for_http "http://127.0.0.1:$PORT/explorer/"
 wait_for_http "http://127.0.0.1:$PORT/workbench/"
 wait_for_http "http://127.0.0.1:$PORT/api/v1/docs"
+echo "Waiting for seeded admin identity..."
+wait_for_admin_seed
 
 echo "Running API smoke checks..."
 size_response="$(api_post '{"function":"size"}' | tr -d '[:space:]')"

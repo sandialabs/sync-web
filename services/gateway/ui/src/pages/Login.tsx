@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Configuration, FrontendApi, LoginFlow } from "@ory/client-fetch";
 import { UserAuthCard } from "@ory/elements";
+import AuthLayout from "../AuthLayout";
 
 const kratos = new FrontendApi(
   new Configuration({ basePath: "/auth/.ory" })
@@ -25,7 +26,13 @@ export default function Login() {
     });
   }, []);
 
-  if (error) return <p>{error}</p>;
+  if (error) {
+    return (
+      <AuthLayout active="login" title="Sign in">
+        <p className="auth-error">{error}</p>
+      </AuthLayout>
+    );
+  }
   if (!flow) return null;
 
   const returnTo = flow.return_to;
@@ -34,13 +41,14 @@ export default function Login() {
     : "/auth/registration";
 
   return (
-    <UserAuthCard
-      flowType="login"
-      flow={flow}
-      additionalProps={{
-        forgotPasswordURL: "/auth/recovery",
-        signupURL,
-      }}
-    />
+    <AuthLayout active="login" title="Sign in">
+      <UserAuthCard
+        flowType="login"
+        flow={flow}
+        additionalProps={{
+          signupURL,
+        }}
+      />
+    </AuthLayout>
   );
 }

@@ -31,7 +31,7 @@ describe('App session check', () => {
     jest.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ identity: { traits: { email: 'user@example.com' } } }),
+      json: () => Promise.resolve({ identity: { traits: { username: 'alice' } } }),
     } as unknown as Response);
 
     render(<App />);
@@ -40,30 +40,34 @@ describe('App session check', () => {
       expect(screen.queryByLabelText('Checking session…')).not.toBeInTheDocument();
     });
     expect(screen.getByText('Ledger')).toBeInTheDocument();
-    expect(screen.getByText('user@example.com')).toBeInTheDocument();
+    expect(screen.getByText('alice')).toBeInTheDocument();
   });
 
-  it('redirects to login when whoami returns 401', async () => {
+  it('shows an in-place sign-in prompt when whoami returns 401', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValueOnce({ ok: false, status: 401 } as Response);
 
     render(<App />);
 
     await waitFor(() => {
-      expect(window.location.href).toBe(
-        '/auth/login?return_to=' + encodeURIComponent('http://localhost/explorer'),
-      );
+      expect(screen.getByText('Sign in to use Explorer')).toBeInTheDocument();
     });
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/auth/login?return_to=' + encodeURIComponent('http://localhost/explorer'),
+    );
+    expect(window.location.href).toBe('http://localhost/explorer');
   });
 
-  it('redirects to login when whoami fetch rejects', async () => {
+  it('shows an in-place retry prompt when whoami fetch rejects', async () => {
     jest.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('Network error'));
 
     render(<App />);
 
     await waitFor(() => {
-      expect(window.location.href).toBe(
-        '/auth/login?return_to=' + encodeURIComponent('http://localhost/explorer'),
-      );
+      expect(screen.getByText('Sign in to use Explorer')).toBeInTheDocument();
     });
+    expect(screen.getByText('Could not check session')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(window.location.href).toBe('http://localhost/explorer');
   });
 });

@@ -466,6 +466,19 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         cursor: pointer;
         text-decoration: none;
       }
+      .auth-name-link {
+        color: var(--toolbar-text);
+        opacity: 0.85;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-decoration: none;
+      }
+      .auth-name-link:hover {
+        opacity: 1;
+        text-decoration: underline;
+      }
       .auth-btn-login {
         background: transparent;
         color: var(--toolbar-text);
@@ -648,7 +661,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           });
           if (res.ok) {
             const data = await res.json();
-            return { loggedIn: true, email: data?.identity?.traits?.username ?? data?.identity?.traits?.email ?? '' };
+            return { loggedIn: true, name: data?.identity?.traits?.username ?? '' };
           }
         } catch (_) {}
         return { loggedIn: false };
@@ -674,7 +687,16 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         if (!el || !label) return;
         if (session.loggedIn) {
           el.classList.add('logged-in');
-          label.textContent = session.email || 'Signed in';
+          if (session.name) {
+            const accountLink = document.createElement('a');
+            accountLink.className = 'auth-name-link';
+            accountLink.href = '/auth/settings';
+            accountLink.title = 'Account settings';
+            accountLink.textContent = session.name;
+            label.replaceWith(accountLink);
+          } else {
+            label.textContent = 'Signed in';
+          }
           const btn = document.createElement('button');
           btn.className = 'auth-btn auth-btn-logout';
           btn.textContent = 'Sign out';

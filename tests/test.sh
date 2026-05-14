@@ -19,6 +19,9 @@ docker build --target test "${build_args[@]}" -f "$ROOT/services/file-system/Doc
 echo "--- gateway ---"
 docker build --target test "${build_args[@]}" -f "$ROOT/services/gateway/Dockerfile" "$ROOT/services/gateway"
 
+echo "--- identity-provider ---"
+sh "$ROOT/services/identity-provider/test-config.sh"
+
 echo "--- explorer ---"
 docker build --target test "${build_args[@]}" -f "$ROOT/services/explorer/Dockerfile" "$ROOT/services/explorer"
 

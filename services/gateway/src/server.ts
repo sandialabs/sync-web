@@ -107,6 +107,11 @@ const swaggerUiTheme = `
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-decoration: none;
+}
+.sync-doc-auth-name:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 .sync-doc-auth-button {
   border-radius: 999px;
@@ -284,7 +289,7 @@ const swaggerUiAuthJs = `
       });
       if (res.ok) {
         const data = await res.json();
-        return { loggedIn: true, email: data?.identity?.traits?.username ?? data?.identity?.traits?.email ?? '' };
+        return { loggedIn: true, name: data?.identity?.traits?.username ?? '' };
       }
     } catch (_) {}
     return { loggedIn: false };
@@ -341,11 +346,13 @@ const swaggerUiAuthJs = `
     while (badge.firstChild) badge.removeChild(badge.firstChild);
 
     if (session.loggedIn) {
-      if (session.email) {
-        const emailSpan = document.createElement('span');
-        emailSpan.className = 'sync-doc-auth-name';
-        emailSpan.textContent = session.email;
-        badge.appendChild(emailSpan);
+      if (session.name) {
+        const nameLink = document.createElement('a');
+        nameLink.className = 'sync-doc-auth-name';
+        nameLink.href = '/auth/settings';
+        nameLink.title = 'Account settings';
+        nameLink.textContent = session.name;
+        badge.appendChild(nameLink);
       }
       const btn = document.createElement('button');
       btn.className = 'sync-doc-auth-button sync-doc-auth-logout';

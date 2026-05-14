@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Configuration, FrontendApi, RegistrationFlow } from "@ory/client-fetch";
 import { ButtonLink, Card, InputField, Node, NodeMessages } from "@ory/elements";
+import AuthLayout from "../AuthLayout";
 
 const kratos = new FrontendApi(
   new Configuration({ basePath: "/auth/.ory" })
@@ -28,7 +29,13 @@ export default function Registration() {
     });
   }, []);
 
-  if (error) return <p>{error}</p>;
+  if (error) {
+    return (
+      <AuthLayout active="registration" title="Create account">
+        <p className="auth-error">{error}</p>
+      </AuthLayout>
+    );
+  }
   if (!flow) return null;
 
   const returnTo = flow.return_to;
@@ -47,49 +54,51 @@ export default function Registration() {
   };
 
   return (
-    <Card heading="Create account">
-      <form
-        action={flow.ui.action}
-        method={flow.ui.method}
-        onSubmit={handleSubmit}
-        style={{ display: "grid", gap: "1rem" }}
-      >
-        <NodeMessages uiMessages={flow.ui.messages} />
-        {flow.ui.nodes.map((node, index) => {
-          const attributes = node.attributes;
-          const name =
-            "name" in attributes && typeof attributes.name === "string"
-              ? attributes.name
-              : "";
-          return (
-            <Fragment key={`${name || node.group}-${index}`}>
-              <Node node={node} />
-              {name === "password" ? (
-                <InputField
-                  header="Confirm password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  required
-                  aria-invalid={passwordMismatch}
-                  helperMessage={
-                    passwordMismatch ? "Passwords do not match." : undefined
-                  }
-                  onChange={(event) => {
-                    setConfirmPassword(event.currentTarget.value);
-                    if (passwordMismatch) setPasswordMismatch(false);
-                  }}
-                  dataTestid="node/input/password_confirm"
-                />
-              ) : null}
-            </Fragment>
-          );
-        })}
-      </form>
-      <div style={{ marginTop: "1rem" }}>
-        <span>Already have an account? </span>
-        <ButtonLink href={loginURL}>Log in</ButtonLink>
-      </div>
-    </Card>
+    <AuthLayout active="registration" title="Create account">
+      <Card heading="Create account">
+        <form
+          action={flow.ui.action}
+          method={flow.ui.method}
+          onSubmit={handleSubmit}
+          style={{ display: "grid", gap: "1rem" }}
+        >
+          <NodeMessages uiMessages={flow.ui.messages} />
+          {flow.ui.nodes.map((node, index) => {
+            const attributes = node.attributes;
+            const name =
+              "name" in attributes && typeof attributes.name === "string"
+                ? attributes.name
+                : "";
+            return (
+              <Fragment key={`${name || node.group}-${index}`}>
+                <Node node={node} />
+                {name === "password" ? (
+                  <InputField
+                    header="Confirm password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    required
+                    aria-invalid={passwordMismatch}
+                    helperMessage={
+                      passwordMismatch ? "Passwords do not match." : undefined
+                    }
+                    onChange={(event) => {
+                      setConfirmPassword(event.currentTarget.value);
+                      if (passwordMismatch) setPasswordMismatch(false);
+                    }}
+                    dataTestid="node/input/password_confirm"
+                  />
+                ) : null}
+              </Fragment>
+            );
+          })}
+        </form>
+        <div style={{ marginTop: "1rem" }}>
+          <span>Already have an account? </span>
+          <ButtonLink href={loginURL}>Log in</ButtonLink>
+        </div>
+      </Card>
+    </AuthLayout>
   );
 }

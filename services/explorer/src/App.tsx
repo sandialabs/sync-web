@@ -118,8 +118,8 @@ const replaceStagePathPrefix = (
 };
 
 const App: React.FC = () => {
-  const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready'>('checking');
-  const [sessionEmail, setSessionEmail] = useState<string>('');
+  const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'unauthenticated' | 'error'>('checking');
+  const [sessionName, setSessionName] = useState<string>('');
   const [appState, setAppState] = useState<AppState>(createInitialAppState);
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [mode, setMode] = useState<ExplorerMode>('ledger');
@@ -145,19 +145,17 @@ const App: React.FC = () => {
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();
-          setSessionEmail(data?.identity?.traits?.email ?? '');
+          setSessionName(data?.identity?.traits?.username ?? '');
           if (JOURNAL_ENDPOINT) {
             setJournalService(new JournalService(JOURNAL_ENDPOINT));
           }
           setSessionStatus('ready');
         } else {
-          window.location.href =
-            '/auth/login?return_to=' + encodeURIComponent(window.location.href);
+          setSessionStatus('unauthenticated');
         }
       })
       .catch(() => {
-        window.location.href =
-          '/auth/login?return_to=' + encodeURIComponent(window.location.href);
+        setSessionStatus('error');
       });
   }, []);
 
@@ -567,10 +565,45 @@ const App: React.FC = () => {
     );
   }
 
+  if (sessionStatus === 'unauthenticated' || sessionStatus === 'error') {
+    const signInUrl = '/auth/login?return_to=' + encodeURIComponent(window.location.href);
+    return (
+      <div className="app">
+        <ToolBar
+          sessionName=""
+          error={sessionStatus === 'error' ? 'Could not check session' : null}
+          isLoading={false}
+          mode={mode}
+          theme={theme}
+          onModeChange={handleModeChange}
+          onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
+        />
+
+        <div className="session-required">
+          <section className="session-required-panel">
+            <div className="session-required-kicker">Authentication</div>
+            <h1>Sign in to use Explorer</h1>
+            <p>
+              Explorer needs a Synchronic session before it can read or write journal state.
+            </p>
+            <div className="session-required-actions">
+              <a className="button button-primary" href={signInUrl}>Sign in</a>
+              {sessionStatus === 'error' && (
+                <button className="button button-secondary" onClick={() => window.location.reload()}>
+                  Retry
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <ToolBar
-        email={sessionEmail}
+        sessionName={sessionName}
         error={appState.error}
         isLoading={appState.isLoading}
         mode={mode}
