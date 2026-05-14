@@ -29,21 +29,167 @@ Operational notes:
 `.trim();
 
 const swaggerUiTheme = `
-.swagger-ui .topbar { background-color: #101318; border-bottom: 1px solid #2c3440; }
-.swagger-ui .topbar .topbar-wrapper img { max-height: 36px; width: auto; }
-.swagger-ui .topbar .topbar-wrapper a.link {
+.swagger-ui { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.swagger-ui .topbar {
+  display: none;
+}
+.sync-doc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background-color: #101318;
+  border-bottom: 1px solid #2c3440;
+  color: #f3f6fb;
+  min-height: 58px;
+  padding: 10px 18px;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.sync-doc-toolbar-left,
+.sync-doc-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sync-doc-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.sync-doc-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-doc-tab {
+  padding: 7px 15px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #f3f6fb;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-decoration: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.sync-doc-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  text-decoration: none;
+}
+.sync-doc-tab.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.sync-doc-auth {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.sync-doc-auth.logged-out {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.sync-doc-auth-name {
+  color: #f3f6fb;
+  opacity: 0.85;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sync-doc-auth-button {
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.sync-doc-auth-login {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f3f6fb;
+  padding: 7px 15px;
+  font-size: 13px;
+}
+.sync-doc-auth-logout {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #f3f6fb;
+  padding: 3px 10px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.sync-doc-auth-logout:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+.sync-doc-theme-toggle {
+  width: 36px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f3f6fb;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
 }
-.swagger-ui .topbar .topbar-wrapper a.link::after {
-  content: "Synchronic Web Gateway";
-  color: #ffffff;
-  font-weight: 700;
-  font-size: 1rem;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+.sync-doc-theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+html[data-theme="dark"] body {
+  background: #181a1f;
+}
+html[data-theme="dark"] .swagger-ui {
+  color: #d4d4d4;
+}
+html[data-theme="dark"] .swagger-ui .info .title,
+html[data-theme="dark"] .swagger-ui .opblock-tag,
+html[data-theme="dark"] .swagger-ui .info p,
+html[data-theme="dark"] .swagger-ui .info li,
+html[data-theme="dark"] .swagger-ui .info h1,
+html[data-theme="dark"] .swagger-ui .info h2,
+html[data-theme="dark"] .swagger-ui .info h3,
+html[data-theme="dark"] .swagger-ui .info h4 {
+  color: #d4d4d4;
+}
+html[data-theme="dark"] .swagger-ui .scheme-container,
+html[data-theme="dark"] .swagger-ui .opblock-description-wrapper,
+html[data-theme="dark"] .swagger-ui .opblock-body,
+html[data-theme="dark"] .swagger-ui .responses-inner h4,
+html[data-theme="dark"] .swagger-ui .responses-inner h5 {
+  background: #1f252b;
+  color: #d4d4d4;
+}
+html[data-theme="dark"] .swagger-ui .opblock.opblock-get {
+  background: #163041;
+  border-color: #0076a9;
+}
+html[data-theme="dark"] .swagger-ui .opblock.opblock-post {
+  background: #16382f;
+  border-color: #008e74;
+}
+html[data-theme="dark"] .swagger-ui table thead tr td,
+html[data-theme="dark"] .swagger-ui table thead tr th,
+html[data-theme="dark"] .swagger-ui .parameter__name,
+html[data-theme="dark"] .swagger-ui .parameter__type,
+html[data-theme="dark"] .swagger-ui .response-col_status,
+html[data-theme="dark"] .swagger-ui .response-col_description {
+  color: #d4d4d4;
 }
 .swagger-ui a { color: #0076a9; }
 .swagger-ui .info .title { color: #1f2937; }
@@ -54,40 +200,82 @@ const swaggerUiTheme = `
 .swagger-ui .opblock-tag { color: #002b4c; }
 .swagger-ui .scheme-container { box-shadow: none; }
 
-/* Keep toolbar/search usable and clean */
-.swagger-ui .topbar .download-url-wrapper { display: flex; align-items: center; gap: 0.5rem; }
-.swagger-ui .topbar .download-url-wrapper input[type=text] { min-width: 18rem; }
+@media (max-width: 640px) {
+  .sync-doc-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .sync-doc-toolbar-right {
+    width: 100%;
+  }
+  .sync-doc-tabs {
+    flex-wrap: wrap;
+  }
+}
 
-/* Dark-mode friendly docs surface */
+/* Default to OS dark preference until the user explicitly toggles the docs page. */
 @media (prefers-color-scheme: dark) {
-  .swagger-ui { color: #d4d4d4; }
-  .swagger-ui .info .title,
-  .swagger-ui .opblock-tag,
-  .swagger-ui .info p,
-  .swagger-ui .info li,
-  .swagger-ui .info h1,
-  .swagger-ui .info h2,
-  .swagger-ui .info h3,
-  .swagger-ui .info h4 { color: #d4d4d4; }
-  .swagger-ui .scheme-container,
-  .swagger-ui .opblock-description-wrapper,
-  .swagger-ui .opblock-body,
-  .swagger-ui .responses-inner h4,
-  .swagger-ui .responses-inner h5 { background: #1f252b; color: #d4d4d4; }
-  .swagger-ui .topbar { background-color: #101318; border-bottom-color: #2c3440; }
-  .swagger-ui .opblock.opblock-get { background: #163041; border-color: #0076a9; }
-  .swagger-ui .opblock.opblock-post { background: #16382f; border-color: #008e74; }
-  .swagger-ui table thead tr td,
-  .swagger-ui table thead tr th,
-  .swagger-ui .parameter__name,
-  .swagger-ui .parameter__type,
-  .swagger-ui .response-col_status,
-  .swagger-ui .response-col_description { color: #d4d4d4; }
+  html:not([data-theme="light"]) body { background: #181a1f; }
+  html:not([data-theme="light"]) .swagger-ui { color: #d4d4d4; }
+  html:not([data-theme="light"]) .swagger-ui .info .title,
+  html:not([data-theme="light"]) .swagger-ui .opblock-tag,
+  html:not([data-theme="light"]) .swagger-ui .info p,
+  html:not([data-theme="light"]) .swagger-ui .info li,
+  html:not([data-theme="light"]) .swagger-ui .info h1,
+  html:not([data-theme="light"]) .swagger-ui .info h2,
+  html:not([data-theme="light"]) .swagger-ui .info h3,
+  html:not([data-theme="light"]) .swagger-ui .info h4 { color: #d4d4d4; }
+  html:not([data-theme="light"]) .swagger-ui .scheme-container,
+  html:not([data-theme="light"]) .swagger-ui .opblock-description-wrapper,
+  html:not([data-theme="light"]) .swagger-ui .opblock-body,
+  html:not([data-theme="light"]) .swagger-ui .responses-inner h4,
+  html:not([data-theme="light"]) .swagger-ui .responses-inner h5 { background: #1f252b; color: #d4d4d4; }
+  html:not([data-theme="light"]) .swagger-ui .opblock.opblock-get { background: #163041; border-color: #0076a9; }
+  html:not([data-theme="light"]) .swagger-ui .opblock.opblock-post { background: #16382f; border-color: #008e74; }
+  html:not([data-theme="light"]) .swagger-ui table thead tr td,
+  html:not([data-theme="light"]) .swagger-ui table thead tr th,
+  html:not([data-theme="light"]) .swagger-ui .parameter__name,
+  html:not([data-theme="light"]) .swagger-ui .parameter__type,
+  html:not([data-theme="light"]) .swagger-ui .response-col_status,
+  html:not([data-theme="light"]) .swagger-ui .response-col_description { color: #d4d4d4; }
 }
 `;
 
 const swaggerUiAuthJs = `
 (function () {
+  const THEME_KEY = 'sync-gateway-theme';
+
+  function getPreferredTheme() {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const btn = document.getElementById('sync-doc-theme-toggle');
+    if (!btn) return;
+    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    btn.textContent = theme === 'light' ? '◐' : '◑';
+    btn.title = 'Switch to ' + nextTheme + ' mode';
+    btn.setAttribute('aria-label', 'Switch to ' + nextTheme + ' mode');
+  }
+
+  function wireThemeToggle() {
+    applyTheme(getPreferredTheme());
+    const btn = document.getElementById('sync-doc-theme-toggle');
+    if (!btn || btn.dataset.bound === 'true') return;
+    btn.dataset.bound = 'true';
+    btn.addEventListener('click', function () {
+      const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      const next = current === 'light' ? 'dark' : 'light';
+      localStorage.setItem(THEME_KEY, next);
+      applyTheme(next);
+    });
+  }
+
   async function getSession() {
     try {
       const res = await fetch('/auth/.ory/sessions/whoami', {
@@ -116,41 +304,59 @@ const swaggerUiAuthJs = `
     window.location.href = '/auth/login';
   }
 
+  function ensureToolbar() {
+    let toolbar = document.getElementById('sync-doc-toolbar');
+    if (toolbar) return toolbar;
+
+    const swaggerRoot = document.getElementById('swagger-ui');
+    if (!swaggerRoot || !swaggerRoot.parentNode) return null;
+
+    toolbar = document.createElement('div');
+    toolbar.id = 'sync-doc-toolbar';
+    toolbar.className = 'sync-doc-toolbar';
+    toolbar.innerHTML =
+      '<div class="sync-doc-toolbar-left">' +
+        '<img class="sync-doc-logo" src="/gateway-logo.png" alt="Synchronic Web" />' +
+        '<nav class="sync-doc-tabs" aria-label="Gateway sections">' +
+          '<a class="sync-doc-tab" href="/gateway">Gateway Home</a>' +
+          '<span class="sync-doc-tab active">API Reference</span>' +
+        '</nav>' +
+      '</div>' +
+      '<div class="sync-doc-toolbar-right">' +
+        '<div id="sync-auth-badge" class="sync-doc-auth"><span>Checking session...</span></div>' +
+        '<button id="sync-doc-theme-toggle" class="sync-doc-theme-toggle" type="button" title="Switch to dark mode" aria-label="Switch to dark mode">◐</button>' +
+      '</div>';
+    swaggerRoot.parentNode.insertBefore(toolbar, swaggerRoot);
+    wireThemeToggle();
+    return toolbar;
+  }
+
   function injectBadge(session) {
-    const topbar = document.querySelector('.swagger-ui .topbar-wrapper');
-    if (!topbar) return false;
+    const toolbar = ensureToolbar();
+    if (!toolbar) return false;
+    const badge = document.getElementById('sync-auth-badge');
+    if (!badge) return false;
 
-    let badge = document.getElementById('sync-auth-badge');
-    if (!badge) {
-      badge = document.createElement('div');
-      badge.id = 'sync-auth-badge';
-      badge.style.cssText = [
-        'display:flex', 'align-items:center', 'gap:0.6rem',
-        'margin-left:auto', 'padding-right:1rem',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
-        'font-size:0.85rem', 'white-space:nowrap',
-      ].join(';');
-      topbar.appendChild(badge);
-    }
-
+    badge.className = 'sync-doc-auth';
     while (badge.firstChild) badge.removeChild(badge.firstChild);
 
     if (session.loggedIn) {
       if (session.email) {
         const emailSpan = document.createElement('span');
-        emailSpan.style.color = '#e0f2fe';
+        emailSpan.className = 'sync-doc-auth-name';
         emailSpan.textContent = session.email;
         badge.appendChild(emailSpan);
       }
       const btn = document.createElement('button');
-      btn.style.cssText = 'background:transparent;border:1px solid #00add0;color:#00add0;padding:0.2rem 0.65rem;border-radius:4px;cursor:pointer;font-size:0.85rem;';
-      btn.textContent = 'Log out';
+      btn.className = 'sync-doc-auth-button sync-doc-auth-logout';
+      btn.textContent = 'Sign out';
       btn.addEventListener('click', logout);
       badge.appendChild(btn);
     } else {
+      badge.classList.add('logged-out');
       const a = document.createElement('a');
       a.href = '/auth/.ory/self-service/login/browser?return_to=' + encodeURIComponent(window.location.href);
-      a.style.cssText = 'background:#00add0;color:#fff;text-decoration:none;padding:0.25rem 0.75rem;border-radius:4px;font-weight:600;';
+      a.className = 'sync-doc-auth-button sync-doc-auth-login';
       a.textContent = 'Log in';
       badge.appendChild(a);
     }
@@ -160,7 +366,7 @@ const swaggerUiAuthJs = `
   async function init() {
     let attempts = 0;
     const interval = setInterval(async () => {
-      if (document.querySelector('.swagger-ui .topbar-wrapper') || attempts++ > 100) {
+      if (document.getElementById('swagger-ui') || attempts++ > 100) {
         clearInterval(interval);
         const session = await getSession();
         injectBadge(session);
@@ -194,6 +400,11 @@ const main = async (): Promise<void> => {
   });
   instrumentGatewayRequests(app);
   const logo = readGatewayLogo();
+  if (logo) {
+    app.get("/gateway-logo.png", { schema: { hide: true } }, async (_request, reply) =>
+      reply.type("image/png").send(logo)
+    );
+  }
 
   app.addContentTypeParser("text/plain", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)

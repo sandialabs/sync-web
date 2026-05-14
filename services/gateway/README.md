@@ -26,6 +26,7 @@ It adds:
 
 ```bash
 npm install
+npm --prefix ui install
 ```
 
 ### Run (dev)
@@ -40,11 +41,15 @@ npm run dev
 npm run build
 ```
 
+Builds both the React auth UI and the Fastify server from the gateway parent package.
+
 ### Unit tests
 
 ```bash
 npm test
 ```
+
+Runs the server tests and the auth UI test script. The UI test currently typechecks the Vite app.
 
 ### Run (prod)
 

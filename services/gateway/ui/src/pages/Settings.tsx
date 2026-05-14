@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Configuration, FrontendApi, SettingsFlow } from "@ory/client-fetch";
-import { UserSettingsCard } from "@ory/elements";
+import { UserSettingsScreen } from "@ory/elements";
 
 const kratos = new FrontendApi(
   new Configuration({ basePath: "/auth/.ory" })
@@ -36,5 +36,5 @@ export default function Settings() {
     },
   };
 
-  return <UserSettingsCard flow={filteredFlow} flowType="settings" />;
+  return <UserSettingsScreen.Body flow={filteredFlow} />;
 }

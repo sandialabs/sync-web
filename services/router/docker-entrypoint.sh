@@ -21,6 +21,14 @@ location /auth/ {
     proxy_pass http://${GATEWAY_HOST};
 }
 
+location = /gateway {
+    proxy_pass http://${GATEWAY_HOST}/;
+}
+
+location = /gateway-logo.png {
+    proxy_pass http://${GATEWAY_HOST}/gateway-logo.png;
+}
+
 location = /docs {
     proxy_pass http://${GATEWAY_HOST}/docs;
 }

@@ -353,82 +353,216 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Synchronic Gateway</title>
     <style>
-      :root { color-scheme: light dark; }
+      :root {
+        color-scheme: light;
+        --blue: #00add0;
+        --medium-blue: #0076a9;
+        --dark-blue: #002b4c;
+        --teal: #008e74;
+        --blue-gray: #7d8ea0;
+        --toolbar-bg: #171a1f;
+        --toolbar-text: #ffffff;
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8f8f8;
+        --text-primary: #002b4c;
+        --text-secondary: #7d8ea0;
+        --border-color: #e0e0e0;
+      }
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --toolbar-bg: #101318;
+        --toolbar-text: #f3f6fb;
+        --bg-primary: #181a1f;
+        --bg-secondary: #20242b;
+        --text-primary: #f0f3f8;
+        --text-secondary: #a1abb8;
+        --border-color: #343b46;
+      }
       body {
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         margin: 0;
-        padding: 2rem;
-        max-width: 880px;
         line-height: 1.45;
+        background: var(--bg-primary);
+        color: var(--text-primary);
       }
       code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      main {
+        max-width: 880px;
+        padding: 2rem;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 18px;
+        min-height: 58px;
+        box-sizing: border-box;
+        background-color: var(--toolbar-bg);
+        color: var(--toolbar-text);
+      }
+      .toolbar-left,
+      .toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .toolbar-logo {
+        width: 36px;
+        height: 36px;
+        object-fit: contain;
+      }
+      .toolbar-nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .toolbar-pill {
+        padding: 7px 15px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--toolbar-text);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+      }
+      .toolbar-pill.active {
+        background: rgba(255, 255, 255, 0.14);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+      .toolbar-pill:hover {
+        background: rgba(255, 255, 255, 0.1);
+        text-decoration: none;
+      }
       .card {
-        border: 1px solid #c7c7c7;
-        border-radius: 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
         padding: 1rem 1.2rem;
         margin: 1rem 0;
+        background: var(--bg-secondary);
       }
       h1 { margin-top: 0; }
       ul { padding-left: 1.2rem; }
-      a { text-decoration: none; }
+      a { color: var(--medium-blue); text-decoration: none; }
       a:hover { text-decoration: underline; }
       #auth-status {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        padding: 0.6rem 1rem;
-        border-radius: 8px;
-        margin-bottom: 1.5rem;
-        font-size: 0.9rem;
-        background: #f0f9ff;
-        border: 1px solid #bae6fd;
-        color: #0c4a6e;
-      }
-      #auth-status.logged-in { background: #f0fdf4; border-color: #bbf7d0; color: #14532d; }
-      #auth-status.logged-out { background: #fff7ed; border-color: #fed7aa; color: #7c2d12; }
-      @media (prefers-color-scheme: dark) {
-        #auth-status { background: #0c2235; border-color: #1e4a6e; color: #7dd3fc; }
-        #auth-status.logged-in { background: #052e16; border-color: #166534; color: #86efac; }
-        #auth-status.logged-out { background: #2c1004; border-color: #7c2d12; color: #fdba74; }
+        gap: 8px;
+        padding: 4px 8px 4px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        font-size: 0.85rem;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--toolbar-text);
       }
       .auth-btn {
-        margin-left: auto;
-        padding: 0.2rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.85rem;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
         font-weight: 600;
         cursor: pointer;
         text-decoration: none;
       }
-      .auth-btn-login { background: #0ea5e9; color: #fff; border: none; }
-      .auth-btn-logout { background: transparent; color: inherit; border: 1px solid currentColor; }
+      .auth-btn-login {
+        background: transparent;
+        color: var(--toolbar-text);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        padding: 7px 15px;
+        font-size: 13px;
+      }
+      #auth-status.logged-out {
+        padding: 0;
+        border: none;
+        background: transparent;
+      }
+      .toolbar-icon {
+        width: 36px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--toolbar-text);
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .toolbar-icon:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .auth-btn-logout {
+        background: transparent;
+        color: var(--toolbar-text);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        opacity: 0.8;
+      }
+      .auth-btn-logout:hover {
+        opacity: 1;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      @media (max-width: 640px) {
+        .toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .toolbar-right {
+          width: 100%;
+        }
+        .toolbar-nav {
+          flex-wrap: wrap;
+        }
+        #auth-status {
+          max-width: 100%;
+        }
+        main {
+          padding: 1.25rem;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>Synchronic Gateway</h1>
-
-    <div id="auth-status">
-      <span id="auth-label">Checking session…</span>
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <img class="toolbar-logo" src="/gateway-logo.png" alt="Synchronic Web" />
+        <nav class="toolbar-nav" aria-label="Gateway sections">
+          <span class="toolbar-pill active">Gateway</span>
+          <a class="toolbar-pill" href="/api/v1/docs">API Reference</a>
+        </nav>
+      </div>
+      <div class="toolbar-right">
+        <div id="auth-status">
+          <span id="auth-label">Checking session…</span>
+        </div>
+        <button id="theme-toggle" class="toolbar-icon" type="button" title="Switch to dark mode" aria-label="Switch to dark mode">◐</button>
+      </div>
     </div>
 
-    <p>
-      Web-facing gateway for Synchronic <code>general</code> and optional <code>root</code> operations.
-      This service forwards operation calls to journal endpoints with session-based authentication.
-    </p>
-    <p>
-      Use this service when you want stable, versioned HTTP endpoints that map directly to function-level journal calls
-      while preserving authentication and request-shape consistency across clients.
-    </p>
+    <main>
+      <h1>Synchronic Gateway</h1>
 
-    <div class="card">
-      <h2>API Docs</h2>
-      <ul>
-        <li><a href="/api/v1/docs">Swagger UI</a> (<code>/api/v1/docs</code>)</li>
-      </ul>
       <p>
-        Start there for route-by-route schemas, authentication requirements, and JSON/Scheme request-body guidance.
+        Web-facing gateway for Synchronic <code>general</code> and optional <code>root</code> operations.
+        This service forwards operation calls to journal endpoints with session-based authentication.
       </p>
-    </div>
+      <p>
+        Use this service when you want stable, versioned HTTP endpoints that map directly to function-level journal calls
+        while preserving authentication and request-shape consistency across clients.
+      </p>
+
+      <div class="card">
+        <h2>API Docs</h2>
+        <ul>
+          <li><a href="/api/v1/docs">Swagger UI</a> (<code>/api/v1/docs</code>)</li>
+        </ul>
+        <p>
+          Start there for route-by-route schemas, authentication requirements, and JSON/Scheme request-body guidance.
+        </p>
+      </div>
 
     <div class="card">
       <h2>Route Groups</h2>
@@ -471,9 +605,41 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   -H "Content-Type: text/plain" \\
   -d '((path ((*state* docs))))'</code></pre>
     </div>
+    </main>
   </body>
   <script>
     (function () {
+      const THEME_KEY = 'sync-gateway-theme';
+
+      function getPreferredTheme() {
+        const stored = localStorage.getItem(THEME_KEY);
+        if (stored === 'light' || stored === 'dark') return stored;
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light';
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        const btn = document.getElementById('theme-toggle');
+        if (!btn) return;
+        const nextTheme = theme === 'light' ? 'dark' : 'light';
+        btn.textContent = theme === 'light' ? '◐' : '◑';
+        btn.title = 'Switch to ' + nextTheme + ' mode';
+        btn.setAttribute('aria-label', 'Switch to ' + nextTheme + ' mode');
+      }
+
+      applyTheme(getPreferredTheme());
+      const themeToggle = document.getElementById('theme-toggle');
+      if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+          const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          const next = current === 'light' ? 'dark' : 'light';
+          localStorage.setItem(THEME_KEY, next);
+          applyTheme(next);
+        });
+      }
+
       async function getSession() {
         try {
           const res = await fetch('/auth/.ory/sessions/whoami', {
@@ -482,7 +648,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           });
           if (res.ok) {
             const data = await res.json();
-            return { loggedIn: true, email: data?.identity?.traits?.email ?? '' };
+            return { loggedIn: true, email: data?.identity?.traits?.username ?? data?.identity?.traits?.email ?? '' };
           }
         } catch (_) {}
         return { loggedIn: false };
@@ -508,16 +674,15 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         if (!el || !label) return;
         if (session.loggedIn) {
           el.classList.add('logged-in');
-          const emailPart = session.email ? ' as <strong>' + session.email + '</strong>' : '';
-          label.innerHTML = 'Logged in' + emailPart;
+          label.textContent = session.email || 'Signed in';
           const btn = document.createElement('button');
           btn.className = 'auth-btn auth-btn-logout';
-          btn.textContent = 'Log out';
+          btn.textContent = 'Sign out';
           btn.addEventListener('click', logout);
           el.appendChild(btn);
         } else {
           el.classList.add('logged-out');
-          label.textContent = 'Not logged in';
+          label.remove();
           const a = document.createElement('a');
           a.className = 'auth-btn auth-btn-login';
           a.href = '/auth/.ory/self-service/login/browser?return_to=' + encodeURIComponent(window.location.origin + '/api/v1/docs');

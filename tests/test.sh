@@ -17,7 +17,7 @@ echo "--- file-system ---"
 docker build --target test "${build_args[@]}" -f "$ROOT/services/file-system/Dockerfile" "$ROOT/services/file-system"
 
 echo "--- gateway ---"
-docker build --target build "${build_args[@]}" -f "$ROOT/services/gateway/Dockerfile" "$ROOT/services/gateway"
+docker build --target test "${build_args[@]}" -f "$ROOT/services/gateway/Dockerfile" "$ROOT/services/gateway"
 
 echo "--- explorer ---"
 docker build --target test "${build_args[@]}" -f "$ROOT/services/explorer/Dockerfile" "$ROOT/services/explorer"
