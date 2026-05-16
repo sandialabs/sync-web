@@ -277,6 +277,19 @@
   (assert (resolve ledger-1 '(1 (*state* do pin this)) #f #f) "yes")
   (assert (resolve ledger-1 '(1 (*state* do pin that)) #f #f) '(unknown))
 
+  (assert ((ledger-1 'pin!) '(-1 (*state* do pin this))) #t)
+  (assert ((ledger-1 'pin!) '(-2 (*state* do pin this))) #t)
+  (assert ((ledger-1 'pin!) '(-3 (*state* do pin this))) #t)
+  (assert ((ledger-1 'pin!) '(-4 (*state* do pin this))) #t)
+  (assert ((ledger-1 'pin!) '(-5 (*state* do pin this))) #f)
+
+  (assert (pin! ledger-1 '(-1 (*bridge* ledger-2 chain) -1 (*state* a b c))) #t)
+  (assert (pin! ledger-1 '(-2 (*bridge* ledger-2 chain) -2 (*state* a b c))) #t)
+  (assert (resolve ledger-1 '(-1 (*bridge* ledger-2 chain) -1 (*state* a b c)) #t #f)
+          (lambda (res) (cadr (assoc 'pinned? res))))
+  (assert (resolve ledger-1 '(-2 (*bridge* ledger-2 chain) -2 (*state* a b c)) #t #f)
+          (lambda (res) (cadr (assoc 'pinned? res))))
+
   (assert ((ledger-1 'update-config!) '(public public-key) #u(0)) #t)
   (assert ((ledger-1 'update-config!) '(private secret-key) #u(1)) #t)
   (assert ((ledger-1 'update-config!) '(public window) 2) #t)

@@ -38,6 +38,8 @@
   (define-method (bridge! self name interface info)
     ;; Apply prepared bridge registration data and cache the bridge public key.
     ;;   Args:
+    ;;     name (symbol): bridge name.
+    ;;     interface (string): remote interface URL.
     ;;     info (list): bridge info payload.
     ;;   Returns:
     ;;     boolean: #t after updating config.
@@ -114,10 +116,16 @@
     ;;     boolean: #t after pinning.
     ((self '~path-check) path #f #f)
     (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (head-node (if response ((standard 'deserialize) response) ((standard 'deep-slice!) ((self '~head) path) path)))
-           (head-obj (sync-eval head-node #f))
-           (head-index (- ((head-obj 'size)) 1)))
-      ((self '~field!) 'perm ((standard 'deep-merge!) ((head-obj 'get) -1) ((self '~field!) 'perm) `(,head-index)))))
+           (perm (sync-eval ((self '~field!) 'perm) #f))
+           (window ((self '~config-get) '(public window)))
+           (current (- ((perm 'size)) 1))
+           (target ((perm 'index) (car path))))
+      (if (and window (< target (- current window))) #f
+          (let* ((head-node (if response ((standard 'deserialize) response) ((standard 'deep-slice!) ((self '~head) path) path)))
+                 (head-obj (sync-eval head-node #f))
+                 (head-index ((head-obj 'index) (car path))))
+            ((self '~field!) 'perm
+             ((standard 'deep-merge!) ((head-obj 'get) (car path)) ((self '~field!) 'perm) `(,head-index)))))))
 
   (define-method (unpin! self path)
     ;; Remove a path from the permanent chain.
@@ -264,7 +272,7 @@
     ;; Update one surface-level code object in place.
     ;;   Args:
     ;;     class (symbol): update target (`standard`, `tree`, or `chain`).
-    ;;     update! (expr): quoted function of form '(lambda (obj) ... obj)
+    ;;     update (expr): quoted function of form '(lambda (obj) ... obj)
     ;;   Returns:
     ;;     boolean: #t after updating code.
     (let ((update-func (eval update)))
@@ -297,7 +305,7 @@
     ;;   Args:
     ;;     path (list): path segments.
     ;;     stage? (boolean): whether this is a staged-state path rather than an indexed chain path.
-    ;;     bridge-okay? (boolean): allow *bridge* paths.
+    ;;     state-only? (boolean): if #t, restrict to *state* paths only.
     ;;   Returns:
     ;;     boolean: #t when valid (or raises on invalid path).
     (let ((invalid-chain? (lambda (x) (if (or (and (not (null? x)) (not (integer? (car x))))

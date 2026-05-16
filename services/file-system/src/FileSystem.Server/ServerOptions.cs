@@ -41,7 +41,7 @@ public sealed class ServerOptions
     public string? Secret { get; set; }
 
     [Required]
-    public string JournalJsonUrl { get; set; } = "http://journal/interface/json";
+    public string JournalJsonUrl { get; set; } = "http://journal/interface";
 
     [Range(1, 60000)]
     public int GatewayTimeoutMs { get; set; } = 30000;

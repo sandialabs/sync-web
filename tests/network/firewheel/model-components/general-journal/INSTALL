@@ -34,7 +34,7 @@ rm sync-services -rf
 git clone https://github.com/sandialabs/sync-services.git
 
 # Pull latest updates from repo
-COMPOSE=sync-services/compose/general/docker-compose.yml
+COMPOSE=sync-services/deploy/compose/general/compose.yaml
 
 mkdir general-images
 SECRET=/ docker compose -f $COMPOSE pull
@@ -43,7 +43,9 @@ SECRET=/ docker compose -f $COMPOSE config --images | while read -r image; do
     docker save -o "general-images/$( echo $image | sha256sum | cut -d " " -f1).tar" $image;
 done
 
-cp -r sync-services/compose/general general-compose
+mkdir -p general-compose/deploy/compose general-compose/records
+cp -r sync-services/deploy/compose/general general-compose/deploy/compose/
+cp -r sync-services/records/lisp general-compose/records/
 rm vm_resources/general-compose.tar -rf
 rm vm_resources/general-images.tar -rf
 tar -cf vm_resources/general-compose.tar general-compose

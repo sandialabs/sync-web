@@ -85,6 +85,10 @@ export const buildFragmentHash = (input: {
   ledgerHops: LedgerHop[];
   rootIndex: number;
 }): string => {
+  if (input.mode === 'admin') {
+    return '#admin';
+  }
+
   if (input.mode === 'stage') {
     return buildStageFragment(input.stageSelection);
   }
@@ -179,7 +183,7 @@ const parseLedgerFragment = (segments: string[], isDirectory: boolean) => {
 
 export const parseFragmentHash = (hash: string): {
   mode: ExplorerMode;
-  selection: ExplorerSelection;
+  selection?: ExplorerSelection;
   ledgerHops?: LedgerHop[];
 } | null => {
   const { segments, isDirectory } = decodeHashSegments(hash);
@@ -202,6 +206,10 @@ export const parseFragmentHash = (hash: string): {
       selection: parsed.selection,
       ledgerHops: parsed.hops,
     };
+  }
+
+  if (segments[0] === 'admin') {
+    return { mode: 'admin' };
   }
 
   return null;

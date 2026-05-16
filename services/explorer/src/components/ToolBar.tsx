@@ -8,6 +8,7 @@ interface ToolBarProps {
   error: string | null;
   isLoading: boolean;
   mode: ExplorerMode;
+  isAdmin: boolean;
   theme: 'light' | 'dark';
   onModeChange: (mode: ExplorerMode) => void;
   onThemeToggle: () => void;
@@ -18,6 +19,7 @@ const ToolBar: React.FC<ToolBarProps> = ({
   error,
   isLoading,
   mode,
+  isAdmin,
   theme,
   onModeChange,
   onThemeToggle,
@@ -65,6 +67,14 @@ const ToolBar: React.FC<ToolBarProps> = ({
             >
               Stage
             </button>
+            {isAdmin && (
+              <button
+                className={`tab ${mode === 'admin' ? 'active' : ''}`}
+                onClick={() => onModeChange('admin')}
+              >
+                Admin
+              </button>
+            )}
           </div>
         </div>
 

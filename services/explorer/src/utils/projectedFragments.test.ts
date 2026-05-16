@@ -56,4 +56,18 @@ describe('projectedFragments', () => {
       selection: ledgerSelection,
     });
   });
+
+  it('builds and parses the admin fragment', () => {
+    const hash = buildFragmentHash({
+      mode: 'admin',
+      stageSelection: null,
+      ledgerSelection: null,
+      ledgerRootPath: [42, ['*state*']],
+      ledgerHops,
+      rootIndex: 42,
+    });
+
+    expect(hash).toBe('#admin');
+    expect(parseFragmentHash(hash)).toEqual({ mode: 'admin' });
+  });
 });

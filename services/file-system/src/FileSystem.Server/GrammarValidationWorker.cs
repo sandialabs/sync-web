@@ -235,7 +235,7 @@ public sealed class GrammarValidationWorker : BackgroundService
         var handler = new RecordingHttpMessageHandler();
         using var httpClient = new HttpClient(handler)
         {
-            BaseAddress = new Uri("http://journal/interface/json", UriKind.Absolute),
+            BaseAddress = new Uri("http://journal/interface", UriKind.Absolute),
             Timeout = TimeSpan.FromSeconds(5),
         };
         using var journal = new HttpJournalClient(httpClient, "secret-token");
@@ -247,7 +247,7 @@ public sealed class GrammarValidationWorker : BackgroundService
         var getResult = journal.GetAsync(new GatewayGetRequest(getPath, true, false), CancellationToken.None)
             .GetAwaiter()
             .GetResult();
-        Assert(string.Equals(handler.LastRequestUri, "http://journal/interface/json", StringComparison.Ordinal), "http journal get URI should match direct journal endpoint");
+        Assert(string.Equals(handler.LastRequestUri, "http://journal/interface", StringComparison.Ordinal), "http journal get URI should match direct journal endpoint");
         Assert(handler.LastAuthorization == null, "http journal should not send bearer auth");
         Assert(string.Equals(handler.LastBody?["function"]?.GetValue<string>(), "get", StringComparison.Ordinal), "http journal get should use function envelope");
         Assert(string.Equals(handler.LastBody?["authentication"]?["identity"]?[0]?.GetValue<string>(), "self", StringComparison.Ordinal), "http journal get should serialize identity in authentication");
@@ -854,7 +854,7 @@ public sealed class GrammarValidationWorker : BackgroundService
                     ? "batch"
                 : request.RequestUri?.AbsolutePath.EndsWith("/size", StringComparison.OrdinalIgnoreCase) == true
                     ? "size"
-                        : request.RequestUri?.AbsolutePath.EndsWith("/interface/json", StringComparison.OrdinalIgnoreCase) == true
+                        : request.RequestUri?.AbsolutePath.EndsWith("/interface", StringComparison.OrdinalIgnoreCase) == true
                             ? (LastBody?["function"]?.GetValue<string>() switch
                             {
                                 "set!" => "set",

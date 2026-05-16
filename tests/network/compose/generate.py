@@ -13,7 +13,7 @@ except ModuleNotFoundError as exc:
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-OUTPUT_COMPOSE = SCRIPT_DIR / "docker-compose.yml"
+OUTPUT_COMPOSE = SCRIPT_DIR / "compose.yml"
 OUTPUT_PEERS = SCRIPT_DIR / "peers.json"
 HTTP_ONLY_CERT = SCRIPT_DIR / "http-only.crt"
 HTTP_ONLY_KEY = SCRIPT_DIR / "http-only.key"
@@ -28,7 +28,8 @@ HTTP_PORT_BASE = 8192
 SMB_PORT_BASE = 1445
 FILE_SYSTEM_HOST_PORT_ZERO = 445
 DEFAULT_NODE_COUNT = 4
-DEFAULT_SECRET = "pass"
+DEFAULT_SECRET = "password"
+DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_CONNECTIVITY = 2
 DEFAULT_PERIOD = 2
 DEFAULT_WINDOW = 1024
@@ -107,7 +108,7 @@ def rewrite_depends_on(depends_on, node_index):
     raise SystemExit("Unsupported compose depends_on format")
 
 
-def rewrite_service_environment(service_name, node_index, environment, secret, period, window):
+def rewrite_service_environment(service_name, node_index, environment, secret, period, window, admin_username, admin_password):
     env_map = to_env_map(environment)
 
     if service_name == "journal":
@@ -115,19 +116,23 @@ def rewrite_service_environment(service_name, node_index, environment, secret, p
         env_map["PERIOD"] = str(period)
         env_map["WINDOW"] = str(window)
     elif service_name == "gateway":
-        env_map["JOURNAL_JSON_ENDPOINT"] = f"http://journal-{node_index}/interface/json"
-        env_map["JOURNAL_SCHEME_ENDPOINT"] = f"http://journal-{node_index}/interface"
-        env_map["ROOT_JSON_ENDPOINT"] = f"http://journal-{node_index}/interface/json"
-        env_map["ROOT_SCHEME_ENDPOINT"] = f"http://journal-{node_index}/interface"
+        env_map["JOURNAL_ENDPOINT"] = f"http://journal-{node_index}/interface"
+        env_map["ROOT_ENDPOINT"] = f"http://journal-{node_index}/interface"
+        env_map["KRATOS_PUBLIC_URL"] = f"http://identity-provider-{node_index}:4433"
+        env_map["KRATOS_ADMIN_URL"] = f"http://identity-provider-{node_index}:4434"
+        env_map["JOURNAL_SECRET"] = secret
     elif service_name == "router":
         env_map["ROUTER_JOURNAL_HOST"] = f"journal-{node_index}"
         env_map["ROUTER_GATEWAY_HOST"] = f"gateway-{node_index}"
         env_map["ROUTER_EXPLORER_HOST"] = f"explorer-{node_index}"
         env_map["ROUTER_WORKBENCH_HOST"] = f"workbench-{node_index}"
+    elif service_name == "identity-provider":
+        env_map["ADMIN_USERNAME"] = admin_username
+        env_map["ADMIN_PASSWORD"] = admin_password
     elif service_name == "file-system":
         env_map["SYNC_FS_GatewayBaseUrl"] = f"http://gateway-{node_index}/api/v1"
         env_map["SYNC_FS_GatewayAuthToken"] = secret
-        env_map["SYNC_FS_JournalJsonUrl"] = f"http://journal-{node_index}/interface/json"
+        env_map["SYNC_FS_JournalJsonUrl"] = f"http://journal-{node_index}/interface"
 
     return env_map
 
@@ -144,7 +149,17 @@ def rewrite_volume_entry(entry, node_index, named_volumes):
     return entry
 
 
-def rewrite_service_volumes(service_name, node_index, volumes, named_volumes):
+def rewrite_journal_bind_source(source, base_compose_dir):
+    if source in (".", ""):
+        return source
+    if source.startswith("/") or source in ("~",):
+        return source
+    if source.startswith("./") or source.startswith("../"):
+        return str((base_compose_dir / source).resolve())
+    return source
+
+
+def rewrite_service_volumes(service_name, node_index, volumes, named_volumes, base_compose_dir):
     if service_name == "router":
         return [
             "./http-only.crt:/etc/nginx/certs/tls.crt:ro",
@@ -154,6 +169,23 @@ def rewrite_service_volumes(service_name, node_index, volumes, named_volumes):
 
     if not volumes:
         return None
+
+    if service_name == "journal":
+        rewritten = []
+        for entry in volumes:
+            if not isinstance(entry, str):
+                rewritten.append(entry)
+                continue
+
+            parts = entry.split(":")
+            source = parts[0]
+            if source in named_volumes:
+                rewritten.append(rewrite_volume_entry(entry, node_index, named_volumes))
+                continue
+
+            parts[0] = rewrite_journal_bind_source(source, base_compose_dir)
+            rewritten.append(":".join(parts))
+        return rewritten
 
     return [rewrite_volume_entry(entry, node_index, named_volumes) for entry in volumes]
 
@@ -196,7 +228,7 @@ def generate_peer_config(node_count, connectivity):
     return {"nodes": nodes, "edges": edges}
 
 
-def make_social_agent_service(node_index, secret, period, size, activity, words, clients):
+def make_social_agent_service(node_index, period, size, activity, words, clients, admin_username, admin_password):
     service_name = f"social-agent-{node_index}"
     image = os.environ.get(
         "IMAGE_OVERRIDE_SOCIAL_AGENT",
@@ -205,11 +237,12 @@ def make_social_agent_service(node_index, secret, period, size, activity, words,
     return {
         "container_name": service_name,
         "image": image,
-        "depends_on": [f"router-{node_index}"],
+        "depends_on": [f"router-{node_index}", f"identity-provider-{node_index}"],
         "networks": ["public"],
         "environment": {
             "NODE_NAME": logical_node_name(node_index),
-            "SECRET": secret,
+            "SYNC_USERNAME": admin_username,
+            "SYNC_PASSWORD": admin_password,
             "PERIOD": str(period),
             "SIZE": str(size),
             "ACTIVITY": str(activity),
@@ -247,6 +280,8 @@ def main():
         raise SystemExit("NODE_COUNT must be greater than zero")
 
     secret = env_optional("SECRET", DEFAULT_SECRET)
+    admin_username = env_optional("ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME)
+    admin_password = env_optional("ADMIN_PASSWORD", secret)
     connectivity = env_int("CONNECTIVITY", DEFAULT_CONNECTIVITY)
     period = env_int("PERIOD", DEFAULT_PERIOD)
     window = env_int("WINDOW", DEFAULT_WINDOW)
@@ -292,6 +327,8 @@ def main():
                 secret,
                 period,
                 window,
+                admin_username,
+                admin_password,
             )
 
             if "image" in generated_service:
@@ -304,6 +341,7 @@ def main():
                 node_index,
                 generated_service.get("volumes"),
                 base_named_volumes,
+                base_compose_path.parent,
             )
             if rewritten_volumes is not None:
                 generated_service["volumes"] = rewritten_volumes
@@ -324,7 +362,7 @@ def main():
             generated["services"][generated_name] = generated_service
 
         generated["services"][f"social-agent-{node_index}"] = make_social_agent_service(
-            node_index, secret, period, size, activity, words, clients
+            node_index, period, size, activity, words, clients, admin_username, admin_password
         )
 
         for volume_name, volume_config in base_named_volumes.items():

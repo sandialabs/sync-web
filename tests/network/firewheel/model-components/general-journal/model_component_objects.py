@@ -52,7 +52,7 @@ class Journal:
         self.run_executable(
             1,
             "bash",
-            arguments=f'-c "cd /home/ubuntu/general-compose && {env} docker compose up"',
+            arguments=f'-c "cd /home/ubuntu/general-compose && {env} docker compose -f deploy/compose/general/compose.yaml up"',
         )
 
 

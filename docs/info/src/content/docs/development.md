@@ -359,7 +359,7 @@ Use `tests/load/locust` for HTTP load generation against gateway general endpoin
 
 Prerequisites:
 
-You need a running gateway endpoint (typically from `tests/api/local-compose.sh up`), Python 3 with `pip` and Locust dependencies from `requirements.txt`, and a `SECRET` environment variable that matches server configuration.
+You need a running gateway endpoint (typically from `tests/api/local-compose.sh up`), Python 3 with `pip` and Locust dependencies from `requirements.txt`, and an API token created from `/auth/settings` or `POST /api/v1/tokens`.
 
 Install and run:
 
@@ -368,7 +368,7 @@ cd tests/load/locust
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-SECRET=pass locust --host=http://localhost:8192
+API_TOKEN=sync-... locust --host=http://localhost:8192
 ```
 
 Headless example:
@@ -376,7 +376,7 @@ Headless example:
 ```bash
 cd tests/load/locust
 . .venv/bin/activate
-SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
+API_TOKEN=sync-... locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
 ```
 
 ### Multi-Node Compose Testing
@@ -403,7 +403,7 @@ docker compose up
 Generator defaults:
 
 - `NODE_COUNT=4`
-- `SECRET=pass`
+- `SECRET=password`
 - `CONNECTIVITY=2`
 - `PERIOD=2`
 - `WINDOW=1024`

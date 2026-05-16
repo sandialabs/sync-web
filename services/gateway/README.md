@@ -61,15 +61,15 @@ npm run start
 
 - `HOST` (default: `0.0.0.0`)
 - `PORT` (default: `8180`)
-- `JOURNAL_JSON_ENDPOINT` (default: `http://127.0.0.1:8192/interface/json`)
-- `JOURNAL_SCHEME_ENDPOINT` (default: `http://127.0.0.1:8192/interface`)
-- `ROOT_JSON_ENDPOINT` (default: `http://127.0.0.1:8192/interface/json`)
-- `ROOT_SCHEME_ENDPOINT` (default: `http://127.0.0.1:8192/interface`)
+- `JOURNAL_ENDPOINT` (default: `http://127.0.0.1:8192/interface`)
+- `ROOT_ENDPOINT` (default: `http://127.0.0.1:8192/interface`)
 - `REQUEST_TIMEOUT_MS` (default: `30000`)
 - Request body limit: `64 MiB`
 - `ALLOW_ADMIN_ROUTES` (default: `false`)
 - `DEBUG_FORWARDING` (default: `false`)
 - `DEBUG_FORWARDING_INCLUDE_AUTH` (default: `false`; unsafe, local debugging only)
+- `KRATOS_PUBLIC_URL` (default: `http://identity-provider:4433`)
+- `KRATOS_ADMIN_URL` (default: `http://identity-provider:4434`)
 
 ## API Style
 
@@ -105,7 +105,7 @@ Gateway supports both JSON and Scheme request bodies for `POST` operation endpoi
 
 - Use keyword-style argument object fields directly (for example `{ "path": ... }` for staged reads or `{ "path": ..., "pinned?": true, "proof?": true }` for committed/indexed `resolve` calls).
 
-- General routes are forwarded to the raw journal interface transport endpoint: `/interface/json`
+- General routes are forwarded to the raw journal interface transport endpoint: `/interface` with `Content-Type: application/json`
 
 ### Scheme Mode
 
@@ -120,7 +120,7 @@ Example body:
 
 Gateway composes the full Scheme call expression and forwards to the raw journal transport endpoint:
 
-- `/interface`
+- `/interface` with `Content-Type: application/scheme`
 
 ### Root Route Forwarding
 
@@ -135,11 +135,14 @@ They are forwarded as raw root calls instead:
 
 This matters because `*step*`, `*set-step*`, and related admin operations are raw root expressions, not general-interface queries.
 
-## Authentication Headers
+## Authentication
 
-Restricted routes accept:
+Restricted routes accept two forms of authentication:
 
-- `Authorization: Bearer <secret>`
+- **Session cookie**: `ory_kratos_session=<token>` (obtain by logging in at `/auth/login`)
+- **API token**: `Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>` (obtain via `POST /api/v1/tokens`)
+
+API tokens are machine/delegated credentials stored as SHA-256 hashes in Kratos `metadata_admin`. The plaintext token is returned once at creation and cannot be retrieved again.
 
 ## Route Summary
 
@@ -162,6 +165,12 @@ Included metrics:
 - `sync_gateway_journal_requests_total`
 - `sync_gateway_journal_request_duration_seconds`
 
+### API Tokens
+
+- `POST /api/v1/tokens` — create an API token (session required; token returned once)
+- `GET /api/v1/tokens` — list tokens for the current user (id + description + created_at)
+- `DELETE /api/v1/tokens/:id` — revoke a token by id
+
 ### General
 
 - `GET /api/v1/general/size` (public)
@@ -176,7 +185,17 @@ Included metrics:
 - `POST /api/v1/general/trace` (public)
 - `POST /api/v1/general/bridge`
 - `POST /api/v1/general/config`
+- `POST /api/v1/general/admins`
+- `POST /api/v1/general/set-admins`
+- `POST /api/v1/general/set-window`
 - `POST /api/v1/general/set-secret`
+
+Admin-oriented general endpoints:
+
+- `admins` calls `*admins-get*` and returns the interface admin username list.
+- `set-admins` calls `*admins-set*` and replaces that list wholesale.
+- `set-window` calls `*window-set*` and updates the public ledger retention window.
+- `bridge` expects the concrete remote journal proxy endpoint, for example `http://peer.example/api/v1/journal/interface`.
 
 ### Root (disabled by default)
 
@@ -201,7 +220,7 @@ Restricted JSON call:
 
 ```bash
 curl -X POST http://127.0.0.1:8180/api/v1/general/get \
-  -H "Authorization: Bearer password" \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: application/json" \
   -d '{"path":[["*state*","docs","article","hash"]]}'
 ```
@@ -210,7 +229,7 @@ Restricted Scheme call:
 
 ```bash
 curl -X POST http://127.0.0.1:8180/api/v1/general/get \
-  -H "Authorization: Bearer password" \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: text/plain" \
   -d '((path ((*state* docs article hash))))'
 ```
@@ -219,7 +238,7 @@ Restricted root step call:
 
 ```bash
 curl -X POST http://127.0.0.1:8180/api/v1/root/step \
-  -H "Authorization: Bearer password" \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: application/json" \
   -d '[]'
 ```
@@ -228,7 +247,7 @@ Restricted batch call:
 
 ```bash
 curl -X POST http://127.0.0.1:8180/api/v1/general/batch \
-  -H "Authorization: Bearer password" \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: application/json" \
   -d '{
     "queries": [
@@ -249,7 +268,7 @@ Restricted batch call in Scheme mode:
 
 ```bash
 curl -X POST http://127.0.0.1:8180/api/v1/general/batch \
-  -H "Authorization: Bearer password" \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: text/plain" \
   -d '((queries (((function get) (arguments ((path ((*state* docs article hash)))))
                ((function config))))))'

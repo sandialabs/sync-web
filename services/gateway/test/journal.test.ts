@@ -9,13 +9,11 @@ const logger = {
   child: () => logger,
 } as unknown as FastifyBaseLogger;
 
-const JSON_EP = "http://journal.test/interface/json";
-const SCHEME_EP = "http://journal.test/interface";
-const ROOT_JSON_EP = "http://journal.test/root/json";
-const ROOT_SCHEME_EP = "http://journal.test/root/interface";
+const JOURNAL_EP = "http://journal.test/interface";
+const ROOT_EP = "http://journal.test/root/interface";
 
 const makeClient = (timeoutMs = 5000) =>
-  createJournalClient(JSON_EP, SCHEME_EP, ROOT_JSON_EP, ROOT_SCHEME_EP, timeoutMs, logger);
+  createJournalClient(JOURNAL_EP, ROOT_EP, timeoutMs, logger);
 
 const respondWith = (body: unknown, status = 200) =>
   Promise.resolve({

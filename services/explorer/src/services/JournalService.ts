@@ -3,6 +3,8 @@
  */
 
 import { 
+  AdminBridge,
+  AdminConfig,
   JournalResponse, 
   JournalPath, 
   PeerInfo,
@@ -161,9 +163,9 @@ export class JournalService {
     return typeof path[0] === 'number';
   }
 
-  private static extractBridgeNames(config: unknown): string[] {
+  private static getBridgeBlock(config: unknown): Record<string, unknown> | null {
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return [];
+      return null;
     }
 
     const rootObject = config as Record<string, unknown>;
@@ -172,10 +174,52 @@ export class JournalService {
         ? (rootObject.private as Record<string, unknown>).bridge
         : config;
     if (!bridgeBlock || typeof bridgeBlock !== 'object' || Array.isArray(bridgeBlock)) {
+      return null;
+    }
+
+    return bridgeBlock as Record<string, unknown>;
+  }
+
+  private static extractBridgeNames(config: unknown): string[] {
+    const bridgeBlock = JournalService.getBridgeBlock(config);
+    return bridgeBlock ? Object.keys(bridgeBlock).sort() : [];
+  }
+
+  private static extractBridgeEndpoint(value: unknown): string {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return '';
+    }
+    const bridge = value as Record<string, unknown>;
+    const raw = bridge.interface;
+    const { value: endpoint } = JournalService.extractSchemeValue(raw);
+    return typeof endpoint === 'string' ? endpoint : '';
+  }
+
+  private static extractAdminBridges(config: unknown): AdminBridge[] {
+    const bridgeBlock = JournalService.getBridgeBlock(config);
+    if (!bridgeBlock) {
       return [];
     }
 
-    return Object.keys(bridgeBlock).sort();
+    return Object.entries(bridgeBlock)
+      .map(([name, value]) => ({
+        name,
+        endpoint: JournalService.extractBridgeEndpoint(value),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private static extractWindowSize(config: unknown): number | null {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return null;
+    }
+    const rootObject = config as Record<string, unknown>;
+    const publicBlock = rootObject.public;
+    if (!publicBlock || typeof publicBlock !== 'object' || Array.isArray(publicBlock)) {
+      return null;
+    }
+    const value = (publicBlock as Record<string, unknown>).window;
+    return typeof value === 'number' ? value : null;
   }
 
   private buildGatewayUrl(path: string): string {
@@ -215,9 +259,7 @@ export class JournalService {
 
     if (method === 'POST') {
       headers['Content-Type'] = 'application/json';
-      if (args && Object.keys(args).length > 0) {
-        body = JSON.stringify(args);
-      }
+      body = JSON.stringify(args ?? {});
     }
 
     const controller = new AbortController();
@@ -503,5 +545,48 @@ export class JournalService {
 
   async getPeers(): Promise<PeerInfo[]> {
     return this.getBridges();
+  }
+
+  async getAdmins(): Promise<string[]> {
+    const admins = await this.request<unknown>({
+      method: 'POST',
+      path: '/general/admins',
+    });
+    if (!Array.isArray(admins)) {
+      return [];
+    }
+    return admins.map((admin) => String(admin)).sort((left, right) => left.localeCompare(right));
+  }
+
+  async setAdmins(admins: string[]): Promise<boolean> {
+    return this.request<boolean>({
+      method: 'POST',
+      path: '/general/set-admins',
+      args: { admins },
+    });
+  }
+
+  async setWindowSize(value: number): Promise<boolean> {
+    return this.request<boolean>({
+      method: 'POST',
+      path: '/general/set-window',
+      args: { value },
+    });
+  }
+
+  async getAdminConfig(): Promise<AdminConfig> {
+    const [admins, config] = await Promise.all([
+      this.getAdmins(),
+      this.request<unknown>({
+        method: 'POST',
+        path: '/general/config',
+      }),
+    ]);
+
+    return {
+      admins,
+      bridges: JournalService.extractAdminBridges(config),
+      windowSize: JournalService.extractWindowSize(config),
+    };
   }
 }

@@ -274,14 +274,15 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
           )}
           {mode === 'ledger' && selection.type === 'file' && (
             <>
-              <button className="button button-secondary" onClick={onLedgerViewToggle}>
-                {ledgerView === 'content' ? 'Proof' : 'Content'}
-              </button>
               <button
                 className={isPinned ? 'button button-secondary' : 'button button-primary'}
                 onClick={handlePinToggle}
               >
                 {isPinned ? 'Unpin' : 'Pin'}
+              </button>
+              <button className="button button-secondary" onClick={handleDownload}>Download</button>
+              <button className="button button-secondary" onClick={onLedgerViewToggle}>
+                {ledgerView === 'content' ? 'Proof' : 'Content'}
               </button>
             </>
           )}

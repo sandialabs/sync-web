@@ -110,9 +110,9 @@
                                       (error 'permissions-error "User may only write to their own space")))
                                 (cadr (assoc 'paths arg-list))))
                      ((get resolve pin! unpin!)
-                      (if (not (or (eq? identity (car (segment (cadr (assoc 'path arg-list)))))
-                                   (not (memq '*private* (segment (cadr (assoc 'path arg-list)))))))
-                          (error 'permissions-error "User may not read another user's private namespace")))
+                      (let ((seg (segment (cadr (assoc 'path arg-list)))))
+                        (if (not (or (null? seg) (eq? identity (car seg)) (not (memq '*private* seg))))
+                            (error 'permissions-error "User may not read another user's private namespace"))))
                      (else (error 'permissions-error "Operation requires admin privileges")))))))
 
          (define (~bridge-path? path)
@@ -170,6 +170,16 @@
            ;;     stored value.
            ((root 'set!) '(interface admins) admins))
 
+         (define* (*window-set* (value (error 'arg-error "Missing arg: value")))
+           ;; Update the public retention window.
+           ;;   Args:
+           ;;     value (integer): positive retention window size.
+           ;;   Returns:
+           ;;     boolean: #t after updating.
+           (if (not (and (integer? value) (> value 0)))
+               (error 'arg-error "Window must be a positive integer"))
+           ((ledger 'update-config!) '(public window) value))
+
          (define* (resolve (path (error 'arg-error "Missing arg: path")) pinned? proof? head)
            ;; Resolve a path, optionally using a provided proof head or remote bridge fetch.
            ;;   Args:
@@ -219,7 +229,7 @@
                                     (proof ((standard 'deep-slice!) merged path))
                                     (response ((standard 'serialize) proof))
                                     (args (append arg-list `((response ,response)))))
-                               (~self-call 'pin! args #f)))))))
+                               (~self-call 'pin! args #t)))))))
 
          (define* (bridge! (name (error 'arg-error "Missing arg: name"))
                            (interface (error 'arg-error "Missing arg: interface"))
@@ -246,6 +256,7 @@
                       ((*secret*) (~authenticate+authorize) (apply *secret* keyword-args))
                       ((*admins-get*) (~authenticate+authorize) (apply *admins-get* keyword-args))
                       ((*admins-set*) (~authenticate+authorize) (apply *admins-set* keyword-args))
+                      ((*window-set*) (~authenticate+authorize) (apply *window-set* keyword-args))
                       ((resolve) (~authenticate+authorize) (apply resolve keyword-args))
                       ((trace) (apply trace keyword-args))
                       ((pin!) (~authenticate+authorize) (apply pin! keyword-args))

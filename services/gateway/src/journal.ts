@@ -14,6 +14,7 @@ export interface JournalClient {
   callRootJson(input: JournalCall): Promise<unknown>;
   callRootScheme(input: { expression: string; functionName: string }): Promise<unknown>;
   proxyJson(body: unknown): Promise<unknown>;
+  proxyScheme(expression: string): Promise<string>;
 }
 
 export interface JournalClientOptions {
@@ -132,10 +133,8 @@ const buildRootJsonBody = (input: JournalCall): unknown[] => {
 };
 
 export const createJournalClient = (
-  journalJsonEndpoint: string,
-  journalSchemeEndpoint: string,
-  rootJsonEndpoint: string,
-  rootSchemeEndpoint: string,
+  journalEndpoint: string,
+  rootEndpoint: string,
   requestTimeoutMs: number,
   logger: FastifyBaseLogger,
   options: JournalClientOptions = {}
@@ -279,7 +278,7 @@ export const createJournalClient = (
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "content-type": "text/plain; charset=utf-8" },
+        headers: { "content-type": "application/scheme" },
         body: input.expression,
         signal: controller.signal,
       });
@@ -352,13 +351,13 @@ export const createJournalClient = (
 
   return {
     async callJson(input: JournalCall): Promise<unknown> {
-      return callJsonEndpoint(journalJsonEndpoint, input);
+      return callJsonEndpoint(journalEndpoint, input);
     },
     async callScheme(input: {
       expression: string;
       functionName: string;
     }): Promise<unknown> {
-      return callSchemeEndpoint(journalSchemeEndpoint, input);
+      return callSchemeEndpoint(journalEndpoint, input);
     },
     async callRootJson(input: JournalCall): Promise<unknown> {
       const requestBody = buildRootJsonBody(input);
@@ -369,7 +368,7 @@ export const createJournalClient = (
       if (options.debugForwarding) {
         logger.info(
           {
-            upstream: rootJsonEndpoint,
+            upstream: rootEndpoint,
             mode: "json",
             outboundBody: options.debugForwardingIncludeAuth
               ? requestBody
@@ -388,7 +387,7 @@ export const createJournalClient = (
       }
 
       try {
-        const response = await fetch(rootJsonEndpoint, {
+        const response = await fetch(rootEndpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(requestBody),
@@ -413,7 +412,7 @@ export const createJournalClient = (
         if (options.debugForwarding) {
           logger.info(
             {
-              upstream: rootJsonEndpoint,
+              upstream: rootEndpoint,
               mode: "json",
               statusCode: response.status,
               durationMs: Date.now() - startedAt,
@@ -462,19 +461,34 @@ export const createJournalClient = (
       expression: string;
       functionName: string;
     }): Promise<unknown> {
-      return callSchemeEndpoint(rootSchemeEndpoint, input);
+      return callSchemeEndpoint(rootEndpoint, input);
     },
     async proxyJson(body: unknown): Promise<unknown> {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
       try {
-        const response = await fetch(journalJsonEndpoint, {
+        const response = await fetch(journalEndpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
           signal: controller.signal,
         });
         return parseResponse(await response.text());
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+    async proxyScheme(expression: string): Promise<string> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        const response = await fetch(journalEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/scheme" },
+          body: expression,
+          signal: controller.signal,
+        });
+        return response.text();
       } finally {
         clearTimeout(timeout);
       }
