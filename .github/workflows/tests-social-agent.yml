@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["tests/network/common/social-agent/**"]
+    paths: ["tests/network/common/social-agent/**", "VERSION"]
   pull_request:
     branches: ["main"]
     paths: ["tests/network/common/social-agent/**"]
@@ -14,7 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      service: ${{ steps.filter.outputs.service }}
+      version: ${{ steps.filter.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            service:
+              - 'tests/network/common/social-agent/**'
+            version:
+              - 'VERSION'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.service == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -32,9 +50,9 @@ jobs:
           python -m unittest discover -s tests/network/common/social-agent/tests -p "test_*.py" -v
 
   docker-validate:
-    needs: test
+    needs: [changes, test]
     runs-on: ubuntu-latest
-    if: github.ref != 'refs/heads/main'
+    if: needs.changes.outputs.service == 'true' && github.ref != 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,10 +70,10 @@ jobs:
           platforms: linux/amd64
 
   publish:
-    needs: test
+    needs: [changes, test]
     runs-on: ubuntu-latest
     permissions: write-all
-    if: github.ref == 'refs/heads/main'
+    if: needs.changes.outputs.service == 'true' && github.ref == 'refs/heads/main'
     steps:
       - name: Login to Github registry
         uses: docker/login-action@v2
@@ -82,3 +100,26 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/social-agent:${{ steps.version.outputs.value }}
             ghcr.io/${{ github.repository }}/social-agent:latest
+
+  tag-version:
+    needs: [changes, publish]
+    if: always() && github.ref == 'refs/heads/main' && needs.changes.outputs.version == 'true' && needs.changes.outputs.service != 'true' && needs.publish.result == 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Login to Github registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Tag version
+        run: |
+          VERSION="$(cat VERSION)"
+          docker buildx imagetools create \
+            -t "ghcr.io/${{ github.repository }}/social-agent:$VERSION" \
+            "ghcr.io/${{ github.repository }}/social-agent:latest"
