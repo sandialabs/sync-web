@@ -4,7 +4,7 @@ networks:
 
 services:
   journal:
-    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.2.0}
+    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.2.1}
     container_name: journal
     working_dir: /srv
     entrypoint: ["/bin/sh", "/srv/run.sh"]
@@ -24,7 +24,7 @@ services:
       - ./run.sh:/srv/run.sh:ro
 
   explorer:
-    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.2.0}
+    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.2.1}
     container_name: explorer
     networks:
       - sync-net
@@ -32,7 +32,7 @@ services:
       SYNC_EXPLORER_ENDPOINT: /api/v1
 
   workbench:
-    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.2.0}
+    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.2.1}
     container_name: workbench
     networks:
       - sync-net
@@ -40,7 +40,7 @@ services:
       SYNC_WORKBENCH_ENDPOINT: /interface
 
   gateway:
-    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.2.0}
+    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.2.1}
     container_name: gateway
     networks:
       - sync-net
@@ -59,14 +59,14 @@ services:
       # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface
 
   identity-provider:
-    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.2.0}
+    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.2.1}
     container_name: identity-provider
     networks:
       - sync-net
     volumes:
       - identity-provider-data:/var/lib/kratos
     environment:
-      DOMAIN: ${DOMAIN:-localhost:8192}
+      ORIGIN: ${ORIGIN:-http://localhost:8192}
       KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
@@ -74,7 +74,7 @@ services:
     restart: unless-stopped
 
   router:
-    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.2.0}
+    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.2.1}
     container_name: router
     environment:
       TLS_CERT_FILE: ${TLS_CERT_FILE:-/etc/nginx/certs/tls.crt}
@@ -96,7 +96,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
 
   file-system:
-    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.2.0}
+    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.2.1}
     container_name: file-system
     depends_on:
       - gateway

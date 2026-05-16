@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import Registration from "./pages/Registration";
 import Recovery from "./pages/Recovery";
 import Settings from "./pages/Settings";
+import KratosError from "./pages/KratosError";
 import ErrorPage from "./Error";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -20,6 +21,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/registration" element={<Registration />} />
             <Route path="/recovery" element={<Recovery />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/error" element={<KratosError />} />
             <Route path="*" element={<ErrorPage />} />
           </Routes>
         </BrowserRouter>

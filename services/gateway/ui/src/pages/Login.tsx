@@ -14,7 +14,7 @@ export default function Login() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const flowId = params.get("flow");
-    const returnTo = params.get("return_to");
+    const returnTo = (params.get("return_to") ?? "").split("#")[0] || null;
     const returnToParam = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
     if (!flowId) {
       window.location.replace(`/auth/.ory/self-service/login/browser${returnToParam}`);
