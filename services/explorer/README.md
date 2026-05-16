@@ -4,16 +4,21 @@ React UI for browsing and editing synchronic web journals through the gateway AP
 
 ## Current Model
 
-The explorer now has two modes:
+The explorer now has three modes:
 
-- `Stage`
-  - local staged files and directories
-  - tree-driven selection
-  - file editing is read-only until `Edit`
 - `Ledger`
   - committed route-based browsing
   - route strip across the top
   - file view toggles between content and proof
+- `Stage`
+  - local staged files and directories
+  - tree-driven selection
+  - file editing is read-only until `Edit`
+- `Admin`
+  - visible only to interface admins
+  - bridge registration and local bridge endpoint copying
+  - public window-size editing
+  - interface admin-list management
 
 There is no dedicated history pane in the current UI. Ledger history is expressed through the route strip and snapshot controls.
 
@@ -72,6 +77,15 @@ Container/runtime defaults are read from:
 - Selecting a file exposes:
   - `Proof` / `Content`
   - `Pin` / `Unpin`
+
+### Admin
+
+- The tab appears only after the current session succeeds against the admin-gated `admins` endpoint.
+- The Bridges section shows the local endpoint that other journals should use when registering this node:
+  - `http(s)://<host>/api/v1/journal/interface`
+- Bridge registration stores a concrete peer interface URL, not a generic API base URL.
+- Window size changes call the interface-level window operation and require confirmation when decreasing the value.
+- Admin user changes replace the interface admin list through the gateway.
 
 ## Docker
 

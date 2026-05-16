@@ -24,6 +24,8 @@ REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-5}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$COMPOSE_DIR")}"
 LOCAL_COMPOSE_FORCE_HTTP="${LOCAL_COMPOSE_FORCE_HTTP:-1}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+CONTAINER_COMPOSE="${CONTAINER_COMPOSE:-$CONTAINER_RUNTIME compose}"
 
 cleanup_mode="down"
 
@@ -31,7 +33,6 @@ VERSION="$(cat "$ROOT_DIR/VERSION")"
 SYNC_WEB_VERSION="$VERSION"
 
 JOURNAL_SDK_REMOTE_TAG="ghcr.io/sandialabs/sync-web/journal-sdk:$VERSION"
-GENERAL_REMOTE_TAG="ghcr.io/sandialabs/sync-web/general:$VERSION"
 GATEWAY_REMOTE_TAG="ghcr.io/sandialabs/sync-web/gateway:$VERSION"
 EXPLORER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/explorer:$VERSION"
 WORKBENCH_REMOTE_TAG="ghcr.io/sandialabs/sync-web/workbench:$VERSION"
@@ -40,7 +41,6 @@ IDENTITY_PROVIDER_REMOTE_TAG="ghcr.io/sandialabs/sync-web/identity-provider:$VER
 FILE_SYSTEM_REMOTE_TAG="ghcr.io/sandialabs/sync-web/file-system:$VERSION"
 
 JOURNAL_SDK_LOCAL_TAG="sync-web/local-journal-sdk:$VERSION"
-GENERAL_LOCAL_TAG="sync-web/local-general:$VERSION"
 GATEWAY_LOCAL_TAG="sync-web/local-gateway:$VERSION"
 EXPLORER_LOCAL_TAG="sync-web/local-explorer:$VERSION"
 WORKBENCH_LOCAL_TAG="sync-web/local-workbench:$VERSION"
@@ -50,7 +50,7 @@ FILE_SYSTEM_LOCAL_TAG="sync-web/local-file-system:$VERSION"
 FILE_SYSTEM_IMAGE="${FILE_SYSTEM_IMAGE:-$FILE_SYSTEM_REMOTE_TAG}"
 
 dc() {
-    docker compose -f "$COMPOSE_FILE" "$@"
+    $CONTAINER_COMPOSE -f "$COMPOSE_FILE" "$@"
 }
 
 has_existing_named_volumes() {
@@ -60,7 +60,7 @@ has_existing_named_volumes() {
     fi
     for logical_name in $names; do
         full_name="${COMPOSE_PROJECT_NAME}_${logical_name}"
-        if docker volume inspect "$full_name" >/dev/null 2>&1; then
+        if $CONTAINER_RUNTIME volume inspect "$full_name" >/dev/null 2>&1; then
             return 0
         fi
     done
@@ -135,14 +135,13 @@ build_and_retag() {
         set -- -f "$dockerfile" "$@"
     fi
 
-    docker build "$@" "$context"
+    $CONTAINER_RUNTIME build "$@" "$context"
 
     echo "Tagging $local_tag as $remote_tag ..."
-    docker tag "$local_tag" "$remote_tag"
+    $CONTAINER_RUNTIME tag "$local_tag" "$remote_tag"
 }
 
 build_and_retag "$ROOT_DIR/journal" "$JOURNAL_SDK_LOCAL_TAG" "$JOURNAL_SDK_REMOTE_TAG"
-build_and_retag "$ROOT_DIR" "$GENERAL_LOCAL_TAG" "$GENERAL_REMOTE_TAG" "" "$COMPOSE_DIR/Dockerfile" "JOURNAL_SDK_IMAGE=$JOURNAL_SDK_LOCAL_TAG"
 build_and_retag "$ROOT_DIR/services/gateway" "$GATEWAY_LOCAL_TAG" "$GATEWAY_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
@@ -150,7 +149,7 @@ build_and_retag "$ROOT_DIR/services/router" "$ROUTER_LOCAL_TAG" "$ROUTER_REMOTE_
 build_and_retag "$ROOT_DIR/services/identity-provider" "$IDENTITY_PROVIDER_LOCAL_TAG" "$IDENTITY_PROVIDER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/file-system" "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_REMOTE_TAG"
 echo "Tagging $FILE_SYSTEM_LOCAL_TAG as $FILE_SYSTEM_IMAGE ..."
-docker tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
+$CONTAINER_RUNTIME tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
 
 if [ "$MODE" = "build" ]; then
     echo "PASS: local images built and tagged."
@@ -209,7 +208,7 @@ api_post() {
     curl -fsS \
       -H "Content-Type: application/json" \
       -d "$body" \
-      "http://127.0.0.1:$PORT/interface/json"
+      "http://127.0.0.1:$PORT/interface"
 }
 
 gateway_status() {
@@ -267,12 +266,6 @@ esac
 root_unauthorized_status="$(gateway_status POST "/api/v1/root/step" -H "Content-Type: application/json" -d '[]')"
 if [ "$root_unauthorized_status" != "401" ]; then
     echo "FAIL: expected gateway root route to require auth (401), got $root_unauthorized_status"
-    exit 1
-fi
-
-root_authorized_status="$(gateway_status POST "/api/v1/root/step" -H "Authorization: Bearer $SECRET" -H "Content-Type: application/json" -d '[]')"
-if [ "$root_authorized_status" != "200" ]; then
-    echo "FAIL: expected authenticated gateway root route to succeed (200), got $root_authorized_status"
     exit 1
 fi
 

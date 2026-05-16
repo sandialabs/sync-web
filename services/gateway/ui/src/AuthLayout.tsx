@@ -78,7 +78,6 @@ export default function AuthLayout({ active, children, title }: AuthLayoutProps)
           <img className="auth-toolbar-logo" src="/gateway-logo.png" alt="Synchronic Web" />
           <nav className="auth-toolbar-tabs" aria-label="Synchronic sections">
             <a className="auth-toolbar-pill" href="/gateway">Gateway Home</a>
-            <a className="auth-toolbar-pill" href="/explorer">Explorer</a>
             <a className="auth-toolbar-pill" href="/api/v1/docs">API Reference</a>
           </nav>
         </div>

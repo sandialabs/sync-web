@@ -1,6 +1,7 @@
+import { randomBytes, createHash } from "node:crypto";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { resolveIdentity, UnauthorizedError } from "./auth";
-import type { KratosClient } from "./kratos";
+import { resolveIdentity, resolveSessionIdentity, UnauthorizedError } from "./auth";
+import type { ApiTokenEntry, KratosClient } from "./kratos";
 import type { JournalClient } from "./journal";
 import { JournalSemanticError } from "./journal";
 
@@ -19,6 +20,11 @@ const getContentType = (request: FastifyRequest): string =>
 
 const isSchemeContentType = (contentType: string): boolean =>
   contentType === "text/plain" || contentType === "application/scheme";
+
+const isDefaultSchemeProxyContentType = (contentType: string): boolean =>
+  contentType === "" ||
+  contentType === "application/octet-stream" ||
+  contentType === "application/x-www-form-urlencoded";
 
 const isJsonContentType = (contentType: string): boolean =>
   contentType === "application/json";
@@ -149,6 +155,9 @@ const generalAliases = {
   trace: "trace",
   bridge: "bridge!",
   config: "config",
+  admins: "*admins-get*",
+  "set-admins": "*admins-set*",
+  "set-window": "*window-set*",
   "set-secret": "*secret*",
 } as const;
 
@@ -220,6 +229,21 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     summary: "Read full node config",
     description:
       "Calls general function `config`. Includes private/runtime fields and should be treated as sensitive output.",
+  },
+  admins: {
+    summary: "Read interface admins",
+    description:
+      "Calls general function `*admins-get*`. Returns the interface admin username list.",
+  },
+  "set-admins": {
+    summary: "Replace interface admins",
+    description:
+      "Calls general function `*admins-set*`. Replaces the interface admin username list wholesale.",
+  },
+  "set-window": {
+    summary: "Set ledger window size",
+    description:
+      "Calls general function `*window-set*`. Updates the public ledger retention window to a positive integer.",
   },
   "set-secret": {
     summary: "Rotate the general interface secret",
@@ -297,6 +321,9 @@ const generalOperationExamples: Record<string, unknown> = {
   info:         {},
   bridge:       { name: "peer-a", interface: "http://peer-a/interface" },
   config:       {},
+  admins:       {},
+  "set-admins": { admins: ["admin", "alice"] },
+  "set-window": { value: 128 },
   "set-secret": { secret: "new-secret" },
   synchronize:  { index: 0 },
   trace:        { index: 0, path: [-1, ["*state*", "mykey"]] },
@@ -312,6 +339,9 @@ const generalSchemeExamples: Record<string, string> = {
   info:         "()",
   bridge:       "((name peer-a) (interface \"http://peer-a/interface\"))",
   config:       "()",
+  admins:       "()",
+  "set-admins": "((admins (admin alice)))",
+  "set-window": "((value 128))",
   "set-secret": "((secret new-secret))",
   synchronize:  "((index 0))",
   trace:        "((index 0) (path (-1 (*state* mykey))))",
@@ -811,9 +841,10 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     },
     async (request, reply) => {
       const contentType = getContentType(request);
-      if (isSchemeContentType(contentType)) {
+      if (isDefaultSchemeProxyContentType(contentType) || isSchemeContentType(contentType)) {
         const expression = extractSchemeArguments(request.body);
-        return journal.callScheme({ expression, functionName: "interface" });
+        const response = await journal.proxyScheme(expression);
+        return reply.type("text/plain; charset=utf-8").send(response);
       }
       if (isJsonContentType(contentType)) {
         return journal.proxyJson(request.body);
@@ -880,6 +911,133 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       );
     }
   }
+
+  const generateKeyId = (): string => randomBytes(4).toString("hex");
+  const generateSecret = (): string => randomBytes(32).toString("hex");
+  const hashSecret = (s: string): string => createHash("sha256").update(s).digest("hex");
+  const stripUuidHyphens = (uuid: string): string => uuid.replace(/-/g, "");
+
+  app.post(
+    "/api/v1/tokens",
+    {
+      schema: {
+        tags: ["API Tokens"],
+        summary: "Create an API token",
+        description:
+          "Creates a new API token for the authenticated user. Returns the plaintext token exactly once — store it immediately, it cannot be retrieved again.",
+        body: {
+          type: "object",
+          properties: { description: { type: "string" } },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              token: { type: "string" },
+              id: { type: "string" },
+              description: { type: "string" },
+              created_at: { type: "string" },
+            },
+            required: ["token", "id", "created_at"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const resolved = await resolveSessionIdentity(request, journalSecret, kratos);
+      const identity = await kratos.getIdentityById(resolved.kratosId);
+      const existingTokens = identity.metadata_admin?.api_tokens ?? {};
+
+      let tokenId: string;
+      do {
+        tokenId = generateKeyId();
+      } while (tokenId in existingTokens);
+
+      const secret = generateSecret();
+      const description =
+        typeof (request.body as Record<string, unknown>)?.description === "string"
+          ? ((request.body as Record<string, string>).description)
+          : "";
+      const created_at = new Date().toISOString();
+
+      const newEntry: ApiTokenEntry = { hash: hashSecret(secret), description, created_at };
+      await kratos.patchIdentityApiTokens(resolved.kratosId, { ...existingTokens, [tokenId]: newEntry });
+
+      const token = `sync-${stripUuidHyphens(resolved.kratosId)}-${tokenId}-0-${secret}`;
+      return reply.code(201).send({ token, id: tokenId, description, created_at });
+    }
+  );
+
+  app.get(
+    "/api/v1/tokens",
+    {
+      schema: {
+        tags: ["API Tokens"],
+        summary: "List API tokens",
+        description: "Lists all API tokens for the authenticated user. Never returns secrets.",
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                description: { type: "string" },
+                created_at: { type: "string" },
+              },
+              required: ["id", "created_at"],
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const resolved = await resolveSessionIdentity(request, journalSecret, kratos);
+      const identity = await kratos.getIdentityById(resolved.kratosId);
+      const tokens = identity.metadata_admin?.api_tokens ?? {};
+      return Object.entries(tokens).map(([id, entry]) => ({
+        id,
+        description: entry.description,
+        created_at: entry.created_at,
+      }));
+    }
+  );
+
+  app.delete(
+    "/api/v1/tokens/:id",
+    {
+      schema: {
+        tags: ["API Tokens"],
+        summary: "Revoke an API token",
+        description: "Permanently revokes an API token by id. The token is immediately invalid.",
+        params: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+        response: {
+          204: { type: "null" },
+          404: {
+            type: "object",
+            properties: { error: { type: "string" } },
+            required: ["error"],
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const resolved = await resolveSessionIdentity(request, journalSecret, kratos);
+      const identity = await kratos.getIdentityById(resolved.kratosId);
+      const existing = identity.metadata_admin?.api_tokens ?? {};
+      if (!(id in existing)) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      const updated = Object.fromEntries(Object.entries(existing).filter(([k]) => k !== id));
+      await kratos.patchIdentityApiTokens(resolved.kratosId, updated);
+      return reply.code(204).send();
+    }
+  );
 
   app.setErrorHandler((error, request, reply) => {
     const asRecord =

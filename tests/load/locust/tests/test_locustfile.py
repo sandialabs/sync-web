@@ -1,10 +1,17 @@
 import os
 import sys
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+if "locust" not in sys.modules:
+    locust_stub = types.ModuleType("locust")
+    locust_stub.HttpUser = object
+    locust_stub.task = lambda func: func
+    sys.modules["locust"] = locust_stub
 
 from locustfile import HelloWorldUser
 
@@ -34,7 +41,7 @@ class HelloWorldUserTests(unittest.TestCase):
         client = _FakeClient('{"ok":true}')
         user = _FakeUser(client)
 
-        with patch.dict(os.environ, {"SECRET": "test-secret"}, clear=False):
+        with patch.dict(os.environ, {"API_TOKEN": "sync-test-token"}, clear=False):
             with patch("locustfile.random.randint", side_effect=[111, 222]):
                 with patch("builtins.print"):
                     HelloWorldUser.hello_world(user)
@@ -47,14 +54,14 @@ class HelloWorldUserTests(unittest.TestCase):
             payload["value"], {"*type/string*": "val-222"}
         )
         self.assertEqual(
-            headers, {"Authorization": "Bearer test-secret"}
+            headers, {"Authorization": "Bearer sync-test-token"}
         )
 
     def test_prints_truncated_request_and_response(self):
         client = _FakeClient("x" * 120)
         user = _FakeUser(client)
 
-        with patch.dict(os.environ, {"SECRET": "test-secret"}, clear=False):
+        with patch.dict(os.environ, {"API_TOKEN": "sync-test-token"}, clear=False):
             with patch("locustfile.random.randint", side_effect=[1, 2]):
                 with patch("builtins.print") as print_mock:
                     HelloWorldUser.hello_world(user)

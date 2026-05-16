@@ -16,6 +16,10 @@ logger.setLevel(logging.INFO)
 
 REQUEST_TIMEOUT_SECONDS = 60
 
+SYNC_USERNAME = os.environ.get("SYNC_USERNAME", "")
+SYNC_PASSWORD = os.environ.get("SYNC_PASSWORD", "")
+API_TOKEN = ""
+
 DIR = os.path.dirname(os.path.abspath(__file__))
 
 with open(os.path.join(DIR, "frankenstein.txt"), encoding="utf-8-sig") as fd:
@@ -121,6 +125,48 @@ def local_gateway_base(nodes):
     return os.environ.get(
         "ROUTER_GATEWAY_BASE", f"http://{local_router_host}/api/v1/general"
     )
+
+
+def acquire_api_token(nodes):
+    global API_TOKEN
+    local_router_host = nodes[NODE_NAME]["router_host"]
+    base = f"http://{local_router_host}"
+    delay = 2
+    while True:
+        try:
+            flow_resp = requests.get(
+                f"{base}/auth/.ory/self-service/login/api",
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            flow_resp.raise_for_status()
+            flow_id = flow_resp.json()["id"]
+
+            login_resp = requests.post(
+                f"{base}/auth/.ory/self-service/login?flow={flow_id}",
+                json={"identifier": SYNC_USERNAME, "password": SYNC_PASSWORD, "method": "password"},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            login_resp.raise_for_status()
+            session_token = login_resp.json()["session_token"]
+
+            token_resp = requests.post(
+                f"{base}/api/v1/tokens",
+                headers={"x-session-token": session_token},
+                json={},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            token_resp.raise_for_status()
+            API_TOKEN = token_resp.json()["token"]
+            logger.info("API token acquired for %s", NODE_NAME)
+            return
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code < 500:
+                raise
+            logger.warning("API token acquisition failed (%s), retrying in %ds", e, delay)
+        except requests.RequestException as e:
+            logger.warning("API token acquisition failed (%s), retrying in %ds", e, delay)
+        time.sleep(delay)
+        delay = min(delay * 2, 16)
 
 
 def is_indexed_path(path):
@@ -396,7 +442,7 @@ def call(nodes, operation, arguments=None, client_id=None):
 
         headers = {"accept": "application/json"}
         if effective_operation not in public_operations:
-            headers["x-sync-auth"] = os.environ["SECRET"]
+            headers["authorization"] = f"Bearer {API_TOKEN}"
 
         if effective_operation in get_only_operations:
             response = requests.get(
@@ -438,6 +484,8 @@ def run(nodes, edges):
     activity_seconds = get_activity_seconds()
     clients = get_clients()
 
+    acquire_api_token(nodes)
+
     for peer_node in edges.get(NODE_NAME, []):
         peer_router_host = nodes[peer_node]["router_host"]
         while result := call(
@@ -445,7 +493,7 @@ def run(nodes, edges):
             "bridge",
             {
                 "name": peer_node,
-                "interface": {"*type/string*": f"http://{peer_router_host}/interface"},
+                "interface": {"*type/string*": f"http://{peer_router_host}/api/v1/journal/interface"},
             },
             client_id="setup",
         ):
@@ -464,7 +512,7 @@ def run(nodes, edges):
             nodes,
             "set",
             {
-                "path": [["*state*", "data", f"key-{i}"]],
+                "path": [["*state*", "admin", "data", f"key-{i}"]],
                 "value": {"*type/string*": " ".join(choice(WORDS, NUM_WORDS))},
             },
             client_id="setup",
@@ -485,7 +533,7 @@ def run(nodes, edges):
                     traversal.append(node_name)
                     path += [-1, ["*bridge*", node_name, "chain"]]
 
-                path += [-1, ["*state*", "data", f"key-{randint(0, size)}"]]
+                path += [-1, ["*state*", "admin", "data", f"key-{randint(0, size)}"]]
 
                 if len(traversal) > 1:
                     METRICS.record_inferred_hops(
@@ -509,7 +557,7 @@ def run(nodes, edges):
                         nodes,
                         "set",
                         {
-                            "path": [["*state*", "data", f"key-{randint(0, size)}"]],
+                            "path": [["*state*", "admin", "data", f"key-{randint(0, size)}"]],
                             "value": {"*type/string*": " ".join(words)},
                         },
                         client_id=client_id,

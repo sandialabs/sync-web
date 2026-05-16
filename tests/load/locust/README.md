@@ -4,18 +4,19 @@ This directory contains a Locust load testing script for testing the synchronic 
 
 ## Prerequisites
 
-1. Start the current general compose stack from `sync-services`:
-   - `SECRET=pass PORT=8192 ./tests/local-compose.sh up`
-   - or `SECRET=pass PORT=8192 docker compose -f compose/general/docker-compose.yml up -d`
+1. Start the current general compose stack from `sync-web`:
+   - `SECRET=password PORT=8192 tests/api/local-compose.sh up`
+   - or `SECRET=password PORT=8192 docker compose -f deploy/compose/general/compose.yaml up -d`
 
-2. Ensure you have the `SECRET` environment variable set (must match the server's secret)
+2. Create an API token from `/auth/settings` or `POST /api/v1/tokens`.
+3. Set `API_TOKEN` to the plaintext token returned at creation time.
 
 ## Running Tests
 
 ### Interactive Web UI Mode (Recommended for Development)
 
 ```bash
-$ SECRET=pass locust --host=http://localhost:8192
+$ API_TOKEN=sync-... locust --host=http://localhost:8192
 ```
 
 **Expected Behavior:**
@@ -35,7 +36,7 @@ $ SECRET=pass locust --host=http://localhost:8192
 ### Headless Mode (For Automated Testing)
 
 ```bash
-$ SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
+$ API_TOKEN=sync-... locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless
 ```
 
 **Expected Behavior:**
@@ -48,10 +49,10 @@ $ SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --ru
 
 ```bash
 # Save results to CSV files
-$ SECRET=pass locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless --csv=results
+$ API_TOKEN=sync-... locust --host=http://localhost:8192 --users=10 --spawn-rate=2 --run-time=60s --headless --csv=results
 
 # Run with custom web UI port
-$ SECRET=pass locust --host=http://localhost:8192 --web-port=8090
+$ API_TOKEN=sync-... locust --host=http://localhost:8192 --web-port=8090
 ```
 
 ## Test Behavior
@@ -73,5 +74,5 @@ REQ: {"path":[["*state*","locust","key-234567"]],"value":{"*type/string*":"val-8
 ## Troubleshooting
 
 - **Connection errors**: Ensure the ledger server is running and accessible
-- **Authentication errors**: Verify the `SECRET` environment variable matches the server configuration
+- **Authentication errors**: Verify `API_TOKEN` is set to a valid token for the target gateway user
 - **Web UI not accessible**: Check that port 8089 (or custom port) is not in use

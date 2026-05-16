@@ -178,7 +178,7 @@
                       ((object 'set!) (car path) result))
                   (object)))))))
 
-  (define-method (deep-merge! self object-source object-target . path-rest)
+  (define-method (deep-merge! self object-source object-target (path '()))
     ;; Merge equivalent nodes by digest.
     ;;   Args:
     ;;     object-source (sync node): source node.
@@ -186,8 +186,7 @@
     ;;     path (list): optional path inside target to merge into.
     ;;   Returns:
     ;;     sync node: merged node.
-    (let ((path (if (null? path-rest) '() (car path-rest)))
-          (merge-nodes
+    (let ((merge-nodes
            (lambda (object-source object-target)
              (if (not (equal? (sync-digest object-source) (sync-digest object-target)))
                  (error 'node-error "Cannot merge non-equivalent objects")

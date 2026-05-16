@@ -157,7 +157,7 @@ Environment variables use the `SYNC_FS_` prefix.
   - default: `http://gateway/api/v1`
   - used only by the gateway-backed backends (`http-gateway-readonly`, `http-gateway-stage`)
 - `SYNC_FS_JournalJsonUrl`
-  - default: `http://journal/interface/json`
+  - default: `http://journal/interface`
   - used by direct journal backends (`http-journal-readonly`, `http-journal-stage`)
 - `SYNC_FS_GatewayAuthToken`
   - optional for now; required later for real gateway integration

@@ -6,10 +6,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const infoDir = path.resolve(__dirname, "..");
 
-const baseUrl = process.env.SYNC_BASE_URL || "http://127.0.0.1:8192";
+const baseUrl = process.env.SYNC_BASE_URL || "http://localhost:8192";
 const outputDir =
   process.env.SYNC_SCREENSHOT_DIR || path.join(infoDir, "public", "images", "screenshots");
 const settleMs = Number(process.env.SYNC_SCREENSHOT_SETTLE_MS || "1500");
+const authUsername = process.env.SYNC_USERNAME || "admin";
+const authPassword = process.env.SYNC_PASSWORD || "password";
 
 const targets = [
   {
@@ -58,6 +60,25 @@ async function run() {
     for (const variant of variants) {
       const context = await browser.newContext(variant.contextOptions);
       const page = await context.newPage();
+
+      console.log("Logging in...");
+      await page.goto(`${baseUrl}/auth/.ory/self-service/login/browser`, {
+        waitUntil: "networkidle",
+        timeout: 30000,
+      });
+      await page.waitForSelector('input[name="identifier"]', { timeout: 10000 });
+      await page.fill('input[name="identifier"]', authUsername);
+      await page.fill('input[name="password"]', authPassword);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 }),
+        page.click('button[type="submit"]'),
+      ]);
+      const cookies = await context.cookies();
+      const session = cookies.find((c) => c.name === "ory_kratos_session");
+      if (!session) {
+        throw new Error("Login failed: ory_kratos_session cookie not set after login");
+      }
+      console.log(`Session cookie set (domain: ${session.domain})`);
 
       for (const target of targets) {
         const url = target.url;

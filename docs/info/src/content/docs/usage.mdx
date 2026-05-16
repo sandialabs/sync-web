@@ -19,7 +19,7 @@ Together they cover the full operator/developer loop: inspect data, make changes
 ### Explorer
 
 The Explorer is the state-navigation and content-management interface.
-It now has two explicit modes:
+It now has three explicit modes:
 
 - `Ledger`
   - the default landing mode
@@ -27,6 +27,10 @@ It now has two explicit modes:
 - `Stage`
   - local editable staged state
   - file and directory oriented editing actions
+- `Admin`
+  - visible only to interface admins
+  - bridge registration and local bridge endpoint sharing
+  - public window-size edits and interface admin-list management
 
 Typical Explorer workflow:
 
@@ -35,6 +39,7 @@ Typical Explorer workflow:
 3. Select a ledger file to switch between content and proof views or pin/unpin it.
 4. Switch to `Stage` when you want to edit local staged files and directories.
 5. Use stage actions to create documents/directories, upload files, edit content, and download files.
+6. If you are an admin, use `Admin` to copy this node's bridge endpoint, register peer bridges, tune the ledger window, or update the interface admin list.
 
 The Explorer is best for operational tasks and data exploration because it separates committed ledger inspection from local staged editing while keeping both in one UI.
 
@@ -130,12 +135,11 @@ The sections below focus on stable request patterns that are easy to lint, test,
 ### Endpoint Catalog
 
 Use this catalog as a quick orientation map.
-The two execution endpoints (`/interface`, `/interface/json`) are for runtime calls, while the conversion endpoints are for debugging and payload authoring.
+The `/interface` execution endpoint accepts Scheme or JSON runtime calls via content negotiation, while the conversion endpoints are for debugging and payload authoring.
 
 | Endpoint | Description |
 | --- | --- |
-| `POST /interface` | Executes Scheme requests directly against the interface runtime. |
-| `POST /interface/json` | Executes JSON requests using the object-shaped API envelope. |
+| `POST /interface` | Executes Scheme requests or JSON requests depending on `Content-Type`. |
 | `POST /interface/scheme-to-json` | Converts Scheme expressions into JSON payload representations. |
 | `POST /interface/json-to-scheme` | Converts JSON payloads back into Scheme forms for debugging and validation. |
 
@@ -150,7 +154,7 @@ Two identities are recognized:
 - **Named user** (e.g. `alice`): a registered user. The gateway injects this automatically when you are logged in via Kratos. When calling the interface directly, you supply it yourself with your username and the interface secret.
 - **Root** (`*journal*`): the journal's own root identity. Used by the gateway itself and admin automation. Has no path restrictions.
 
-When calling through the **gateway** (`/api/v1/...`), you do not construct the authentication block — the gateway handles it from your session. When calling the interface **directly** (`/interface` or `/interface/json`), you supply it manually:
+When calling through the **gateway** (`/api/v1/...`), you do not construct the authentication block — the gateway handles it from your session or API token. When calling the interface **directly** (`/interface`), you supply it manually:
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
@@ -196,7 +200,7 @@ Reads are more permissive — any authenticated user can read another user's pat
 | Admin | Named user in the admin list | All operations on all paths. |
 | User | Named user not in the admin list | Namespace and visibility rules above apply. |
 
-Operations requiring admin or root: `bridge!`, `*secret*`, `*admins-get*`, `*admins-set*`. Regular users receive a `permissions-error` on these.
+Operations requiring admin or root: `bridge!`, `*secret*`, `*admins-get*`, `*admins-set*`, `*window-set*`. Regular users receive a `permissions-error` on these.
 
 ### Request Envelope
 
@@ -324,7 +328,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function bridge!)
  (arguments ((name journal_b)
-             (interface "http://journal-b.example.org/interface")))
+             (interface "http://journal-b.example.org/api/v1/journal/interface")))
  (authentication ((identity *journal*) (credentials "password"))))
 ```
 
@@ -336,7 +340,7 @@ You can copy them into Workbench first, then move them into automation once vali
   "function": "bridge!",
   "arguments": {
     "name": "journal_b",
-    "interface": {"*type/string*": "http://journal-b.example.org/interface"}
+    "interface": {"*type/string*": "http://journal-b.example.org/api/v1/journal/interface"}
   },
   "authentication": {
     "identity": "*journal*",

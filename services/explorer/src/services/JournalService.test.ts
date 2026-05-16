@@ -347,6 +347,93 @@ describe('JournalService API', () => {
     });
   });
 
+  describe('admin operations', () => {
+    it('should read admin config from admin and config endpoints', async () => {
+      mockFetch
+        .mockResolvedValueOnce(mockJsonResponse(['alice', 'admin']))
+        .mockResolvedValueOnce(
+          mockJsonResponse({
+            public: { window: 12 },
+            private: {
+              bridge: {
+                peer2: { interface: { '*type/string*': 'http://peer2/api/v1/journal/interface' } },
+                peer1: { interface: { '*type/string*': 'http://peer1/api/v1/journal/interface' } },
+              },
+            },
+          })
+        );
+
+      const result = await service.getAdminConfig();
+
+      expect(result).toEqual({
+        admins: ['admin', 'alice'],
+        bridges: [
+          { name: 'peer1', endpoint: 'http://peer1/api/v1/journal/interface' },
+          { name: 'peer2', endpoint: 'http://peer2/api/v1/journal/interface' },
+        ],
+        windowSize: 12,
+      });
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        'http://test-endpoint.com/api/v1/general/admins',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        })
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        'http://test-endpoint.com/api/v1/general/config',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        })
+      );
+    });
+
+    it('should replace admins through the admin endpoint', async () => {
+      mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
+
+      const result = await service.setAdmins(['admin', 'alice']);
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/set-admins',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ admins: ['admin', 'alice'] }),
+        })
+      );
+    });
+
+    it('should set window size through the admin endpoint', async () => {
+      mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
+
+      const result = await service.setWindowSize(32);
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/set-window',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ value: 32 }),
+        })
+      );
+    });
+  });
+
   describe('error handling', () => {
     it('should surface gateway error message on non-ok response', async () => {
       mockFetch.mockResolvedValueOnce(

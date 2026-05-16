@@ -2,6 +2,17 @@
 
 This compose stack runs one journal with gateway, explorer, workbench, router, and the `file-system` SMB service.
 
+The journal service uses the generic `journal-sdk` image directly. The general
+interface is assembled at startup from mounted deployment inputs:
+
+- `records/lisp/*.scm`
+- `deploy/compose/general/run.sh`
+- the persistent `database` volume
+
+For a fresh database, `run.sh` installs the general interface from the mounted Lisp
+files. For an existing database, mounted Lisp files are only applied when
+`JOURNAL_UPDATE=1`; otherwise the durable journal state continues from the database.
+
 ## Requirements
 
 - Docker
@@ -14,6 +25,7 @@ This compose stack runs one journal with gateway, explorer, workbench, router, a
 - `HTTPS_PORT` (default `443`): host TLS port exposed by router
 - `PERIOD` (default `2`): journal periodicity exponent
 - `WINDOW` (default `1024`): retained historical state window
+- `JOURNAL_UPDATE` (default empty): set to `1` to update an existing journal database from the mounted Lisp files before serving
 - `TLS_CERT_HOST_PATH` (default `./tls/tls.crt`): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (default `./tls/tls.key`): host key file mounted into router
 - `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files
@@ -22,7 +34,7 @@ This compose stack runs one journal with gateway, explorer, workbench, router, a
 - `SMB_PORT` (default `445`): host port exposed by the `file-system` service
 - `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.0.0`): image used by the optional `file-system` service
 - `SYNC_FS_Backend` (default `http-journal-stage`): file-system backend override
-- `SYNC_FS_JournalJsonUrl` (default `http://journal/interface/json`): direct journal JSON endpoint used by the default file-system backend
+- `SYNC_FS_JournalJsonUrl` (default `http://journal/interface`): direct journal JSON endpoint used by the default file-system backend
 - `SYNC_FS_GatewayBaseUrl` (default `http://gateway/api/v1`): gateway endpoint used only when gateway-backed file-system modes are selected
 
 Gateway note:
@@ -81,6 +93,10 @@ tests/api/local-compose.sh smoke
 ```
 
 The local compose helper enables the SMB file-system service by default.
+
+The helper builds a local `journal-sdk` image and uses the same mounted Lisp/runtime
+script layout as the reference compose stack. It no longer builds a separate
+`general` image.
 
 To override the file-system image during local development:
 

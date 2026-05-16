@@ -17,8 +17,8 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
           <section>
             <h3>Overview</h3>
             <p>
-              The Synchronic Web Explorer has two modes. Stage is for local editable state.
-              Ledger is for committed, route-based browsing across bridges and snapshots.
+              The Synchronic Web Explorer has Ledger and Stage modes for ordinary use.
+              Interface admins also see Admin controls for bridge and journal settings.
             </p>
           </section>
 
@@ -27,6 +27,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
             <ol>
               <li>Use Stage to browse and edit local files and folders.</li>
               <li>Use Ledger to synchronize and browse committed state.</li>
+              <li>Use Admin to manage bridges, window size, and interface admins.</li>
             </ol>
           </section>
 

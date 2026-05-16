@@ -18,8 +18,7 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
     </head>
     <body style="padding: 0 20px; font-family: 'Consolas'">
  <ul>
-     <li><a href="/interface">Scheme Interface</a></li>
-     <li><a href="/interface/json">JSON Interface</a></li>
+     <li><a href="/interface">Interface</a></li>
      <li><a href="/interface/scheme-to-json">Scheme to JSON</a></li>
      <li><a href="/interface/json-to-scheme">JSON to Scheme</a></li>
  </ul>
@@ -30,22 +29,23 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
 const INTERFACE_HTML: &str = r#"<!DOCTYPE html>
 <html>
     <head>
- <h2>__TITLE__</h2>
+ <h2>Journal Interface</h2>
     </head>
     <body style="padding: 0 20px; font-family: 'Consolas'">
  <textarea id="query" rows="8" cols="128" spellcheck="false"></textarea>
  </br>
  </br>
- <button type="button" onclick="customSubmit()">Evaluate</button>
+ <button type="button" onclick="customSubmit('application/scheme')">Scheme</button>
+ <button type="button" onclick="customSubmit('application/json')">JSON</button>
  </br>
  <ul id="history">
  </ul>
  <script>
-     function customSubmit() {
+     function customSubmit(contentType) {
   let query = document.getElementById('query').value;
   fetch('', {
       method: 'POST',
-      __HEADERS__
+      headers: { 'Content-Type': contentType },
       body: query,
   }).then(response => {
       return response.text();
@@ -75,58 +75,33 @@ async fn index() -> RawHtml<String> {
 }
 
 #[get("/interface", format = "text/html")]
-async fn inform_lisp() -> RawHtml<String> {
-    RawHtml(
-        INTERFACE_HTML
-            .replace("__TITLE__", "Scheme Interface")
-            .replace("__HEADERS__", ""),
-    )
+async fn inform_interface() -> RawHtml<String> {
+    RawHtml(String::from(INTERFACE_HTML))
 }
 
-#[post("/interface", data = "<query>", rank = 1)]
-async fn evaluate_lisp(query: &str) -> String {
+#[post("/interface", format = "application/json", data = "<query>", rank = 1)]
+async fn evaluate_interface_json(query: Json<Value>) -> Json<Value> {
+    Json(JOURNAL.evaluate_json(query.into_inner()))
+}
+
+#[post("/interface", data = "<query>", rank = 2)]
+async fn evaluate_interface_scheme(query: &str) -> String {
     JOURNAL.evaluate(query)
 }
 
 #[get("/interface/scheme-to-json", format = "text/html")]
 async fn inform_scheme_to_json() -> RawHtml<String> {
-    RawHtml(
-        INTERFACE_HTML
-            .replace("__TITLE__", "Scheme to JSON")
-            .replace("__HEADERS__", ""),
-    )
+    RawHtml(String::from(INTERFACE_HTML))
 }
 
 #[post("/interface/scheme-to-json", data = "<query>", rank = 1)]
 async fn scheme_to_json(query: &str) -> Json<Value> {
-    let result = JOURNAL.scheme_to_json(query);
-    Json(result)
-}
-
-#[get("/interface/json", format = "text/html")]
-async fn inform_json() -> RawHtml<String> {
-    RawHtml(
-        INTERFACE_HTML
-            .replace("__TITLE__", "JSON Interface")
-            .replace(
-                "__HEADERS__",
-                "headers: { 'Content-Type': 'application/json' },",
-            ),
-    )
-}
-
-#[post("/interface/json", data = "<query>", format = "json", rank = 1)]
-async fn evaluate_json(query: Json<Value>) -> Json<Value> {
-    let result = JOURNAL.evaluate_json(query.into_inner());
-    Json(result)
+    Json(JOURNAL.scheme_to_json(query))
 }
 
 #[get("/interface/json-to-scheme", format = "text/html")]
 async fn inform_json_to_scheme() -> RawHtml<String> {
-    RawHtml(INTERFACE_HTML.replace("__TITLE__", "JSON to Scheme").replace(
-        "__HEADERS__",
-        "headers: { 'Content-Type': 'application/json' },",
-    ))
+    RawHtml(String::from(INTERFACE_HTML))
 }
 
 #[post("/interface/json-to-scheme", data = "<query>", format = "json", rank = 1)]
@@ -195,12 +170,11 @@ async fn main() {
             "/",
             routes![
                 index,
-                inform_lisp,
-                evaluate_lisp,
+                inform_interface,
+                evaluate_interface_json,
+                evaluate_interface_scheme,
                 inform_scheme_to_json,
                 scheme_to_json,
-                inform_json,
-                evaluate_json,
                 inform_json_to_scheme,
                 json_to_scheme
             ],

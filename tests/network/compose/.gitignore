@@ -1,4 +1,4 @@
-docker-compose.yml
+compose.yml
 peers.json
 http-only.crt
 http-only.key

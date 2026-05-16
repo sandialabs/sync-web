@@ -35,9 +35,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Run unit tests
         run: docker build --target test services/explorer
-      - name: Resolve version
-        id: version
-        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
       - name: Build Docker image (PR/non-main validation)
         if: github.ref != 'refs/heads/main'
         uses: docker/build-push-action@v6
@@ -46,7 +43,7 @@ jobs:
           target: runtime
           platforms: linux/amd64
           push: false
-          tags: ghcr.io/${{ github.repository }}/explorer:${{ steps.version.outputs.value }}
+          tags: ghcr.io/${{ github.repository }}/explorer:latest
       - name: Build and push multi-arch Docker images
         if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
@@ -55,6 +52,4 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/explorer:${{ steps.version.outputs.value }}
-            ghcr.io/${{ github.repository }}/explorer:latest
+          tags: ghcr.io/${{ github.repository }}/explorer:latest

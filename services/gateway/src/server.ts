@@ -17,7 +17,7 @@ Start here:
 - Use GET routes for simple read-only checks: /api/v1/general/size and /api/v1/general/info.
 - Use POST /api/v1/general/{operation} for function calls that take arguments.
 - Use POST /api/v1/general/batch for ordered multi-request workflows under one authenticated call.
-- For restricted routes, provide an Authorization bearer token.
+- For restricted routes, authenticate via a Kratos session cookie or an API token (Authorization: Bearer sync-...).
 
 Request bodies:
 - JSON mode uses application/json with keyword arguments as a direct object body.
@@ -419,6 +419,9 @@ const main = async (): Promise<void> => {
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
+  app.addContentTypeParser("application/octet-stream", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
@@ -464,6 +467,11 @@ const main = async (): Promise<void> => {
           description:
             "Thin pass-through endpoints that forward directly to the journal interface without transformation.",
         },
+        {
+          name: "API Tokens",
+          description:
+            "Manage API tokens for headless/machine authentication. Tokens are stored as hashes in Kratos metadata_admin. The plaintext token is returned once at creation and cannot be retrieved again.",
+        },
       ],
     },
   });
@@ -493,10 +501,8 @@ displayRequestDuration: true,
   });
 
   const journal = createJournalClient(
-    config.journalJsonEndpoint,
-    config.journalSchemeEndpoint,
-    config.rootJsonEndpoint,
-    config.rootSchemeEndpoint,
+    config.journalEndpoint,
+    config.rootEndpoint,
     config.requestTimeoutMs,
     app.log,
     {
@@ -572,7 +578,7 @@ displayRequestDuration: true,
     return reply.sendFile("index.html");
   });
 
-  const kratos = createKratosClient(config.kratosPublicUrl);
+  const kratos = createKratosClient(config.kratosPublicUrl, config.kratosAdminUrl);
 
   await app.register(gatewayRoutes, {
     journal,

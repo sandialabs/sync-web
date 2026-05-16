@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import Fastify from "fastify";
 import fastifySwagger from "@fastify/swagger";
 import { gatewayRoutes } from "../src/routes";
 import { JournalSemanticError } from "../src/journal";
 import type { JournalCall, JournalClient } from "../src/journal";
-import type { KratosClient } from "../src/kratos";
+import type { ApiTokenEntry, KratosAdminIdentity, KratosClient } from "../src/kratos";
 
 const JOURNAL_SECRET = "test-journal-secret";
 const IDENTITY_ID = "test-user-id";
@@ -16,17 +17,20 @@ interface MockJournal {
   jsonCalls: JournalCall[];
   schemeCalls: Array<{ expression: string; functionName: string }>;
   proxiedJsonBodies: unknown[];
+  proxiedSchemeExpressions: string[];
 }
 
 const createMockJournal = (): MockJournal => {
   const jsonCalls: JournalCall[] = [];
   const schemeCalls: Array<{ expression: string; functionName: string }> = [];
   const proxiedJsonBodies: unknown[] = [];
+  const proxiedSchemeExpressions: string[] = [];
 
   return {
     jsonCalls,
     schemeCalls,
     proxiedJsonBodies,
+    proxiedSchemeExpressions,
     client: {
       async callJson(input: JournalCall): Promise<unknown> {
         jsonCalls.push(input);
@@ -54,15 +58,40 @@ const createMockJournal = (): MockJournal => {
         proxiedJsonBodies.push(body);
         return { ok: true, mode: "proxy-json" };
       },
+      async proxyScheme(expression: string): Promise<string> {
+        proxiedSchemeExpressions.push(expression);
+        return "((public-key #u(1 2 3)))";
+      },
     },
   };
 };
 
-const createMockKratos = (identityId = IDENTITY_ID): KratosClient => ({
-  async whoami(_opts) {
-    return { identity: { id: identityId, traits: { username: identityId } } };
-  },
-});
+const KRATOS_UUID = "a3f8c201-b4d2-e9f0-a1b2-c3d4e5f6a7b8";
+
+const createMockKratos = (
+  identityId = IDENTITY_ID,
+  apiTokens: Record<string, ApiTokenEntry> = {}
+): KratosClient => {
+  let storedTokens = { ...apiTokens };
+  return {
+    async whoami(_opts) {
+      return { identity: { id: KRATOS_UUID, traits: { username: identityId } } };
+    },
+    async whoamiWithSessionToken(_token) {
+      return { identity: { id: KRATOS_UUID, traits: { username: identityId } } };
+    },
+    async getIdentityById(_uuid): Promise<KratosAdminIdentity> {
+      return {
+        id: KRATOS_UUID,
+        traits: { username: identityId },
+        metadata_admin: { api_tokens: storedTokens },
+      };
+    },
+    async patchIdentityApiTokens(_uuid, newTokens) {
+      storedTokens = { ...newTokens };
+    },
+  };
+};
 
 const createApp = async (input: {
   allowAdminRoutes: boolean;
@@ -75,6 +104,12 @@ const createApp = async (input: {
     done(null, body)
   );
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
+  app.addContentTypeParser("application/octet-stream", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
   app.addHook("preParsing", async (request, _reply, payload) => {
@@ -122,6 +157,9 @@ test("restricted route returns 401 without session cookie", async (t) => {
 test("restricted route returns 401 when Kratos session is invalid", async (t) => {
   const failingKratos: KratosClient = {
     async whoami() { throw new Error("session invalid"); },
+    async whoamiWithSessionToken() { throw new Error("session invalid"); },
+    async getIdentityById() { throw new Error("not found"); },
+    async patchIdentityApiTokens() { throw new Error("not found"); },
   };
   const app = await createApp({ allowAdminRoutes: false, kratos: failingKratos });
   t.after(async () => app.close());
@@ -153,6 +191,51 @@ test("POST /api/v1/general/get accepts JSON keyword-object payload with Kratos s
   assert.equal(mock.jsonCalls.length, 1);
   assert.deepEqual(mock.jsonCalls[0], {
     functionName: "get",
+    args,
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  });
+});
+
+test("POST /api/v1/general/admins forwards to interface admin operation", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/admins",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: {},
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.jsonCalls.length, 1);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "*admins-get*",
+    args: {},
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  });
+});
+
+test("POST /api/v1/general/set-window forwards positive window value", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const args = { value: 32 };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/set-window",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: args,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.jsonCalls.length, 1);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "*window-set*",
     args,
     authentication: JOURNAL_SECRET,
     identityId: IDENTITY_ID,
@@ -357,6 +440,9 @@ test("relays journal semantic error payloads as HTTP errors (JSON mode)", async 
     async proxyJson(): Promise<unknown> {
       return { ok: true };
     },
+    async proxyScheme(): Promise<string> {
+      return "";
+    },
   };
 
   const app = await createApp({ allowAdminRoutes: false, journal });
@@ -395,9 +481,10 @@ test("POST /api/v1/journal/interface forwards Scheme body to journal", async (t)
   });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(mock.schemeCalls.length, 1);
-  assert.equal(mock.schemeCalls[0].expression, "((function synchronize) (arguments ((index 0))))");
-  assert.equal(mock.schemeCalls[0].functionName, "interface");
+  assert.equal(res.headers["content-type"], "text/plain; charset=utf-8");
+  assert.equal(res.body, "((public-key #u(1 2 3)))");
+  assert.equal(mock.proxiedSchemeExpressions.length, 1);
+  assert.equal(mock.proxiedSchemeExpressions[0], "((function synchronize) (arguments ((index 0))))");
 });
 
 test("POST /api/v1/journal/interface forwards JSON body to journal", async (t) => {
@@ -430,9 +517,45 @@ test("POST /api/v1/journal/interface treats missing content-type as Scheme (sync
   });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(mock.schemeCalls.length, 1);
-  assert.equal(mock.schemeCalls[0].expression, "((function info))");
-  assert.equal(mock.schemeCalls[0].functionName, "interface");
+  assert.equal(res.body, "((public-key #u(1 2 3)))");
+  assert.equal(mock.proxiedSchemeExpressions.length, 1);
+  assert.equal(mock.proxiedSchemeExpressions[0], "((function info))");
+});
+
+test("POST /api/v1/journal/interface treats octet-stream as Scheme (sync-remote compat)", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/journal/interface",
+    headers: { "content-type": "application/octet-stream" },
+    payload: "((function info))",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body, "((public-key #u(1 2 3)))");
+  assert.equal(mock.proxiedSchemeExpressions.length, 1);
+  assert.equal(mock.proxiedSchemeExpressions[0], "((function info))");
+});
+
+test("POST /api/v1/journal/interface treats form content as Scheme (sync-remote compat)", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/journal/interface",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: "((function info))",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body, "((public-key #u(1 2 3)))");
+  assert.equal(mock.proxiedSchemeExpressions.length, 1);
+  assert.equal(mock.proxiedSchemeExpressions[0], "((function info))");
 });
 
 test("GET /api/v1/general/info forwards to info without auth", async (t) => {
@@ -446,48 +569,6 @@ test("GET /api/v1/general/info forwards to info without auth", async (t) => {
   assert.deepEqual(mock.jsonCalls[0], { functionName: "info" });
 });
 
-test("bearer token auth uses *journal* identity in JSON mode", async (t) => {
-  const mock = createMockJournal();
-  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
-  t.after(async () => app.close());
-
-  const args = { path: [["*state*", "docs"]] };
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/v1/general/get",
-    headers: { authorization: `Bearer ${JOURNAL_SECRET}`, "content-type": "application/json" },
-    payload: args,
-  });
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(mock.jsonCalls.length, 1);
-  assert.deepEqual(mock.jsonCalls[0], {
-    functionName: "get",
-    args,
-    authentication: JOURNAL_SECRET,
-    identityId: undefined,
-  });
-});
-
-test("bearer token auth uses *journal* identity in Scheme mode", async (t) => {
-  const mock = createMockJournal();
-  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
-  t.after(async () => app.close());
-
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/v1/general/get",
-    headers: { authorization: `Bearer ${JOURNAL_SECRET}`, "content-type": "text/plain" },
-    payload: "(((path ((*state* docs)))))",
-  });
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(mock.schemeCalls.length, 1);
-  assert.match(
-    mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity \*journal\*\) \(credentials "test-journal-secret"\)\)\)/
-  );
-});
 
 test("non-semantic journal error becomes 502", async (t) => {
   const journal: JournalClient = {
@@ -496,6 +577,7 @@ test("non-semantic journal error becomes 502", async (t) => {
     async callRootJson(): Promise<unknown> { return {}; },
     async callRootScheme(): Promise<unknown> { return {}; },
     async proxyJson(): Promise<unknown> { return {}; },
+    async proxyScheme(): Promise<string> { return ""; },
   };
   const app = await createApp({ allowAdminRoutes: false, journal });
   t.after(async () => app.close());
@@ -524,6 +606,7 @@ test("relays journal semantic error payloads as HTTP errors (Scheme mode)", asyn
     async callRootJson(): Promise<unknown> { return {}; },
     async callRootScheme(): Promise<unknown> { return {}; },
     async proxyJson(): Promise<unknown> { return {}; },
+    async proxyScheme(): Promise<string> { return ""; },
   };
   const app = await createApp({ allowAdminRoutes: false, journal });
   t.after(async () => app.close());
@@ -570,6 +653,12 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
   app.addContentTypeParser("application/scheme", { parseAs: "string" }, (_req, body, done) =>
     done(null, body)
   );
+  app.addContentTypeParser("application/octet-stream", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) =>
+    done(null, body)
+  );
   await app.register(fastifySwagger, {
     openapi: { info: { title: "test", version: "0" } },
   });
@@ -593,6 +682,9 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
 
   assert.deepEqual(schemaExample("/api/v1/general/get"), { path: [["*state*", "mykey"]] });
   assert.deepEqual(schemaExample("/api/v1/general/bridge"), { name: "peer-a", interface: "http://peer-a/interface" });
+  assert.deepEqual(schemaExample("/api/v1/general/admins"), {});
+  assert.deepEqual(schemaExample("/api/v1/general/set-admins"), { admins: ["admin", "alice"] });
+  assert.deepEqual(schemaExample("/api/v1/general/set-window"), { value: 128 });
   assert.deepEqual(schemaExample("/api/v1/general/batch"), {
     queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }],
   });
@@ -604,7 +696,141 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
 
   assert.equal(schemeExample("/api/v1/general/get"), "((path ((*state* mykey))))");
   assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (interface "http://peer-a/interface"))');
+  assert.equal(schemeExample("/api/v1/general/admins"), "()");
+  assert.equal(schemeExample("/api/v1/general/set-admins"), "((admins (admin alice)))");
+  assert.equal(schemeExample("/api/v1/general/set-window"), "((value 128))");
   assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");
   assert.equal(schemeExample("/api/v1/root/set-secret"), '"new-admin-secret"');
   assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");
+});
+
+test("POST /api/v1/tokens creates a token and returns token once", async (t) => {
+  const kratos = createMockKratos();
+  const app = await createApp({ allowAdminRoutes: false, kratos });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/tokens",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: { description: "ci bot" },
+  });
+  assert.equal(res.statusCode, 201);
+  const body = res.json();
+  assert.ok(typeof body.token === "string", "token is a string");
+  assert.ok(body.token.startsWith("sync-"), "token starts with sync-");
+  assert.ok(typeof body.id === "string", "id is a string");
+  assert.ok(typeof body.created_at === "string", "created_at is a string");
+  assert.equal(body.description, "ci bot");
+
+  const parts = body.token.split("-");
+  assert.equal(parts.length, 5, "token has 5 dash-separated parts");
+  assert.equal(parts[0], "sync");
+});
+
+test("POST /api/v1/tokens returns 401 without session cookie", async (t) => {
+  const app = await createApp({ allowAdminRoutes: false });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/tokens",
+    headers: { "content-type": "application/json" },
+    payload: { description: "bot" },
+  });
+  assert.equal(res.statusCode, 401);
+});
+
+test("GET /api/v1/tokens lists tokens without secrets", async (t) => {
+  const existingToken: ApiTokenEntry = {
+    hash: createHash("sha256").update("somesecret").digest("hex"),
+    description: "my agent",
+    created_at: "2026-05-14T00:00:00Z",
+  };
+  const kratos = createMockKratos(IDENTITY_ID, { abc12345: existingToken });
+  const app = await createApp({ allowAdminRoutes: false, kratos });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/api/v1/tokens",
+    headers: { cookie: SESSION_COOKIE },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json() as Array<{ id: string; description: string; created_at: string }>;
+  assert.equal(body.length, 1);
+  assert.equal(body[0].id, "abc12345");
+  assert.equal(body[0].description, "my agent");
+  assert.equal(body[0].created_at, "2026-05-14T00:00:00Z");
+  assert.ok(!("hash" in body[0]), "hash must not be returned");
+  assert.ok(!("token" in body[0]), "token must not be returned");
+});
+
+test("DELETE /api/v1/tokens/:id revokes a token", async (t) => {
+  const existingToken: ApiTokenEntry = {
+    hash: createHash("sha256").update("somesecret").digest("hex"),
+    description: "old bot",
+    created_at: "2026-05-14T00:00:00Z",
+  };
+  const kratos = createMockKratos(IDENTITY_ID, { abc12345: existingToken });
+  const app = await createApp({ allowAdminRoutes: false, kratos });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "DELETE",
+    url: "/api/v1/tokens/abc12345",
+    headers: { cookie: SESSION_COOKIE },
+  });
+  assert.equal(res.statusCode, 204);
+
+  const listRes = await app.inject({
+    method: "GET",
+    url: "/api/v1/tokens",
+    headers: { cookie: SESSION_COOKIE },
+  });
+  assert.deepEqual(listRes.json(), []);
+});
+
+test("DELETE /api/v1/tokens/:id returns 404 for unknown token", async (t) => {
+  const kratos = createMockKratos();
+  const app = await createApp({ allowAdminRoutes: false, kratos });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "DELETE",
+    url: "/api/v1/tokens/nonexistent",
+    headers: { cookie: SESSION_COOKIE },
+  });
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.json().error, "not_found");
+});
+
+test("POST /api/v1/tokens accepts X-Session-Token for headless bootstrap", async (t) => {
+  const kratos = createMockKratos();
+  const app = await createApp({ allowAdminRoutes: false, kratos });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/tokens",
+    headers: { "x-session-token": "kratos-session-token-abc", "content-type": "application/json" },
+    payload: { description: "headless agent" },
+  });
+  assert.equal(res.statusCode, 201);
+  assert.ok(res.json().token.startsWith("sync-"));
+});
+
+test("POST /api/v1/tokens rejects Bearer API token auth", async (t) => {
+  const kratos = createMockKratos();
+  const app = await createApp({ allowAdminRoutes: false, kratos });
+  t.after(async () => app.close());
+
+  const fakeToken = `sync-${"a".repeat(32)}-deadbeef-0-${"b".repeat(64)}`;
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/tokens",
+    headers: { authorization: `Bearer ${fakeToken}`, "content-type": "application/json" },
+    payload: { description: "should be rejected" },
+  });
+  assert.equal(res.statusCode, 401);
 });

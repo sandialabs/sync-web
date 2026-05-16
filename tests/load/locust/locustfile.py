@@ -17,7 +17,7 @@ class HelloWorldUser(HttpUser):
         response = self.client.post(
             "/api/v1/general/set",
             json=request_data,
-            headers={"Authorization": f"Bearer {os.environ['SECRET']}"},
+            headers={"Authorization": f"Bearer {os.environ['API_TOKEN']}"},
         )
 
         # Truncate request and response for readable logging

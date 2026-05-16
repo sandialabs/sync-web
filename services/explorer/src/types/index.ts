@@ -12,7 +12,7 @@ export interface AppState {
 }
 
 export type JournalPath = Array<number | string[]>;
-export type ExplorerMode = 'stage' | 'ledger';
+export type ExplorerMode = 'stage' | 'ledger' | 'admin';
 
 export interface JournalResponse<T = any> {
   content: T;
@@ -23,6 +23,17 @@ export interface JournalResponse<T = any> {
 export interface PeerInfo {
   name: string;
   endpoint: string;
+}
+
+export interface AdminBridge {
+  name: string;
+  endpoint: string;
+}
+
+export interface AdminConfig {
+  admins: string[];
+  bridges: AdminBridge[];
+  windowSize: number | null;
 }
 
 export interface TreeNode {

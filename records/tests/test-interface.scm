@@ -226,6 +226,13 @@
 
   (assert (admin-step journal-1 "pass-1") 8)
 
+  (let* ((path '(6 (*bridge* journal-2 chain) -1 (*state* a b c)))
+         (pin-query `((function pin!) (arguments ((path ,path)))))
+         (resolve-query `((function resolve) (arguments ((path ,path) (pinned? #t) (proof? #f))))))
+    (assert (interface-query journal-1 interface-1 pin-query) #t)
+    (assert (interface-query journal-1 interface-1 resolve-query)
+            (lambda (res) (cadr (assoc 'pinned? res)))))
+
   (let ((query '((function resolve) (arguments ((path (1 (*state* do pin))) (pinned? #f) (proof? #f))))))
     (assert (interface-query journal-1 interface-1 query) '(directory ((this value) (that value)) #t)))
 
@@ -300,6 +307,13 @@
   (let ((query '((function get) (arguments ((path ((*state* alice data))))))))
     (assert (interface-query journal-1 interface-1 query 'bob) "public data"))
 
+  ; non-admin users can read the ownerless state root as public directory metadata
+  (let ((query '((function get) (arguments ((path ((*state*))))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (and (list? x) (eq? (car x) 'directory)))))
+
+  (let ((query '((function resolve) (arguments ((path (-1 (*state*))) (pinned? #t) (proof? #t))))))
+    (assert (interface-query journal-1 interface-1 query 'bob) (lambda (x) (and (list? x) (assoc 'content x)))))
+
   ; set-batch! with paths from mixed owners — fails when any path is not owned by identity
   (let ((query '((function set-batch!)
                  (arguments ((paths (((*state* bob stuff)) ((*state* alice stuff))))
@@ -321,5 +335,16 @@
   ; promoted alice can now call *admins-get* — confirms admin list is enforced
   (let ((query '((function *admins-get*))))
     (assert (interface-query journal-1 interface-1 query 'alice) '(alice)))
+
+  ; admins can update the public window through the interface-level admin operation
+  (let ((query '((function *window-set*) (arguments ((value 3))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) #t))
+
+  (let ((query '((function config) (arguments ((path (public window)))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) 3))
+
+  ; non-positive window sizes are rejected before reaching ledger config updates
+  (let ((query '((function *window-set*) (arguments ((value 0))))))
+    (assert (interface-query journal-1 interface-1 query 'alice) (lambda (x) (eq? (car x) 'error))))
 
   (append "Success (" (object->string asserted) " checks)"))

@@ -4,6 +4,7 @@ import ToolBar from './components/ToolBar';
 import ExplorerTree from './components/ExplorerTree';
 import ExplorerContent from './components/ExplorerContent';
 import LedgerRouteBar from './components/LedgerRouteBar';
+import AdminPanel from './components/AdminPanel';
 import { JournalService } from './services/JournalService';
 import { AppState, ExplorerMode, ExplorerSelection, JournalPath, LedgerHop } from './types';
 import {
@@ -124,6 +125,7 @@ const App: React.FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [mode, setMode] = useState<ExplorerMode>('ledger');
   const [journalService, setJournalService] = useState<JournalService | null>(null);
+  const [adminStatus, setAdminStatus] = useState<'checking' | 'admin' | 'not-admin'>('checking');
   const [stageSelection, setStageSelection] = useState<ExplorerSelection | null>(null);
   const [ledgerSelection, setLedgerSelection] = useState<ExplorerSelection | null>(null);
   const [stageExpandedNodes, setStageExpandedNodes] = useState<Set<string>>(new Set());
@@ -133,6 +135,7 @@ const App: React.FC = () => {
   const [ledgerView, setLedgerView] = useState<'content' | 'proof'>('content');
   const [stageRefreshKey, setStageRefreshKey] = useState(0);
   const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0);
+  const [adminRefreshKey, setAdminRefreshKey] = useState(0);
   const isApplyingHashRef = useRef(false);
 
   useEffect(() => {
@@ -148,6 +151,8 @@ const App: React.FC = () => {
           setSessionName(data?.identity?.traits?.username ?? '');
           if (JOURNAL_ENDPOINT) {
             setJournalService(new JournalService(JOURNAL_ENDPOINT));
+          } else {
+            setAdminStatus('not-admin');
           }
           setSessionStatus('ready');
         } else {
@@ -162,6 +167,36 @@ const App: React.FC = () => {
   const setLoadingState = (isLoading: boolean, error: string | null = null) => {
     setAppState((prev) => ({ ...prev, isLoading, error }));
   };
+
+  useEffect(() => {
+    if (!journalService) {
+      return;
+    }
+
+    let cancelled = false;
+    setAdminStatus('checking');
+    journalService.getAdmins()
+      .then(() => {
+        if (!cancelled) {
+          setAdminStatus('admin');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAdminStatus('not-admin');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [journalService]);
+
+  useEffect(() => {
+    if (adminStatus === 'not-admin' && mode === 'admin') {
+      setMode('ledger');
+    }
+  }, [adminStatus, mode]);
 
   const synchronizeLedger = async () => {
     if (!journalService) {
@@ -219,10 +254,10 @@ const App: React.FC = () => {
       setAppState((prev) => ({ ...prev, error: null }));
 
       if (parsed.mode === 'stage') {
-        setStageSelection(parsed.selection);
-      } else {
+        setStageSelection(parsed.selection ?? { path: STAGE_ROOT_PATH, type: 'directory' });
+      } else if (parsed.mode === 'ledger') {
         setLedgerHops(parsed.ledgerHops ?? getInitialLedgerHops(appState.rootIndex));
-        setLedgerSelection(parsed.selection);
+        setLedgerSelection(parsed.selection ?? null);
         setLedgerView('content');
       }
 
@@ -237,12 +272,17 @@ const App: React.FC = () => {
   }, [appState.rootIndex]);
 
   const handleModeChange = (nextMode: ExplorerMode) => {
+    if (nextMode === 'admin' && adminStatus !== 'admin') {
+      return;
+    }
     setMode(nextMode);
     if (nextMode === 'stage') {
       setStageSelection({ path: STAGE_ROOT_PATH, type: 'directory' });
-    } else {
+    } else if (nextMode === 'ledger') {
       setLedgerView('content');
       void synchronizeLedger();
+    } else if (nextMode === 'admin') {
+      setAdminRefreshKey((prev) => prev + 1);
     }
     setAppState((prev) => ({ ...prev, error: null }));
   };
@@ -574,6 +614,7 @@ const App: React.FC = () => {
           error={sessionStatus === 'error' ? 'Could not check session' : null}
           isLoading={false}
           mode={mode}
+          isAdmin={false}
           theme={theme}
           onModeChange={handleModeChange}
           onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
@@ -607,6 +648,7 @@ const App: React.FC = () => {
         error={appState.error}
         isLoading={appState.isLoading}
         mode={mode}
+        isAdmin={adminStatus === 'admin'}
         theme={theme}
         onModeChange={handleModeChange}
         onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
@@ -627,6 +669,23 @@ const App: React.FC = () => {
         />
       )}
 
+      {mode === 'admin' ? (
+        adminStatus === 'admin' && journalService ? (
+        <div className="main-content">
+          <AdminPanel
+            journalService={journalService}
+            currentUser={sessionName}
+            refreshKey={adminRefreshKey}
+          />
+        </div>
+        ) : (
+          <div className="main-content">
+            <div className="admin-panel">
+              <div className="admin-loading">Checking admin access...</div>
+            </div>
+          </div>
+        )
+      ) : (
       <div className="main-content two-pane">
         <div className="left-pane pane">
           <ExplorerTree
@@ -672,6 +731,7 @@ const App: React.FC = () => {
           />
         </div>
       </div>
+      )}
     </div>
   );
 };

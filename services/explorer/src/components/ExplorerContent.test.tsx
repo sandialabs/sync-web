@@ -167,6 +167,7 @@ describe('ExplorerContent', () => {
     );
 
     expect(await screen.findByText('Proof')).toBeInTheDocument();
+    expect(screen.getByText('Download')).toBeInTheDocument();
     expect(await screen.findByText('Unpin')).toBeInTheDocument();
   });
 });

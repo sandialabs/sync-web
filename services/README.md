@@ -41,6 +41,10 @@ tests/api/local-compose.sh smoke
 
 `tests/api/local-compose.sh` forces HTTP mode by default for local runs. To allow TLS behavior, set `LOCAL_COMPOSE_FORCE_HTTP=0`.
 
+The compose journal service runs the generic `journal-sdk` image directly and mounts
+the general Lisp deployment inputs from `records/lisp` plus
+`deploy/compose/general/run.sh`. There is no separate `general` image layer.
+
 Bring down the base compose stack manually:
 
 ```bash

@@ -67,12 +67,17 @@ docker compose -f deploy/compose/general/compose.yaml down -v
 
 The default stack includes:
 
-- journal runtime (`general`)
+- journal runtime (`journal-sdk` plus mounted general Lisp deployment inputs)
 - router/nginx entrypoint
 - gateway API service
 - explorer UI
 - workbench UI
 - file-system SMB service
+
+The compose stack does not use a separate immutable `general` image. Instead,
+`journal-sdk` starts through `deploy/compose/general/run.sh`, which reads mounted
+`records/lisp/*.scm` files. Fresh databases install from those files; existing
+databases only absorb changed Lisp inputs when `JOURNAL_UPDATE=1`.
 
 ## Routing
 
@@ -83,11 +88,10 @@ It serves runtime query routes and UI routes:
 
 | Route | Purpose |
 | --- | --- |
-| `/interface` | Scheme request endpoint for direct evaluator and API calls. |
-| `/interface/json` | JSON request endpoint for web and service integrations. |
+| `/interface` | Scheme or JSON request endpoint selected by request `Content-Type`. |
 | `/docs` | Gateway Swagger/OpenAPI documentation and route orientation. |
 | `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
-| `/explorer/` | Browser UI with dedicated `Ledger` and `Stage` modes for committed browsing and local staged editing. |
+| `/explorer/` | Browser UI with dedicated `Ledger`, `Stage`, and admin-only `Admin` modes for committed browsing, local staged editing, and application-level journal administration. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
 | SMB share | File-system projection: `/stage` (mutable), `/ledger/state` (current committed, index optional), `/control/pin` (pin directives). |
 
@@ -106,7 +110,7 @@ Permission boundaries are central to safe operation, so operators should treat f
 | Family | Description | Functions |
 | --- | --- | --- |
 | Public (no authentication) | Read-mostly methods intended for external visibility without secrets. | `size`, `synchronize`, `info`, `config`, `get`, `trace` |
-| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `resolve`, `set!`, `pin!`, `unpin!`, `bridge!`, `bridge-synchronize!`, `*step!*`, `*secret*` |
+| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `resolve`, `set!`, `pin!`, `unpin!`, `bridge!`, `bridge-synchronize!`, `*step!*`, `*secret*`, `*admins-get*`, `*admins-set*`, `*window-set*` |
 | Root/Admin | Root commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
 
 ### Function Reference
@@ -137,6 +141,9 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 | `bridge-synchronize!` | Merge a prepared bridge synchronization response |
 | `*step!*` | Run interface stepping, including bridge synchronization |
 | `*secret*` | Rotate interface secret |
+| `*admins-get*` | Read the interface admin username list |
+| `*admins-set*` | Replace the interface admin username list |
+| `*window-set*` | Update the public ledger retention window |
 
 #### Root/Admin Functions
 
@@ -203,6 +210,9 @@ It also handles remote bridge fetch/merge flows before handing the final operati
 | `bridge-synchronize!` | Restricted | Synchronize a named bridge into local staged state. |
 | `*step!*` | Restricted | Run bridge synchronization and local step progression. |
 | `*secret*` | Restricted | Rotate interface secret used by interface API auth checks. |
+| `*admins-get*` | Restricted | Read the interface admin username list. |
+| `*admins-set*` | Restricted | Replace the interface admin username list. |
+| `*window-set*` | Restricted | Update the public ledger retention window. |
 
 Root commands (`*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*`) are also callable, but remain part of the root-plane surface and should be treated as admin-level operations.
 This keeps externally visible behavior stable while allowing implementation details inside ledger classes to evolve.

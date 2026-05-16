@@ -11,6 +11,8 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-social-agent-network}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+CONTAINER_COMPOSE="${CONTAINER_COMPOSE:-$CONTAINER_RUNTIME compose}"
 export COMPOSE_PROJECT_NAME
 
 GENERAL_COMPOSE_FILE="$ROOT_DIR/deploy/compose/general/compose.yaml"
@@ -33,7 +35,7 @@ build_social_agent() {
     if [ -n "$DOCKER_PLATFORM" ]; then
         set -- --platform "$DOCKER_PLATFORM" "$@"
     fi
-    docker build "$@" "$ROOT_DIR/tests/network/common/social-agent"
+    $CONTAINER_RUNTIME build "$@" "$ROOT_DIR/tests/network/common/social-agent"
 }
 
 build_local_stack() {
@@ -53,7 +55,7 @@ generate_network() {
 
 if [ "$MODE" = "down" ]; then
     cd "$SCRIPT_DIR"
-    docker compose down -v --remove-orphans
+    $CONTAINER_COMPOSE down -v --remove-orphans
     exit 0
 fi
 
@@ -72,4 +74,5 @@ if [ "$MODE" = "generate" ]; then
 fi
 
 cd "$SCRIPT_DIR"
-docker compose up
+$CONTAINER_COMPOSE down -v --remove-orphans
+$CONTAINER_COMPOSE up

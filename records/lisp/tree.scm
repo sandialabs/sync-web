@@ -154,6 +154,7 @@
     ;; Collect all keys in a directory node and whether it is fully known.
     ;;   Args:
     ;;     node (sync node): directory root node.
+    ;;     values? (boolean): if #t, return (key value) pairs instead of just keys.
     ;;   Returns:
     ;;     list: (keys-list known?) for this subtree.
     (let recurse ((node node))

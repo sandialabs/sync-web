@@ -1,6 +1,6 @@
 # Social Agent Network
 
-Generate a local multi-node social-agent network from the `sync-services` general compose stack.
+Generate a local multi-node social-agent network from the reference general compose stack.
 
 The generator expects `python3` with `PyYAML` available in the environment where you run it.
 
@@ -11,7 +11,7 @@ The generator expects `python3` with `PyYAML` available in the environment where
 All other inputs default if omitted:
 
 - `NODE_COUNT=4`
-- `SECRET=pass`
+- `SECRET=password`
 - `CONNECTIVITY=2`
 - `PERIOD=2`
 - `WINDOW=1024`
@@ -33,7 +33,7 @@ Optional image overrides:
 
 ```bash
 cd /code/sync-analysis/compose/social-agent-network
-SYNC_SERVICES_GENERAL_COMPOSE=/code/sync-services/compose/general/docker-compose.yml \
+SYNC_SERVICES_GENERAL_COMPOSE=/code/sync-web/deploy/compose/general/compose.yaml \
 python3 generate.py
 docker compose up
 ```
@@ -60,7 +60,7 @@ SYNC_SERVICES=/path/to/sync-services \
 This does the following:
 
 - builds a local `sync-journal` image and tags it as the journal SDK image expected by `sync-services`
-- builds local `sync-services` images using `sync-records/lisp` as the Lisp source of truth
+- builds local service images and uses `journal-sdk` plus mounted `records/lisp` inputs for each journal
 - builds a local `sync-analysis` social-agent image
 - regenerates `docker-compose.yml` and `peers.json`
 - starts the generated multi-node network
@@ -85,7 +85,7 @@ Required environment:
 The script derives:
 
 - `sync-records/lisp`
-- `sync-services/compose/general/docker-compose.yml`
+- `deploy/compose/general/compose.yaml`
 
 from those repo roots.
 
