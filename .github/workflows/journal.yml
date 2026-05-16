@@ -49,26 +49,6 @@ jobs:
         working-directory: journal
         run: cargo test
 
-  publish-docs:
-    needs: test-journal
-    if: github.ref == 'refs/heads/main' && needs.test-journal.result == 'success'
-    runs-on: ubuntu-latest
-    permissions: write-all
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: journal
-      - uses: actions/configure-pages@v5
-      - name: Build docs
-        working-directory: journal
-        run: cargo doc --no-deps
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: './journal/target/doc/'
-      - uses: actions/deploy-pages@v4
-
   build-journal-sdk:
     needs: [changes, test-journal]
     if: needs.changes.outputs.journal == 'true' && needs.test-journal.result == 'success'
