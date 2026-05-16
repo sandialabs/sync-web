@@ -1,16 +1,16 @@
-name: Workbench Service
+name: Identity Provider Service
 
 on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["services/workbench/**", "VERSION"]
+    paths: ["services/identity-provider/**", "VERSION"]
   pull_request:
     branches: ["main"]
-    paths: ["services/workbench/**"]
+    paths: ["services/identity-provider/**"]
 
 concurrency:
-  group: "services-workbench-${{ github.ref }}"
+  group: "services-identity-provider-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
@@ -34,37 +34,32 @@ jobs:
         with:
           filters: |
             service:
-              - 'services/workbench/**'
+              - 'services/identity-provider/**'
             version:
               - 'VERSION'
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Run unit tests
-        if: steps.filter.outputs.service == 'true'
-        run: docker build --target test services/workbench
       - name: Build Docker image (PR/non-main validation)
         if: github.ref != 'refs/heads/main' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: services/workbench
-          target: runtime
+          context: services/identity-provider
           platforms: linux/amd64
           push: false
-          tags: ghcr.io/${{ github.repository }}/workbench:latest
+          tags: ghcr.io/${{ github.repository }}/identity-provider:latest
       - name: Build and push multi-arch Docker images
         if: github.ref == 'refs/heads/main' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: services/workbench
-          target: runtime
+          context: services/identity-provider
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}/workbench:latest
+          tags: ghcr.io/${{ github.repository }}/identity-provider:latest
       - name: Tag version
         if: github.ref == 'refs/heads/main' && steps.filter.outputs.version == 'true'
         run: |
           VERSION="$(cat VERSION)"
-          TAG="ghcr.io/${{ github.repository }}/workbench:$VERSION"
-          docker buildx imagetools create -t "$TAG" "ghcr.io/${{ github.repository }}/workbench:latest"
+          TAG="ghcr.io/${{ github.repository }}/identity-provider:$VERSION"
+          docker buildx imagetools create -t "$TAG" "ghcr.io/${{ github.repository }}/identity-provider:latest"
