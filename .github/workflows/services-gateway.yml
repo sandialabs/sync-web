@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["services/gateway/**"]
+    paths: ["services/gateway/**", "VERSION"]
   pull_request:
     branches: ["main"]
     paths: ["services/gateway/**"]
@@ -29,14 +29,23 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout code
         uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            service:
+              - 'services/gateway/**'
+            version:
+              - 'VERSION'
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Run unit tests
+        if: steps.filter.outputs.service == 'true'
         run: docker build --target test services/gateway
       - name: Build Docker image (PR/non-main validation)
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
           context: services/gateway
@@ -45,7 +54,7 @@ jobs:
           push: false
           tags: ghcr.io/${{ github.repository }}/gateway:latest
       - name: Build and push multi-arch Docker images
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
           context: services/gateway
@@ -53,3 +62,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}/gateway:latest
+      - name: Tag version
+        if: github.ref == 'refs/heads/main' && steps.filter.outputs.version == 'true'
+        run: |
+          VERSION="$(cat VERSION)"
+          TAG="ghcr.io/${{ github.repository }}/gateway:$VERSION"
+          docker buildx imagetools create -t "$TAG" "ghcr.io/${{ github.repository }}/gateway:latest"

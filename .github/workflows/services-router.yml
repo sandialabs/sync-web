@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["services/router/**"]
+    paths: ["services/router/**", "VERSION"]
   pull_request:
     branches: ["main"]
     paths: ["services/router/**"]
@@ -29,12 +29,20 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout code
         uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            service:
+              - 'services/router/**'
+            version:
+              - 'VERSION'
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build Docker image (PR/non-main validation)
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
           context: services/router
@@ -42,10 +50,16 @@ jobs:
           push: false
           tags: ghcr.io/${{ github.repository }}/router:latest
       - name: Build and push multi-arch Docker images
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
           context: services/router
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}/router:latest
+      - name: Tag version
+        if: github.ref == 'refs/heads/main' && steps.filter.outputs.version == 'true'
+        run: |
+          VERSION="$(cat VERSION)"
+          TAG="ghcr.io/${{ github.repository }}/router:$VERSION"
+          docker buildx imagetools create -t "$TAG" "ghcr.io/${{ github.repository }}/router:latest"
