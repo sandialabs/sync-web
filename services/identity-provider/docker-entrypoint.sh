@@ -1,27 +1,22 @@
 #!/bin/sh
 set -eu
 
-DOMAIN="${DOMAIN:?DOMAIN is required}"
+ORIGIN="${ORIGIN:?ORIGIN is required (e.g. https://example.com or http://localhost:8192)}"
+SCHEME="${ORIGIN%%://*}"
+DOMAIN="${ORIGIN#*://}"
 COOKIE_DOMAIN="${DOMAIN%%:*}"
 KRATOS_COOKIE_SECRET="${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}"
 KRATOS_CONFIG_DIR="${KRATOS_CONFIG_DIR:-/etc/config/kratos}"
 KRATOS_CONFIG_FILE="${KRATOS_CONFIG_FILE:-$KRATOS_CONFIG_DIR/kratos.yml}"
 KRATOS_DATA_DIR="${KRATOS_DATA_DIR:-/var/lib/kratos}"
 KRATOS_IDENTITY_SCHEMA_URL="${KRATOS_IDENTITY_SCHEMA_URL:-file://$KRATOS_CONFIG_DIR/identity.schema.json}"
-CERT_FILE="${TLS_CERT_FILE:-/etc/kratos/certs/tls.crt}"
-KEY_FILE="${TLS_KEY_FILE:-/etc/kratos/certs/tls.key}"
 
-if [ -f "$CERT_FILE" ] \
-    && [ -f "$KEY_FILE" ] \
-    && grep -q "BEGIN CERTIFICATE" "$CERT_FILE" \
-    && grep -Eq "BEGIN (EC |RSA |)PRIVATE KEY" "$KEY_FILE"; then
-    SCHEME="https"
+if [ "$SCHEME" = "https" ]; then
     DEV_FLAG=""
-    echo "Identity provider mode: production (TLS detected)"
+    echo "Identity provider mode: production (https)"
 else
-    SCHEME="http"
     DEV_FLAG="--dev"
-    echo "Identity provider mode: dev (no TLS certs, HTTP only)"
+    echo "Identity provider mode: dev (http)"
 fi
 
 mkdir -p "$KRATOS_CONFIG_DIR"
@@ -57,6 +52,8 @@ selfservice:
       enabled: true
 
   flows:
+    error:
+      ui_url: ${SCHEME}://${DOMAIN}/auth/error
     login:
       ui_url: ${SCHEME}://${DOMAIN}/auth/login
       lifespan: 10m
