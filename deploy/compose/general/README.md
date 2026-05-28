@@ -17,6 +17,9 @@ files. For an existing database, mounted Lisp files are only applied when
 
 - Docker
 - Docker Compose
+- Podman Compose on Fedora is also supported. The bind mounts use SELinux
+  relabel flags so rootless Podman can read the mounted startup script and Lisp
+  files.
 
 ## Configuration
 
@@ -65,6 +68,13 @@ HTTP-only deployment (no TLS files configured):
 ```bash
 SECRET=password PORT=8192 \
 docker compose -f deploy/compose/general/compose.yaml up -d
+```
+
+With Podman Compose:
+
+```bash
+SECRET=password PORT=8192 \
+podman-compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 The default compose stack now mounts ACME webroot to `/var/www/acme-challenge`.

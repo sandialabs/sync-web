@@ -20,8 +20,8 @@ services:
       LISP_DIR: /srv/lisp
     volumes:
       - database:/srv/database
-      - ../../../records/lisp:/srv/lisp:ro
-      - ./run.sh:/srv/run.sh:ro
+      - ../../../records/lisp:/srv/lisp:ro,Z
+      - ./run.sh:/srv/run.sh:ro,Z
 
   explorer:
     image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.2.1}
@@ -80,9 +80,9 @@ services:
       TLS_CERT_FILE: ${TLS_CERT_FILE:-/etc/nginx/certs/tls.crt}
       TLS_KEY_FILE: ${TLS_KEY_FILE:-/etc/nginx/certs/tls.key}
     volumes:
-      - ${TLS_CERT_HOST_PATH:-./tls/tls.crt}:/etc/nginx/certs/tls.crt:ro
-      - ${TLS_KEY_HOST_PATH:-./tls/tls.key}:/etc/nginx/certs/tls.key:ro
-      - ${ACME_WEBROOT_HOST_PATH:-./acme-challenge}:/var/www/acme-challenge
+      - ${TLS_CERT_HOST_PATH:-./tls/tls.crt}:/etc/nginx/certs/tls.crt:ro,Z
+      - ${TLS_KEY_HOST_PATH:-./tls/tls.key}:/etc/nginx/certs/tls.key:ro,Z
+      - ${ACME_WEBROOT_HOST_PATH:-./acme-challenge}:/var/www/acme-challenge:Z
     depends_on:
       - journal
       - explorer
