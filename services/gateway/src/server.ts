@@ -9,6 +9,7 @@ import { createJournalClient } from "./journal";
 import { createKratosClient } from "./kratos";
 import { instrumentGatewayRequests } from "./metrics";
 import { gatewayRoutes } from "./routes";
+import { allowHttpSwaggerAssets } from "./swagger-csp";
 
 const apiDescription = `
 Versioned, function-oriented HTTP gateway over Synchronic journal transport endpoints.
@@ -479,6 +480,7 @@ const main = async (): Promise<void> => {
   await app.register(fastifySwaggerUi, {
     routePrefix: "/api/v1/docs",
     staticCSP: true,
+    transformStaticCSP: allowHttpSwaggerAssets,
     ...(logo
       ? {
           logo: {

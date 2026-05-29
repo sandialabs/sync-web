@@ -35,7 +35,7 @@ files. For an existing database, mounted Lisp files are only applied when
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
 - `SMB_PORT` (default `445`): host port exposed by the `file-system` service
-- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.0.0`): image used by the optional `file-system` service
+- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.2.2`): image used by the optional `file-system` service
 - `SYNC_FS_Backend` (default `http-journal-stage`): file-system backend override
 - `SYNC_FS_JournalJsonUrl` (default `http://journal/interface`): direct journal JSON endpoint used by the default file-system backend
 - `SYNC_FS_GatewayBaseUrl` (default `http://gateway/api/v1`): gateway endpoint used only when gateway-backed file-system modes are selected
