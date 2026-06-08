@@ -1,0 +1,10 @@
+(let* ((root (inlet 'x 1))
+       (child (sublet root 'y 2)))
+  (varlet root 'z 3)
+  (varlet child 'x 10)
+  (list
+    (root 'x)
+    (child 'x)
+    (child 'y)
+    (child 'z)
+    (begin (set! (child 'z) 30) (root 'z))))

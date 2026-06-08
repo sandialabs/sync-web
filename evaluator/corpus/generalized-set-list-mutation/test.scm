@@ -1,0 +1,5 @@
+(let ((xs (list 'a 'b 'c)))
+  (set! (xs 1) 'B)
+  (set-car! xs 'A)
+  (set-cdr! (cdr xs) '(C D))
+  xs)

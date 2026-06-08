@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "Dotted lambda* rest should preserve keyword-looking arguments as data.",
+  "expected_to_fail_candidate": true
+}

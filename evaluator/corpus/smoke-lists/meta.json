@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "smoke",
+  "features": [
+    "pairs",
+    "lists",
+    "dotted-lists"
+  ],
+  "description": "Basic pair/list operations and dotted-list printing."
+}

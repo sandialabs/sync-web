@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "macros",
+  "features": [
+    "define-macro*",
+    "lambda*-keywords",
+    "rest-body",
+    "quasiquote"
+  ],
+  "description": "Macro* keyword/default argument handling with rest body expansion."
+}

@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "reader",
+  "features": [
+    "open-input-string",
+    "read",
+    "ports"
+  ],
+  "description": "String input port reading; sync-web currently uses this pattern around eval."
+}

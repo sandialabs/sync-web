@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16428,
+  "source_form": "(test (pair? (let ()\n               (define (func)\n                 (list-values (#_quasiquote (odd?)) (let ((<1> (list 1 #f))) (set! (<1> 1) (let ((<L> (list #f 3))) (set-car! <L> <1>) <L>)) <1>)))\n               (func)))\n      #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

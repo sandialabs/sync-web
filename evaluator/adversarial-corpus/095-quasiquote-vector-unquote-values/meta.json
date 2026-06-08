@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "quasiquote"
+  ],
+  "description": "Vector quasiquote unquote returning values should preserve s7 printed form.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "reader"
+  ],
+  "description": "reader should reject empty-row constant multivectors with s7 read-error.",
+  "expected_to_fail_candidate": true
+}

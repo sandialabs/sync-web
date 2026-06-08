@@ -1,0 +1,16 @@
+(define (interp x env)
+  (let loop ((pts env))
+    (let ((x0 (car pts))
+          (y0 (cadr pts))
+          (x1 (caddr pts))
+          (y1 (cadddr pts)))
+      (if (or (<= x x1) (null? (cddddr pts)))
+          (+ y0 (* (/ (- x x0) (- x1 x0)) (- y1 y0)))
+          (loop (cddr pts))))))
+
+(let ((env '(0.0 0.0 0.25 1.0 0.75 0.5 1.0 0.0)))
+  (list
+    (interp 0.0 env)
+    (interp 0.125 env)
+    (interp 0.5 env)
+    (interp 1.0 env)))

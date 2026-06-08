@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15142,
+  "source_form": "(test (let* ((v1 (vector 1 2)) (v2 (vector v1)))\n\t(vector-set! v1 1 v1)\n\t(string=? (object->string v2) \"#(#1=#(1 #1#))\"))\n      #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

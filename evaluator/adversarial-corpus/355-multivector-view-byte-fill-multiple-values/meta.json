@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "byte-vector",
+    "multivector",
+    "multiple-values"
+  ],
+  "description": "fill! on byte-vector multivector views should handle multiple values like s7.",
+  "expected_to_fail_candidate": true
+}

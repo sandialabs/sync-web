@@ -1,0 +1,11 @@
+{
+  "category": "byte-vector",
+  "tags": [
+    "benchmark",
+    "byte-vector",
+    "mutation",
+    "numeric"
+  ],
+  "description": "Byte-vector indexed writes and reads.",
+  "scale": "50000 writes + 50000 reads"
+}

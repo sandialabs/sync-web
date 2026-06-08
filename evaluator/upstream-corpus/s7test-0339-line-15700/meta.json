@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15700,
+  "source_form": "(test (let ((f #f))\n\t(set! f (lambda ()\n\t\t  (let* ((code (procedure-source f))\n\t\t\t (pos (- (length code) 1)))\n\t\t    (set! (code pos) (+ (code pos) 1)))\n\t\t  1))\n\t(f) (f) (f))\n      4)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

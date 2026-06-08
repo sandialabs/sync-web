@@ -1,0 +1,12 @@
+(let* ((a (list 1 2))
+       (b a)
+       (c (list 1 2)))
+  (set-car! b 9)
+  (list
+    (list 'a a)
+    (list 'b b)
+    (list 'c c)
+    (list 'eq-ab (eq? a b))
+    (list 'eq-ac (eq? a c))
+    (list 'equal-ac (equal? a c))
+    (list 'eqv-num (eqv? 1 1.0))))

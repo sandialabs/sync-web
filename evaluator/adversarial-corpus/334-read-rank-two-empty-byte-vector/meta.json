@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "#u2d empty constant should preserve rank and byte kind.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "sync-web-shape",
+  "features": [
+    "trie-shape",
+    "path-update",
+    "nothing-sentinel",
+    "unknown-sentinel",
+    "byte-vectors"
+  ],
+  "description": "Pure tree/trie path get/set shape analogous to record path storage."
+}

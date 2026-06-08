@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16633,
+  "source_form": "(test (catch #t (lambda () (let ((V (vector (vector 0 12)))) (V 0 1 0))) (lambda (typ info) (apply format #f info)))\n      \"(#(0 12) 1 0) becomes (12 0), but 12 can't take arguments\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector"
+  ],
+  "description": "vector sort! should not add extra comparator side effects.",
+  "expected_to_fail_candidate": true
+}

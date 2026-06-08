@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 5107,
+  "source_form": "(test (let ((11-1 10)\n\t    (2012-4-19 21)\n\t    (1+the-road 18)\n\t    (-1+2 1)\n\t    (1e. 2)\n\t    (0+i' 3)\n\t    (0.. 4))\n\t(+ 11-1 2012-4-19 1+the-road -1+2 1e. 0+i' 0..))\n      59)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

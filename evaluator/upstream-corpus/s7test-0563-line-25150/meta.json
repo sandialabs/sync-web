@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 25150,
+  "source_form": "(test (or (equal? (object->string (inlet 'a abs) :readable) \"(inlet :a abs)\") (equal? (object->string (inlet 'a abs) :readable) \"(inlet :a #_abs)\")) #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 21461,
+  "source_form": "(test (with-output-to-string (lambda () (write (string (integer->char 4) (integer->char 8) (integer->char 20) (integer->char 30))))) \"\\\"\\\\x04;\\\\b\\\\x14;\\\\x1e;\\\"\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

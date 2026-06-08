@@ -1,0 +1,14 @@
+{
+  "status": "required",
+  "category": "long-programs",
+  "features": [
+    "conways-game-of-life",
+    "grid-simulation",
+    "recursive-loops",
+    "list-of-coordinates",
+    "string-rendering",
+    "character-literals",
+    "bounded-state-transition"
+  ],
+  "description": "Bounded Conway's Game of Life simulation with a glider, rendering and population/bounding-box summaries over several generations."
+}

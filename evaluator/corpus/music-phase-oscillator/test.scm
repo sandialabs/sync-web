@@ -1,0 +1,10 @@
+(define* (make-osc (frequency 440.0) (sample-rate 44100.0) (phase 0.0))
+  (let ((ph phase)
+        (inc (/ (* 2.0 pi frequency) sample-rate)))
+    (lambda ()
+      (let ((y (sin ph)))
+        (set! ph (+ ph inc))
+        y))))
+
+(let ((osc (make-osc :frequency 11025.0 :sample-rate 44100.0)))
+  (map (lambda (ignored) (osc)) '(0 1 2 3 4)))

@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "multiple-values"
+  ],
+  "description": "float multivector vector-set! should handle multiple values in argument position like s7.",
+  "expected_to_fail_candidate": true
+}

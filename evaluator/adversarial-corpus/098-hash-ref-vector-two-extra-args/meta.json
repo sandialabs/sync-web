@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash"
+  ],
+  "description": "hash-table-ref should apply all extra args to applicable vector values.",
+  "expected_to_fail_candidate": true
+}

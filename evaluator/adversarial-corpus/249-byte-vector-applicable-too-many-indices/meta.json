@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "byte-vector"
+  ],
+  "description": "applicable byte-vectors should reject too many indices instead of ignoring extras.",
+  "expected_to_fail_candidate": true
+}

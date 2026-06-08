@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort"
+  ],
+  "description": "string sort! should honor descending char comparator.",
+  "expected_to_fail_candidate": true
+}

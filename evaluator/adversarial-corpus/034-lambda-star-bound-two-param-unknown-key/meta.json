@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star",
+    "diagnostics"
+  ],
+  "description": "Bound lambda* with two optional parameters should show full lambda* source in unknown-key error.",
+  "expected_to_fail_candidate": true
+}

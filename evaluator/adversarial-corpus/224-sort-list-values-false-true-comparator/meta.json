@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "values",
+    "list"
+  ],
+  "description": "sort! comparator multiple values should use s7 truth/splicing behavior, not treat all values as unspecified.",
+  "expected_to_fail_candidate": true
+}

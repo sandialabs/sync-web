@@ -1,0 +1,9 @@
+{
+  "status": "required",
+  "category": "bindings",
+  "features": [
+    "letrec",
+    "mutual-recursion"
+  ],
+  "description": "Mutually recursive local procedures."
+}

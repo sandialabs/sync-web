@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "generalized-set",
+  "features": [
+    "nested-applicable-objects",
+    "hash-table",
+    "vector",
+    "list",
+    "string",
+    "generalized-set!"
+  ],
+  "description": "Nested generalized set! through hash-table, vector, list, and string accessors."
+}

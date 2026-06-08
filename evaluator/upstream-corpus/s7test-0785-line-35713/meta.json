@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 35713,
+  "source_form": "(test (let () (define (arg2 a) (let ((b 1)) (set! b (+ a b)) (values b))) (define (hi c) (expt (abs c) (arg2 2))) (hi 2)) 8)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

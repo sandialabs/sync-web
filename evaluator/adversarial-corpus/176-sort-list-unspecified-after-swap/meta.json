@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort"
+  ],
+  "description": "sort! should preserve partial mutation state when comparator returns unspecified mid-sort.",
+  "expected_to_fail_candidate": true
+}

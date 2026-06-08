@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "procedure-source"
+  ],
+  "description": "procedure-source negative ref should use s7 list-ref out-of-range reason.",
+  "expected_to_fail_candidate": true
+}

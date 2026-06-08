@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "values",
+    "vector"
+  ],
+  "description": "vector sort! comparator returning zero values should follow s7 behavior.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "byte-vector"
+  ],
+  "description": "Reader byte-vector rational diagnostic should report ratio.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,1 @@
+(upstream-test 16704 (value "make-hash-table third argument, (integer?), is a pair but should be (key-type . value-type)") (value "make-hash-table third argument, (integer?), is a pair but should be (key-type . value-type)") #t)

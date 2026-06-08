@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "ports",
+  "features": [
+    "open-output-string",
+    "display",
+    "write",
+    "newline",
+    "get-output-string"
+  ],
+  "description": "String output port behavior for printer/display differences."
+}

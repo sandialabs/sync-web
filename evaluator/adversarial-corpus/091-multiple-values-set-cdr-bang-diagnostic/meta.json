@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "set-cdr! with multiple values should report s7 too-many-arguments diagnostic.",
+  "expected_to_fail_candidate": true
+}

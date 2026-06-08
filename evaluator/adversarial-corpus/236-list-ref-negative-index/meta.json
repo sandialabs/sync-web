@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list"
+  ],
+  "description": "list-ref should reject negative indices instead of returning the head.",
+  "expected_to_fail_candidate": true
+}

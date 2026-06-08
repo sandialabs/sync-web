@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "characters",
+  "features": [
+    "characters",
+    "char-comparison",
+    "char-conversion"
+  ],
+  "description": "Character literals, comparisons, case conversion, and integer conversion."
+}

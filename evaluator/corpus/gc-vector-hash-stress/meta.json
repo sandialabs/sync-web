@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "stress",
+  "features": [
+    "hash-table",
+    "vectors",
+    "allocation",
+    "do",
+    "gc-stress"
+  ],
+  "description": "Allocation-heavy hash/vector stress with equal?-composite keys."
+}

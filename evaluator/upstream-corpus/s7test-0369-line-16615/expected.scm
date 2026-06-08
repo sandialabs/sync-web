@@ -1,0 +1,1 @@
+(upstream-test 16615 (value "(hash-table-ref (hash-table) 'a 'asdf) becomes (#f 'asdf), but #f can't take arguments") (value "(hash-table-ref (hash-table) 'a 'asdf) becomes (#f 'asdf), but #f can't take arguments") #t)

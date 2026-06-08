@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "Reader should reject ragged multidimensional vectors.",
+  "expected_to_fail_candidate": true
+}

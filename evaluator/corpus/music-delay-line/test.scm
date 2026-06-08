@@ -1,0 +1,11 @@
+(define (make-delay size)
+  (let ((buf (make-float-vector size 0.0))
+        (loc 0))
+    (lambda (input)
+      (let ((old (float-vector-ref buf loc)))
+        (float-vector-set! buf loc input)
+        (set! loc (modulo (+ loc 1) size))
+        old))))
+
+(let ((d (make-delay 3)))
+  (map d '(1.0 2.0 3.0 4.0 5.0)))

@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "generalized-set",
+  "features": [
+    "generalized-set!",
+    "applicable-vectors",
+    "applicable-strings",
+    "applicable-environments"
+  ],
+  "description": "Generalized set! over applicable mutable values."
+}

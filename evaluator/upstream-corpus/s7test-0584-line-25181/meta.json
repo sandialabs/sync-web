@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 25181,
+  "source_form": "(test (object->string (inlet 'a (let ((p (open-input-string \"123456\"))) (read-char p) p)) :readable) \"(inlet :a (open-input-string \\\"23456\\\"))\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

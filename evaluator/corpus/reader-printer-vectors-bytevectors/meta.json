@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "vectors",
+    "byte-vectors",
+    "applicable-vectors"
+  ],
+  "description": "Vector and byte-vector syntax, printing, predicates, and applicable vector ref."
+}

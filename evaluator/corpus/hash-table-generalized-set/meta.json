@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "hash-table",
+  "features": [
+    "hash-table",
+    "generalized-set!",
+    "applicable-hash-table"
+  ],
+  "description": "Generalized set! over hash-table application."
+}

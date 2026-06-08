@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "values"
+  ],
+  "description": "sort! comparator returning zero values should follow s7 comparator truth behavior.",
+  "expected_to_fail_candidate": true
+}

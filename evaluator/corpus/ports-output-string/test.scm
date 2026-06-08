@@ -1,0 +1,7 @@
+(let ((p (open-output-string)))
+  (display 'hello p)
+  (display #\space p)
+  (write '(a "b" 3) p)
+  (newline p)
+  (display "done" p)
+  (get-output-string p))

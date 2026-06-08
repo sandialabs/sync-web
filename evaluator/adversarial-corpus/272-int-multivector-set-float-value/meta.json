@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "values",
+    "vector",
+    "multivector"
+  ],
+  "description": "int multivector set! should reject real non-integer values.",
+  "expected_to_fail_candidate": true
+}

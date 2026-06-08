@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "reader"
+  ],
+  "description": "reader should report the s7 element position for invalid typed multivector elements.",
+  "expected_to_fail_candidate": true
+}

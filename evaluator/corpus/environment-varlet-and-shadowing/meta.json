@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "inlet",
+    "sublet",
+    "varlet",
+    "shadowing",
+    "generalized-set!"
+  ],
+  "description": "Environment varlet insertion, child shadowing, and parent mutation through child lookup."
+}

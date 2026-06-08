@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash",
+    "macro"
+  ],
+  "description": "hash-table-ref should apply/expand macro values with all extra arguments, not only one.",
+  "expected_to_fail_candidate": true
+}

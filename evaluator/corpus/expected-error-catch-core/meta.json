@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "errors-catch",
+  "features": [
+    "expected-errors",
+    "wrong-type-arg",
+    "arity-error",
+    "unbound-variable",
+    "catch"
+  ],
+  "description": "Caught expected errors for core wrong-type, arity, and unbound variable cases."
+}

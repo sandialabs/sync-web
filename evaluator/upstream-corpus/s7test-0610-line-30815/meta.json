@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 30815,
+  "source_form": "(test (catch #t (lambda () (set! (_not_a_pws_) 1)) (lambda (typ info) (apply format #f info))) \"unbound variable _not_a_pws_ in (set! (_not_a_pws_) 1)\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

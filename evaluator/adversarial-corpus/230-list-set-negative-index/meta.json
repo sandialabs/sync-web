@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "list"
+  ],
+  "description": "list-set! negative index should be out-of-range, not mutate first element.",
+  "expected_to_fail_candidate": true
+}

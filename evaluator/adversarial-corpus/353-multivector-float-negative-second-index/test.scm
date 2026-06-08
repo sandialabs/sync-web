@@ -1,0 +1,1 @@
+((make-float-vector (list 2 2 2) 1.0) 1 -1)

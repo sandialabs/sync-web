@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "strings",
+  "features": [
+    "strings",
+    "string-mutation",
+    "substring",
+    "string-append"
+  ],
+  "description": "String mutation and common string operations."
+}

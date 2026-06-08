@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multivector"
+  ],
+  "description": "multidimensional vector-ref out of range should be Scheme error, not Rust panic.",
+  "expected_to_fail_candidate": true
+}

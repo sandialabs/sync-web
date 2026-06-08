@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port"
+  ],
+  "description": "get-output-string should reject input ports.",
+  "expected_to_fail_candidate": true
+}

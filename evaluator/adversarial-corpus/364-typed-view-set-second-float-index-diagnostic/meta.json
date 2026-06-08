@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "diagnostic",
+    "set",
+    "vector",
+    "multivector"
+  ],
+  "description": "generalized set! through typed multivector view should report vector-set! third-argument index diagnostic.",
+  "expected_to_fail_candidate": true
+}

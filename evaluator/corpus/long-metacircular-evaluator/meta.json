@@ -1,0 +1,18 @@
+{
+  "status": "required",
+  "category": "long-programs",
+  "features": [
+    "metacircular-evaluator",
+    "lexical-closures",
+    "recursive-functions",
+    "define",
+    "set!",
+    "begin",
+    "if",
+    "quote",
+    "primitive-application",
+    "environment-mutation",
+    "alist-frames"
+  ],
+  "description": "A compact metacircular evaluator for a small Scheme subset, exercising realistic interpreter-shaped code under the sync-web s7 profile."
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "byte-vector"
+  ],
+  "description": "Reader should reject byte-vector literal elements outside unsigned-byte range.",
+  "expected_to_fail_candidate": true
+}

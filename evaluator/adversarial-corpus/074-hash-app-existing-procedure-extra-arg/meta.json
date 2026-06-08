@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash"
+  ],
+  "description": "Applicable hash-table should not implicitly call an existing procedure value with extra argument if s7 rejects it.",
+  "expected_to_fail_candidate": true
+}

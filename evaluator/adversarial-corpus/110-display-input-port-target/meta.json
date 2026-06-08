@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port"
+  ],
+  "description": "display to an input port should be rejected with port type error.",
+  "expected_to_fail_candidate": true
+}

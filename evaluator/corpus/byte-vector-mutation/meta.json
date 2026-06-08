@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "byte-vectors",
+  "features": [
+    "byte-vector",
+    "generalized-set!",
+    "copy",
+    "length"
+  ],
+  "description": "Byte-vector application, mutation, length, and copy."
+}

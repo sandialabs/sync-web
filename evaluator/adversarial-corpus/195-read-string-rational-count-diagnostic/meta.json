@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "string",
+    "port"
+  ],
+  "description": "read-string rational count diagnostic should report ratio, not real.",
+  "expected_to_fail_candidate": true
+}

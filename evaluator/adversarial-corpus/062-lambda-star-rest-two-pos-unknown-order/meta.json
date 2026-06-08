@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* :rest should preserve positional rest items before unknown keyword pairs.",
+  "expected_to_fail_candidate": true
+}

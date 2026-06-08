@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15945,
+  "source_form": "(test (let ((x '(car (list 1 2 3)))) (set! (x 0) x) (eval `(let () (define (f1) ,x) (catch #t f1 (lambda a 'error))))) 'error)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

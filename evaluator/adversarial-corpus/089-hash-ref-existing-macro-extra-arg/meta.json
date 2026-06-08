@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash"
+  ],
+  "description": "hash-table-ref extra argument applied to macro values should match s7 expansion/eval behavior.",
+  "expected_to_fail_candidate": true
+}

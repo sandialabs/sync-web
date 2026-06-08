@@ -1,0 +1,10 @@
+{
+  "status": "nice-to-have",
+  "category": "vectors",
+  "features": [
+    "multidimensional-vectors",
+    "vector-dimensions",
+    "generalized-set!"
+  ],
+  "description": "s7 multidimensional vector behavior; useful but may be deferrable if sync-web does not need it."
+}

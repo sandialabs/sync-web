@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "byte multivector set should enforce byte range.",
+  "expected_to_fail_candidate": true
+}

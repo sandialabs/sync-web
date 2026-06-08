@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "remainder by zero should produce s7 division-by-zero error, not bare tag.",
+  "expected_to_fail_candidate": true
+}

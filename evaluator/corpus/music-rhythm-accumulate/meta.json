@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "music-structure",
+  "features": [
+    "recursion",
+    "numeric-list-processing",
+    "reverse"
+  ],
+  "description": "Accumulate rhythmic durations into onset times."
+}

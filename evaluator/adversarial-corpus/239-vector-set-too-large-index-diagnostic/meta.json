@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "vector-set! too-large index diagnostic should match s7.",
+  "expected_to_fail_candidate": true
+}

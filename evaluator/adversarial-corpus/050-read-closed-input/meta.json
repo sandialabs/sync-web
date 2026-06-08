@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "ports"
+  ],
+  "description": "read on a closed input port should be an error, not EOF.",
+  "expected_to_fail_candidate": true
+}

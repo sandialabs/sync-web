@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "byte-vector",
+    "fill"
+  ],
+  "description": "fill! byte-vector unspecified value diagnostic should identify the unspecified object.",
+  "expected_to_fail_candidate": true
+}

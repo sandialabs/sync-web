@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "multidimensional vector-ref negative index should report negative, not too large.",
+  "expected_to_fail_candidate": true
+}

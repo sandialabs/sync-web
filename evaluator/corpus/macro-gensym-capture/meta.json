@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "macros",
+  "features": [
+    "define-macro",
+    "gensym",
+    "hygiene-by-convention",
+    "generalized-set!"
+  ],
+  "description": "Macro-generated temporary avoids capture via gensym."
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15725,
+  "source_form": "(test (let ((x '(1 2 3)))\n\t(set! (x 0) (cons x 2))\n\t(eval (list-values 'let () (list-values 'define '(f1) (list-values 'list-set! x 0 (list-values 'cons x 2))) '(catch #t f1 (lambda a 'error)))))\n      'error)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

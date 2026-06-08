@@ -1,0 +1,10 @@
+{
+  "category": "string",
+  "tags": [
+    "benchmark",
+    "string",
+    "allocation"
+  ],
+  "description": "Repeated string append and symbol conversion pressure.",
+  "scale": "5000 appends"
+}

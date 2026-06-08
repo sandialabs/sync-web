@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port"
+  ],
+  "description": "Setting port-position negative should be out-of-range, not clamp to zero.",
+  "expected_to_fail_candidate": true
+}

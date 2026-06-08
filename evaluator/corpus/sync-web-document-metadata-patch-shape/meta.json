@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "sync-web-shape",
+  "features": [
+    "metadata-patch",
+    "alist",
+    "nothing-sentinel"
+  ],
+  "description": "Pure document metadata patch semantics shape."
+}

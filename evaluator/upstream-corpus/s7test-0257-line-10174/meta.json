@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 10174,
+  "source_form": "(test (catch #t\n       (lambda () (let ((L1 (list 1))) (list-set! L1 3 0)))\n       (lambda (type info) (apply format #f info)))\n      \"list-set! second argument, 3, is out of range (it is too large)\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

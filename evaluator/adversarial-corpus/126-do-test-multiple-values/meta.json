@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "do"
+  ],
+  "description": "do test multiple values should follow s7 truth behavior, not loop forever.",
+  "expected_to_fail_candidate": true
+}

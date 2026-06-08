@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "macros",
+  "features": [
+    "first-class-macros",
+    "macro?",
+    "macro-application"
+  ],
+  "description": "s7 macros are first-class values."
+}

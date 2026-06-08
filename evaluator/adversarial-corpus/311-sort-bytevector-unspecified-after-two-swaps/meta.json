@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "sort",
+    "vector",
+    "byte-vector"
+  ],
+  "description": "byte-vector sort! should preserve s7 partial reorder state when comparator becomes unspecified.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "define with multiple values should be rejected rather than binding a Values object.",
+  "expected_to_fail_candidate": true
+}

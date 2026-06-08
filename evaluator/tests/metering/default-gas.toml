@@ -1,0 +1,21 @@
+# Default gas schedule used by the planned Rust metering tests.
+# The current placeholder candidate does not read this yet; the metered
+# interpreter should load this file via S7_RUST_GAS_CONFIG in tools/run-metering.py.
+
+[eval]
+step = 1
+apply = 1
+special_form = 1
+variable_lookup = 1
+
+[allocation]
+pair = 1
+object = 1
+byte = 0
+
+[primitive.default]
+base = 1
+
+[host.default]
+base = 10
+byte = 1

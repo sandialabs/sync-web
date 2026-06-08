@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "expt zero negative inexact exponent should raise division-by-zero like s7.",
+  "expected_to_fail_candidate": true
+}

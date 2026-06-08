@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "#u1d large element diagnostic should use byte-vector unsigned-byte wording.",
+  "expected_to_fail_candidate": true
+}

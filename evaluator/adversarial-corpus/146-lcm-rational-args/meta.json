@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port"
+  ],
+  "description": "lcm should support rational arguments like s7.",
+  "expected_to_fail_candidate": true
+}

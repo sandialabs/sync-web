@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15932,
+  "source_form": "(test (let ((hi 3))\n\t(let ((e (curlet)))\n\t  (set! hi (curlet))\n\t  (object->string e)))\n      \"#1=(inlet 'hi #2=(inlet 'e #1#))\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

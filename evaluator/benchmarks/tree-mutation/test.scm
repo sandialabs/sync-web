@@ -1,0 +1,13 @@
+(let ((root '()))
+  (define (put al k v)
+    (let ((cell (assoc k al)))
+      (if cell
+          (begin (set-cdr! cell v) al)
+          (cons (cons k v) al))))
+  (define (get al k)
+    (let ((cell (assoc k al)))
+      (if cell (cdr cell) #f)))
+  (let loop ((i 0) (state root))
+    (if (= i 15000)
+        (list (get state 17) (get state 14999) (length state))
+        (loop (+ i 1) (put state i (list i (* i i)))))))

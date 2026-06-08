@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "s7 modulo by zero behavior should not panic.",
+  "expected_to_fail_candidate": true
+}

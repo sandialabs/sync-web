@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "quasiquote",
+    "unquote",
+    "unquote-splicing",
+    "dotted-lists",
+    "nested-quasiquote"
+  ],
+  "description": "Quasiquote/unquote/splicing and dotted-list reader/printer behavior."
+}

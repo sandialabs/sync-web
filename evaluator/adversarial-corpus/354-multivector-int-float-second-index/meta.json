@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "multivector non-integer nested index diagnostics should report the correct argument position.",
+  "expected_to_fail_candidate": true
+}

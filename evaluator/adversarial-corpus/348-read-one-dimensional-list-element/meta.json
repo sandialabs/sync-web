@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch"
+  ],
+  "description": "#1d constants should treat nested lists as elements, not shape errors.",
+  "expected_to_fail_candidate": true
+}

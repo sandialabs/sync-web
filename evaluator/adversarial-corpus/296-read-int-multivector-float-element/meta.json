@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "reader"
+  ],
+  "description": "reader should parse typed multidimensional int vectors and reject real elements.",
+  "expected_to_fail_candidate": true
+}

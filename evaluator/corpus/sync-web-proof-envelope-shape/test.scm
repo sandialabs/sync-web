@@ -1,0 +1,25 @@
+(define (make-proof-envelope path value digest complete?)
+  (list (list 'path path)
+        (list 'value value)
+        (list 'digest digest)
+        (list 'complete? complete?)))
+
+(define (proof-ref proof key fallback)
+  (let ((entry (assoc key proof)))
+    (if entry (cadr entry) fallback)))
+
+(define (merge-proof-shape local remote)
+  (let ((local-complete? (proof-ref local 'complete? #f))
+        (remote-complete? (proof-ref remote 'complete? #f)))
+    (cond (local-complete? local)
+          (remote-complete? remote)
+          (else (make-proof-envelope
+                  (proof-ref local 'path '())
+                  '(unknown)
+                  (list 'merge (proof-ref local 'digest 'none) (proof-ref remote 'digest 'none))
+                  #f)))))
+
+(let ((a (make-proof-envelope '(*state* alice doc) #u(1 2) 'd1 #f))
+      (b (make-proof-envelope '(*state* alice doc) '(unknown) 'd2 #f))
+      (c (make-proof-envelope '(*state* alice doc) #u(1 2) 'd3 #t)))
+  (list (merge-proof-shape a b) (merge-proof-shape a c)))

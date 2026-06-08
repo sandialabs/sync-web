@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "smoke",
+  "features": [
+    "literals",
+    "symbols",
+    "keywords",
+    "strings",
+    "numbers"
+  ],
+  "description": "Basic literal values and printed representation."
+}

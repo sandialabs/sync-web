@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* :rest before a defaulted formal should let the default see the full rest list.",
+  "expected_to_fail_candidate": true
+}

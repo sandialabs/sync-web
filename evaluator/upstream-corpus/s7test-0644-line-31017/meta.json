@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 31017,
+  "source_form": "(test (catch #t  ; t_c_function branch in implicit_index\n        (lambda () (apply (list cons cons) (catch #t (lambda () (+ 1 #\\a)) (lambda (type info) (list 1 2)))))\n        (lambda (y i) y))\n  'wrong-number-of-args)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

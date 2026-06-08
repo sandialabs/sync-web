@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "message-dispatch",
+    "closures",
+    "stateful-object",
+    "case",
+    "rest-args",
+    "mutation"
+  ],
+  "description": "Small closure-based object protocol resembling sync-web record method dispatch style."
+}

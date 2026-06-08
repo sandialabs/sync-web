@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "int-vector"
+  ],
+  "description": "int multivector partial application should return an int-vector view, not generic vector.",
+  "expected_to_fail_candidate": true
+}

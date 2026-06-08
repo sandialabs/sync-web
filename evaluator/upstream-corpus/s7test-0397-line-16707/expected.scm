@@ -1,0 +1,1 @@
+(upstream-test 16707 (value "make-hash-table: in the third argument, (#<lambda (x)> . integer?), (the key/value type checkers) the first function is anonymous") (value "make-hash-table: in the third argument, (#<lambda (x)> . integer?), (the key/value type checkers) the first function is anonymous") #t)

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port"
+  ],
+  "description": "newline closed-output diagnostic should match s7 arity/argument shape.",
+  "expected_to_fail_candidate": true
+}

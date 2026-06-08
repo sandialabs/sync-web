@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "float-vector-set! non-real value diagnostic should match s7.",
+  "expected_to_fail_candidate": true
+}

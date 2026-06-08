@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "control",
+  "features": [
+    "cond",
+    "case",
+    "do"
+  ],
+  "description": "Core control forms used by realistic Scheme code."
+}

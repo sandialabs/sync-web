@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "reader",
+    "vector",
+    "int-vector"
+  ],
+  "description": "typed #i1d reader should diagnose nil element as int-vector element type error.",
+  "expected_to_fail_candidate": true
+}

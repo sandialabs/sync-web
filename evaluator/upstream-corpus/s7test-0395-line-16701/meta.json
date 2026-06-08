@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16701,
+  "source_form": "(test (catch #t (lambda () (make-hash-table 8 eq? #t)) (lambda (type info) (apply format #f info)))\n        \"make-hash-table third argument, #t, is boolean but should be either #f or (cons key-type-check value-type-check)\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

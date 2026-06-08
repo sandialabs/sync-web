@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "eval",
+  "features": [
+    "eval",
+    "environments",
+    "define"
+  ],
+  "description": "Eval in root/current and explicit environments."
+}

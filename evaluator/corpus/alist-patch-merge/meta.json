@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "alist",
+    "recursion",
+    "metadata-patch-shape",
+    "nothing"
+  ],
+  "description": "Metadata patch-like alist update pattern resembling document metadata logic."
+}

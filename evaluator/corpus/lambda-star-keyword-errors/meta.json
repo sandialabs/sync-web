@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "lambda-star",
+  "features": [
+    "lambda*",
+    "keyword-errors",
+    "allow-other-keys",
+    "catch"
+  ],
+  "description": "lambda* keyword/arity edge cases, with errors caught where applicable."
+}

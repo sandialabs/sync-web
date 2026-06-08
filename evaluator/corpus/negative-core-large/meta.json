@@ -1,0 +1,14 @@
+{
+  "status": "required",
+  "category": "negative",
+  "features": [
+    "expected-errors",
+    "wrong-type",
+    "bounds",
+    "arity",
+    "reader-errors",
+    "eval-errors",
+    "catch"
+  ],
+  "description": "Large caught-negative suite covering many core failure modes without failing the corpus run."
+}

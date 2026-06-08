@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "diagnostic",
+    "set",
+    "vector",
+    "multivector"
+  ],
+  "description": "byte multidimensional vector-set! second index should be reported as argument 3.",
+  "expected_to_fail_candidate": true
+}

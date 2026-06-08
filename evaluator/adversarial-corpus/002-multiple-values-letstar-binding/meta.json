@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "Multiple values in let* binding diagnostics.",
+  "expected_to_fail_candidate": true
+}

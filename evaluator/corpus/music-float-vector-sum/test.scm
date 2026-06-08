@@ -1,0 +1,8 @@
+(let ((v (make-float-vector 8 0.0)))
+  (do ((i 0 (+ i 1)))
+      ((= i (length v)))
+    (float-vector-set! v i (/ i 2.0)))
+  (let ((sum 0.0))
+    (do ((i 0 (+ i 1)))
+        ((= i (length v)) (list v sum))
+      (set! sum (+ sum (float-vector-ref v i))))))

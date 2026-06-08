@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "int-vector",
+    "reader"
+  ],
+  "description": "reader should collapse #i1d constants to int-vectors like s7.",
+  "expected_to_fail_candidate": true
+}

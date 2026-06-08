@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "Multiple values assigned through generalized set! should be rejected.",
+  "expected_to_fail_candidate": true
+}

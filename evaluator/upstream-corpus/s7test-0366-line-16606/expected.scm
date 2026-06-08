@@ -1,0 +1,1 @@
+(upstream-test 16606 (value "(hash-table-ref (hash-table 'a 1) 'b 2) becomes (#f 2), but #f can't take arguments") (value "(hash-table-ref (hash-table 'a 1) 'b 2) becomes (#f 2), but #f can't take arguments") #t)

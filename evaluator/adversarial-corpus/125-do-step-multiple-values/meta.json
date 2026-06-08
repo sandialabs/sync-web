@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "do"
+  ],
+  "description": "do step expressions returning multiple values should error, not loop forever.",
+  "expected_to_fail_candidate": true
+}

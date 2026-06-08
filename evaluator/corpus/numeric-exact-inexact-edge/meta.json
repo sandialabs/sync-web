@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "numbers",
+  "features": [
+    "exact-inexact",
+    "rounding",
+    "complex"
+  ],
+  "description": "Numeric exactness, rounding, and complex accessors."
+}

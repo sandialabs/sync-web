@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "pairs-mutation",
+  "features": [
+    "cyclic-list",
+    "shared-structure",
+    "set-cdr!",
+    "eq?"
+  ],
+  "description": "Create cyclic and shared pair structures without printing the cycle itself."
+}

@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "macros",
+  "features": [
+    "define-macro",
+    "macro-expansion",
+    "quasiquote",
+    "set!"
+  ],
+  "description": "Basic macro definition and expansion."
+}

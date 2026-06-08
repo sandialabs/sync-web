@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* with only :rest should treat keyword-looking arguments as rest data, not unknown-key errors.",
+  "expected_to_fail_candidate": true
+}

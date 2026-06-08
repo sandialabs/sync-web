@@ -1,0 +1,11 @@
+{
+  "category": "quasiquote",
+  "tags": [
+    "benchmark",
+    "quasiquote",
+    "list",
+    "allocation"
+  ],
+  "description": "Quasiquote/unquote-heavy structured list construction.",
+  "scale": "20000 constructed nodes"
+}

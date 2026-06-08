@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "port"
+  ],
+  "description": "make-vector dimension diagnostic should report symbol type.",
+  "expected_to_fail_candidate": true
+}

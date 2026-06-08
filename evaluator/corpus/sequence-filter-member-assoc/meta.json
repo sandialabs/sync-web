@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "sequences",
+  "features": [
+    "member",
+    "memq",
+    "assoc",
+    "manual-filter",
+    "alist"
+  ],
+  "description": "Common list search/filter helpers."
+}

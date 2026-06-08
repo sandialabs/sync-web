@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-shape",
+  "features": [
+    "authorization-shape",
+    "paths",
+    "symbols",
+    "prefix-check"
+  ],
+  "description": "Pure shape of interface path authorization logic without sync primitives."
+}

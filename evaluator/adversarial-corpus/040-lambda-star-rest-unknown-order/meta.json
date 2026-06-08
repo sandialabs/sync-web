@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* :rest should preserve s7 rest argument ordering around unknown keywords and following positional args.",
+  "expected_to_fail_candidate": true
+}

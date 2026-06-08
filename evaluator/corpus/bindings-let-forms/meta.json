@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "bindings",
+  "features": [
+    "let",
+    "let*",
+    "named-let",
+    "recursion"
+  ],
+  "description": "Core binding forms and named-let recursion."
+}

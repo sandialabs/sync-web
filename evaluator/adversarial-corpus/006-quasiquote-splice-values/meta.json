@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "Quasiquote unquote-splicing with multiple values should match s7 error.",
+  "expected_to_fail_candidate": true
+}

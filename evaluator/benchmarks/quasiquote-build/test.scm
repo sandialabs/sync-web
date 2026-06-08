@@ -1,0 +1,7 @@
+(define (make-node i)
+  `(node (id ,i) (left ,(- i 1)) (right ,(+ i 1)) (payload ,(list i (* i i)))))
+(let loop ((i 0) (acc '()))
+  (if (= i 20000)
+      (let ((x (car acc)))
+        (list (car x) (length acc) (cadr (cadr x))))
+      (loop (+ i 1) (cons (make-node i) acc))))

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* rest/default order should preserve s7 rest binding behavior.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "port"
+  ],
+  "description": "int-vector constructor should report ratio type for rational elements.",
+  "expected_to_fail_candidate": true
+}

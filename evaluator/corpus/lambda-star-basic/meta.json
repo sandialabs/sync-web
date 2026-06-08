@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "lambda-star",
+  "features": [
+    "lambda*",
+    "define*",
+    "keywords",
+    "optional-args"
+  ],
+  "description": "s7 optional and keyword argument behavior."
+}

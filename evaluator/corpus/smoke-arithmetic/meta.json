@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "smoke",
+  "features": [
+    "numbers",
+    "arithmetic",
+    "comparison"
+  ],
+  "description": "Basic arithmetic and numeric comparisons."
+}

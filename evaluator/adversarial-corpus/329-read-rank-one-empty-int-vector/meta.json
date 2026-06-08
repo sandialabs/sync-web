@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "#i1d empty constant should read as an empty int-vector.",
+  "expected_to_fail_candidate": true
+}

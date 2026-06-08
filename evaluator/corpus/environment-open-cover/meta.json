@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "openlet",
+    "coverlet",
+    "let-set!"
+  ],
+  "description": "Open/cover environment operations and printed result shape."
+}

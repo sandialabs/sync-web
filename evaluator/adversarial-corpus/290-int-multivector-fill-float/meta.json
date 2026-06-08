@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "fill"
+  ],
+  "description": "fill! on int multivectors should reject real fill values.",
+  "expected_to_fail_candidate": true
+}

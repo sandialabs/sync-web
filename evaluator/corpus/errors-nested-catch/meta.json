@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "errors-catch",
+  "features": [
+    "catch",
+    "throw",
+    "nested-control"
+  ],
+  "description": "Nested catch/throw tag matching and unwinding."
+}

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multivector"
+  ],
+  "description": "multidimensional vector-ref with fewer indices should return a subvector-like slice.",
+  "expected_to_fail_candidate": true
+}

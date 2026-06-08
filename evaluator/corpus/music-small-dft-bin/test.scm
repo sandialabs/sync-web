@@ -1,0 +1,13 @@
+(define (dft-bin data k)
+  (let* ((n (length data))
+         (real 0.0)
+         (imag 0.0))
+    (do ((i 0 (+ i 1)))
+        ((= i n) (list real imag))
+      (let* ((angle (/ (* -2.0 pi k i) n))
+             (x (data i)))
+        (set! real (+ real (* x (cos angle))))
+        (set! imag (+ imag (* x (sin angle))))))))
+
+(let ((data (float-vector 1.0 0.0 -1.0 0.0)))
+  (list (dft-bin data 0) (dft-bin data 1) (dft-bin data 2)))

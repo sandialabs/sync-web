@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "lambda-star",
+  "features": [
+    "lambda*",
+    "default-args",
+    "keywords",
+    "evaluation-order"
+  ],
+  "description": "lambda* defaults are evaluated left-to-right with earlier defaults in scope."
+}

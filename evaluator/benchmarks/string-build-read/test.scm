@@ -1,0 +1,5 @@
+(let loop ((i 0) (s ""))
+  (if (= i 5000)
+      (let ((roundtrip (symbol->string (string->symbol s))))
+        (list (string-ref s 0) (string-ref roundtrip 1) (string=? s roundtrip)))
+      (loop (+ i 1) (string-append s "abc"))))

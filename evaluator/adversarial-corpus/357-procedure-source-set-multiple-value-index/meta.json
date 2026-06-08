@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "procedure-source",
+    "set"
+  ],
+  "description": "procedure-source generalized set! should handle multiple value indices like s7 list-set!.",
+  "expected_to_fail_candidate": true
+}

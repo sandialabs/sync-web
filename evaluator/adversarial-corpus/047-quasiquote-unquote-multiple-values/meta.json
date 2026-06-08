@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values",
+    "quasiquote"
+  ],
+  "description": "unquote returning multiple values should splice into the quasiquoted list.",
+  "expected_to_fail_candidate": true
+}

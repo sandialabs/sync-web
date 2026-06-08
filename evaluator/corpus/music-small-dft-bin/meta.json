@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "music-dsp",
+  "features": [
+    "float-vector",
+    "applicable-vectors",
+    "sin",
+    "cos",
+    "do",
+    "dft"
+  ],
+  "description": "Tiny DFT-bin computation inspired by s7 FFT examples."
+}

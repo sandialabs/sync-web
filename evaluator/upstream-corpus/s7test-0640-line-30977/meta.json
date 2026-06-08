@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 30977,
+  "source_form": "(test (let ((x (list 1 2))) (let ((y x)) (set! (x 0) (define x (vector 2 3))) (list x y))) '(#(2 3) (#(2 3) 2)))",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

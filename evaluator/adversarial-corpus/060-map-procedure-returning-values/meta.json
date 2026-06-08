@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "map should splice multiple values returned by the mapping procedure.",
+  "expected_to_fail_candidate": true
+}

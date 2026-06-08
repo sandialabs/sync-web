@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16713,
+  "source_form": "(test (catch #t (lambda () (make-hash-table 8 eq? (cons (lambda (a b) a) integer?))) (lambda (type info) (apply format #f info)))\n        \"make-hash-table: in the third argument, (#<lambda (a b)> . integer?), (the key/value type checkers) both functions should take one argument\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

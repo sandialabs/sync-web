@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "hash"
+  ],
+  "description": "hash-table-ref applying int multivectors should report the correct index position/type.",
+  "expected_to_fail_candidate": true
+}

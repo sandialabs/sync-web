@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash",
+    "macro"
+  ],
+  "description": "hash-table-ref applying macro values should preserve macro lexical environment.",
+  "expected_to_fail_candidate": true
+}

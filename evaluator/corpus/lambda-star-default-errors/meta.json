@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "lambda-star",
+  "features": [
+    "lambda*",
+    "default-args",
+    "error",
+    "catch"
+  ],
+  "description": "Required-argument idiom used by sync-web via default error expressions."
+}

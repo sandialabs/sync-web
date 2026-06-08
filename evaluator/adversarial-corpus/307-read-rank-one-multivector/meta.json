@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "#1d constants should read as ordinary vectors, not reject flat contents.",
+  "expected_to_fail_candidate": true
+}

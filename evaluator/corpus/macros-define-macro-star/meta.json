@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "macros",
+  "features": [
+    "define-macro*",
+    "lambda*",
+    "generalized-set!"
+  ],
+  "description": "Macro with lambda* argument handling."
+}

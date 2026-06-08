@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "hash"
+  ],
+  "description": "hash-table-ref applying byte multivectors should preserve too-many-index diagnostics.",
+  "expected_to_fail_candidate": true
+}

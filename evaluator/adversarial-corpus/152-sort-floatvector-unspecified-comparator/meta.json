@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector"
+  ],
+  "description": "float-vector sort! comparator returning unspecified should match s7 no-sort behavior.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,1 @@
+(upstream-test 16713 (value "make-hash-table: in the third argument, (#<lambda (a b)> . integer?), (the key/value type checkers) both functions should take one argument") (value "make-hash-table: in the third argument, (#<lambda (a b)> . integer?), (the key/value type checkers) both functions should take one argument") #t)

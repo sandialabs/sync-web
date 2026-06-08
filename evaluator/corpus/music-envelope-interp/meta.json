@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "music-dsp",
+  "features": [
+    "envelopes",
+    "numeric-loops",
+    "recursion",
+    "ratios"
+  ],
+  "description": "Piecewise-linear envelope interpolation, common in Snd/Common Music style code."
+}

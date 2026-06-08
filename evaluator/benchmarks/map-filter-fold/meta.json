@@ -1,0 +1,8 @@
+{
+  "category": "list",
+  "description": "List construction, map, modulo-heavy filtering, and fold.",
+  "scale": "20000 elements",
+  "tags": [
+    "benchmark"
+  ]
+}

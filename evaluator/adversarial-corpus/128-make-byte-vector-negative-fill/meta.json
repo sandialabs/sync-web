@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "byte-vector"
+  ],
+  "description": "make-byte-vector should reject negative fill byte, not wrap to 255.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list",
+    "vector"
+  ],
+  "description": "make-int-vector with one dimension should print as an int vector, not a generic multidim vector.",
+  "expected_to_fail_candidate": true
+}

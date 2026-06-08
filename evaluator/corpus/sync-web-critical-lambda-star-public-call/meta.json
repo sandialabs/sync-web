@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "lambda*",
+    "keywords",
+    "default-errors",
+    "sync-web-api-shape"
+  ],
+  "description": "Public interface style keyword/default argument handling."
+}

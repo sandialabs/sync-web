@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "with-let",
+    "curlet",
+    "rootlet",
+    "define-in-environment"
+  ],
+  "description": "Evaluate in explicit environment and inspect curlet/rootlet behavior."
+}

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* positional argument after keyword should report parameter-set-twice, not silently bind.",
+  "expected_to_fail_candidate": true
+}

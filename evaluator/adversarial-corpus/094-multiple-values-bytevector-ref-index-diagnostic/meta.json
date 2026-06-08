@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "byte-vector-ref with multiple index values should report too-many-indices out-of-range diagnostic.",
+  "expected_to_fail_candidate": true
+}

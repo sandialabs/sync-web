@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "generalized-set",
+  "features": [
+    "applicable-vector",
+    "applicable-string",
+    "applicable-hash-table",
+    "applicable-environment",
+    "applicable-list",
+    "generalized-set!"
+  ],
+  "description": "Multiple applicable object types and generalized set! in one case."
+}

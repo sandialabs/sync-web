@@ -1,0 +1,11 @@
+{
+  "category": "sort",
+  "tags": [
+    "benchmark",
+    "list",
+    "sort",
+    "procedure"
+  ],
+  "description": "List sorting with Scheme comparator calls.",
+  "scale": "5000 integers"
+}

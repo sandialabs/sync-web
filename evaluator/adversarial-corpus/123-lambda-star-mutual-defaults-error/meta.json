@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "Mutually dependent lambda* defaults should error with s7 undefined-object behavior.",
+  "expected_to_fail_candidate": true
+}

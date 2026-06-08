@@ -1,0 +1,1 @@
+(upstream-test 16639 (value "((inlet) 'a :asdf) becomes (#<undefined> :asdf), but #<undefined> can't take arguments") (value "((inlet) 'a :asdf) becomes (#<undefined> :asdf), but #<undefined> can't take arguments") #t)

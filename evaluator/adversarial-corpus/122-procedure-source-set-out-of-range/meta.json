@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port",
+    "procedure-source"
+  ],
+  "description": "procedure-source out-of-range assignment should report list-set! out-of-range.",
+  "expected_to_fail_candidate": true
+}

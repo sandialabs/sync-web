@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values",
+    "sort"
+  ],
+  "description": "sort! comparator returning multiple values should follow s7 truth behavior.",
+  "expected_to_fail_candidate": true
+}

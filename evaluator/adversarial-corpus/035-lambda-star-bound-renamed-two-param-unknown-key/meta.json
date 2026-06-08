@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star",
+    "diagnostics"
+  ],
+  "description": "Bound lambda* unknown-key diagnostic should not truncate parameter list or depend on names a/b.",
+  "expected_to_fail_candidate": true
+}

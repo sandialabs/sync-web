@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "generalized-set",
+  "features": [
+    "setter",
+    "procedure-setter",
+    "set-car!"
+  ],
+  "description": "Procedure setter participates in generalized set!."
+}

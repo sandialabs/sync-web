@@ -1,0 +1,9 @@
+{
+  "status": "required",
+  "category": "multiple-values",
+  "features": [
+    "multiple-values",
+    "splicing"
+  ],
+  "description": "s7 multiple values splice into caller argument positions."
+}

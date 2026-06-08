@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list",
+    "vector",
+    "byte-vector",
+    "port"
+  ],
+  "description": "make-byte-vector should support one-dimensional dimension lists.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list",
+    "vector"
+  ],
+  "description": "make-float-vector with one dimension should print as a float vector, not #r1d.",
+  "expected_to_fail_candidate": true
+}

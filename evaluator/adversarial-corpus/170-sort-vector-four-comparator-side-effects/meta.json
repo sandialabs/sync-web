@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector"
+  ],
+  "description": "sort! vector length four should match s7 comparator call count.",
+  "expected_to_fail_candidate": true
+}

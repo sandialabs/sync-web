@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "stress",
+  "features": [
+    "closures",
+    "allocation",
+    "lists",
+    "recursion",
+    "gc-stress"
+  ],
+  "description": "Allocation-heavy closure and nested-list stress without relying on explicit gc."
+}

@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-shape",
+  "features": [
+    "proof-envelope",
+    "unknown-sentinel",
+    "alist-shape",
+    "merge-shape"
+  ],
+  "description": "Pure proof envelope and merge decision shape without Merkle/sync primitives."
+}

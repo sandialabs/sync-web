@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "lambda-star",
+  "features": [
+    "lambda*",
+    ":rest",
+    ":allow-other-keys",
+    "keywords"
+  ],
+  "description": "lambda* rest argument and allow-other-keys behavior from s7 docs."
+}

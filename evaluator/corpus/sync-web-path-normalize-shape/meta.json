@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "paths",
+    "recursion",
+    "symbols",
+    "integers"
+  ],
+  "description": "Small path-processing helper resembling flat public path handling."
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "sync-profile"
+  ],
+  "description": "vector-fill! is unbound in the sync-profile C oracle and should not be an extra callable binding.",
+  "expected_to_fail_candidate": true
+}

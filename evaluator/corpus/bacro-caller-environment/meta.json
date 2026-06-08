@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "macros",
+  "features": [
+    "define-bacro",
+    "caller-environment",
+    "define",
+    "quasiquote"
+  ],
+  "description": "Bacro expansion/evaluation can see and affect the caller environment."
+}

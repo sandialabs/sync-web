@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list"
+  ],
+  "description": "applicable list failure should preserve s7 form object, not stringify it.",
+  "expected_to_fail_candidate": true
+}

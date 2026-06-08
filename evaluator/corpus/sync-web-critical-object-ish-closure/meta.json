@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "closures",
+    "environments",
+    "generalized-set!",
+    "message-dispatch",
+    "errors"
+  ],
+  "description": "Small object-protocol pattern resembling sync-web record object dispatch."
+}

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "procedure-source"
+  ],
+  "description": "procedure-source applicable rational index should use list-ref integer diagnostic.",
+  "expected_to_fail_candidate": true
+}

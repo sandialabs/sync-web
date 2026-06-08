@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15088,
+  "source_form": "(test (let ((lst (list 1)))\n\t(set! (car lst) lst)\n\t(set! (cdr lst) lst)\n\t(equal? (car lst) (cdr lst)))\n      #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

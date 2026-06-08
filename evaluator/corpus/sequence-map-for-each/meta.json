@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sequences",
+  "features": [
+    "map",
+    "for-each",
+    "apply",
+    "mutation"
+  ],
+  "description": "Common higher-order sequence functions with side effects."
+}

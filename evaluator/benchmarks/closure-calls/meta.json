@@ -1,0 +1,11 @@
+{
+  "category": "closure",
+  "tags": [
+    "benchmark",
+    "procedure",
+    "closure",
+    "environment"
+  ],
+  "description": "Closure allocation/capture followed by repeated closure calls.",
+  "scale": "200000 iterations, 3 closure calls each"
+}

@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "line-comments",
+    "block-comments",
+    "datum-comments"
+  ],
+  "description": "Reader skips line, block, and datum comments."
+}

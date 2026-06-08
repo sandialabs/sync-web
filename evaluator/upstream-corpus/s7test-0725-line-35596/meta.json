@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 35596,
+  "source_form": "(test (let ((f1 (lambda (x) (values x (+ x 1)))) (f2 (lambda () (values 2)))) (+ (f1 3) (* 2 (f2)))) 11)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

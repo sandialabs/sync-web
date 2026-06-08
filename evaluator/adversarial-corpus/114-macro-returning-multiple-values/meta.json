@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values",
+    "macro"
+  ],
+  "description": "Macros returning multiple values should splice/evaluate like s7.",
+  "expected_to_fail_candidate": true
+}

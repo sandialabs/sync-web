@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "numeric"
+  ],
+  "description": "sort! comparator non-#f numeric return should match s7 ordering behavior.",
+  "expected_to_fail_candidate": true
+}

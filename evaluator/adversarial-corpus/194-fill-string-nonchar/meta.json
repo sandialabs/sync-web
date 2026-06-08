@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "string"
+  ],
+  "description": "fill! on string value must be character, not silently space-fill.",
+  "expected_to_fail_candidate": true
+}

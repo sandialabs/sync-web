@@ -1,0 +1,1 @@
+((wrong-type-arg ("~A ~:D argument, ~S, is ~A but should be ~A" + 2 a "a symbol" "a number")) (wrong-type-arg ("~A argument, ~S, is ~A but should be ~A" car () "nil" "a pair")) (wrong-number-of-args ("~S: not enough arguments: ((~S ~S ...)~{~^ ~S~})" ((lambda (x) x)) lambda (x) ())) (unbound-variable ("unbound variable ~S" y)))

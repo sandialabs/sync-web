@@ -1,0 +1,6 @@
+(let* ((h (hash-table))
+       (v (vector (list 1 2) (copy "xy"))))
+  (set! (h 'v) v)
+  (set! (((h 'v) 0) 1) 99)
+  (set! (((h 'v) 1) 0) #\Q)
+  (list (h 'v) ((h 'v) 0) ((h 'v) 1)))

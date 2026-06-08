@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash"
+  ],
+  "description": "hash-table-ref should not implicitly call an existing procedure value with the default argument.",
+  "expected_to_fail_candidate": true
+}

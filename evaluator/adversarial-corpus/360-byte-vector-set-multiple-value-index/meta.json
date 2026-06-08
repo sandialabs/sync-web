@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "byte-vector",
+    "set"
+  ],
+  "description": "generalized byte-vector set! should diagnose multiple-value indices like s7 vector-set!.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash",
+    "macro"
+  ],
+  "description": "hash-table-ref should pass all extra arguments to rest macros stored as values.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "escaped-symbols",
+    "string-escapes",
+    "unicode-strings"
+  ],
+  "description": "Escaped symbols, empty symbol, string escapes, and Unicode string printing."
+}

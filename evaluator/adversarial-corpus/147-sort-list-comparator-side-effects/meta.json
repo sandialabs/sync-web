@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort"
+  ],
+  "description": "sort! should not add extra comparator side effects or skip sorting lists.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "case",
+    "message-dispatch",
+    "rest-args",
+    "apply"
+  ],
+  "description": "Message dispatch style common in sync-web object protocols."
+}

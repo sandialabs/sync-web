@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "music-dsp",
+  "features": [
+    "float-vector",
+    "closures",
+    "modulo",
+    "stateful-generator"
+  ],
+  "description": "Simple circular-buffer delay line."
+}

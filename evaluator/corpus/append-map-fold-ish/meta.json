@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sequences",
+  "features": [
+    "recursion",
+    "map",
+    "apply",
+    "append"
+  ],
+  "description": "Semi-realistic list processing helper and multi-list map."
+}

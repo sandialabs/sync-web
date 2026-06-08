@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "Multiple defaults after :rest should see the full rest list and earlier default values.",
+  "expected_to_fail_candidate": true
+}

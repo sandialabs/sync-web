@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "reader",
+    "vector",
+    "multivector"
+  ],
+  "description": "typed int multivector reader should report correct flattened element position.",
+  "expected_to_fail_candidate": true
+}

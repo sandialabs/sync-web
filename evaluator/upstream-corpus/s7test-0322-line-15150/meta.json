@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15150,
+  "source_form": "(test (let ((h1 (make-hash-table 11))\n\t    (old-print-length (*s7* 'print-length)))\n\t(set! (*s7* 'print-length) 32)\n\t(hash-table-set! h1 \"hi\" h1)\n\t(let ((result (object->string h1)))\n\t  (set! (*s7* 'print-length) old-print-length)\n\t  (let ((val (string=? result \"#1=(hash-table \\\"hi\\\" #1#)\")))\n\t    (unless val\n\t      (format #t \";hash display:~%  ~A~%\" result))\n\t    val)))\n      #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

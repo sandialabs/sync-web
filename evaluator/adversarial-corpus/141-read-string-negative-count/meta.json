@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "read-string negative count should be out-of-range, not read all input.",
+  "expected_to_fail_candidate": true
+}

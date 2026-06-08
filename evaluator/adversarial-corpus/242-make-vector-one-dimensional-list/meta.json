@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list",
+    "vector"
+  ],
+  "description": "make-vector with a one-element dimension list should collapse to a normal vector like s7.",
+  "expected_to_fail_candidate": true
+}

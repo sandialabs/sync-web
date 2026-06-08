@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "multivector view set! index must be integer.",
+  "expected_to_fail_candidate": true
+}

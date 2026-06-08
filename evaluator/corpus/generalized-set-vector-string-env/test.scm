@@ -1,0 +1,10 @@
+(let ((v (vector 1 2 3))
+      (s (copy "abc"))
+      (e (inlet 'x 1)))
+  (set! (v 1) 20)
+  (set! (s 2) #\Z)
+  (set! (e 'x) 99)
+  (list
+    (list 'vector v)
+    (list 'string s)
+    (list 'env-x (e 'x))))

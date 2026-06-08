@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 35393,
+  "source_form": "(test (let () (define (call-func func arg1 arg2) (define (call) (func arg1 arg2)) (call)) (call-func + 1 2.5) (call-func - 5 2)) 3)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

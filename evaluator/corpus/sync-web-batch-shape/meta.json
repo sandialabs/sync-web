@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "alist",
+    "map",
+    "quoted-api-shape",
+    "byte-vectors"
+  ],
+  "description": "Manipulate gateway/interface-style query alists containing paths and byte-vectors."
+}

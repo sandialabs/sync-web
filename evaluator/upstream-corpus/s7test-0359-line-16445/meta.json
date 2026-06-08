@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16445,
+  "source_form": "(test (catch #t\n        (lambda ()\n          (let-temporarily (((*s7* 'print-length) 123123))\n            (+ 1 #())\n            323))\n        (lambda (type info) 'catch1))\n      'catch1)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

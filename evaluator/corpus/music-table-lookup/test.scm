@@ -1,0 +1,11 @@
+(define (table-lookup table phase)
+  (let* ((len (length table))
+         (pos (* phase (- len 1)))
+         (i (floor pos))
+         (frac (- pos i))
+         (a (table i))
+         (b (table (min (+ i 1) (- len 1)))))
+    (+ a (* frac (- b a)))))
+
+(let ((table (float-vector 0.0 1.0 0.0 -1.0 0.0)))
+  (map (lambda (p) (table-lookup table p)) '(0.0 0.125 0.25 0.5 0.75 1.0)))

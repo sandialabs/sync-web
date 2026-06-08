@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "generalized-set",
+  "features": [
+    "generalized-set!",
+    "list-mutation",
+    "set-car!",
+    "set-cdr!"
+  ],
+  "description": "List mutation and list-as-applicable setter behavior."
+}

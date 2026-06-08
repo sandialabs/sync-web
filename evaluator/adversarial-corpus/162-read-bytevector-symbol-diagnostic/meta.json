@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "byte-vector",
+    "vector"
+  ],
+  "description": "Reader byte-vector non-integer diagnostic should match byte-vector constructor.",
+  "expected_to_fail_candidate": true
+}

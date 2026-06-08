@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "environments",
+    "with-let",
+    "set!",
+    "lexical-lookup"
+  ],
+  "description": "Evaluate code in a first-class environment and mutate its bindings."
+}

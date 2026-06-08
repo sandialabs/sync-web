@@ -1,0 +1,14 @@
+{
+  "status": "required",
+  "category": "introspection",
+  "features": [
+    "rootlet",
+    "object->let",
+    "documentation",
+    "signature",
+    "arity",
+    "catch",
+    "introspection"
+  ],
+  "description": "Call object->let across rootlet symbols/current values and summarize returned metadata."
+}

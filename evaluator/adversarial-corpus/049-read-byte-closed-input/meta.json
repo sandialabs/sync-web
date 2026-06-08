@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "ports"
+  ],
+  "description": "read-byte on a closed input port should name read-byte in the error.",
+  "expected_to_fail_candidate": true
+}

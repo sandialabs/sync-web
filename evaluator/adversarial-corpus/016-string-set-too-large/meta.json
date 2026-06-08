@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "Out-of-range string-set! should be Scheme error, not Rust panic.",
+  "expected_to_fail_candidate": true
+}

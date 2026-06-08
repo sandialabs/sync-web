@@ -1,0 +1,8 @@
+(let ((make-counter (lambda (start)
+                      (let ((n start))
+                        (lambda ()
+                          (set! n (+ n 1))
+                          n)))))
+  (let ((a (make-counter 0))
+        (b (make-counter 10)))
+    (list (a) (a) (b) (a) (b))))

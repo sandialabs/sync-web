@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 25035,
+  "source_form": "(test (format #f \"~W\" (let () (define (func) (define _definee_ (dilambda (lambda args args) (lambda c c)))) (func))) \"(dilambda (lambda args args) (lambda c c))\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

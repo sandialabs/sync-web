@@ -1,0 +1,11 @@
+{
+  "category": "environment",
+  "tags": [
+    "benchmark",
+    "environment",
+    "lookup",
+    "loop"
+  ],
+  "description": "Repeated lexical lookup through nested environments.",
+  "scale": "300000 iterations, 5 lexical variables"
+}

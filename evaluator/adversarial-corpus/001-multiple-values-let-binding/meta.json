@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "Multiple values in let binding should raise s7 syntax-error, not generic wrong-type.",
+  "expected_to_fail_candidate": true
+}

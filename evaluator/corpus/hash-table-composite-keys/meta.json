@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "hash-table",
+  "features": [
+    "make-hash-table",
+    "equal?",
+    "composite-keys",
+    "hash-table-entries"
+  ],
+  "description": "Hash table with equal?-based composite keys."
+}

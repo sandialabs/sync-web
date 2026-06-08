@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16675,
+  "source_form": "(test (catch #t (lambda () (set! (when #t 3) 21) ) (lambda (type info) (apply format #f info)))\n      \"when (syntactic) does not have a setter: (set! (when #t 3) 21)\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

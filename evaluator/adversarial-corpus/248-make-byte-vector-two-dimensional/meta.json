@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "list",
+    "vector",
+    "byte-vector",
+    "port"
+  ],
+  "description": "make-byte-vector should support multidimensional dimension lists like s7.",
+  "expected_to_fail_candidate": true
+}

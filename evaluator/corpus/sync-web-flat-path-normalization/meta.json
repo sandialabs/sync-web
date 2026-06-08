@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "sync-web-shape",
+  "features": [
+    "flat-paths",
+    "bridge-paths",
+    "normalization"
+  ],
+  "description": "Flat public path decomposition resembling ledger/interface path handling."
+}

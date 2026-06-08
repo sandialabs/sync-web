@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "values",
+    "vector",
+    "hash"
+  ],
+  "description": "hash-table-ref applying float-vector values should use s7 float-vector-ref too-many-indices diagnostic.",
+  "expected_to_fail_candidate": true
+}

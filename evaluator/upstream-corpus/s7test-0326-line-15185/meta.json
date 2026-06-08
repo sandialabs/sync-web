@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15185,
+  "source_form": "(test (let* ((lst1 (list 1 2))\n\t     (lst2 (list (list (list 1 (list (list (list 2 (list (list (list 3 (list (list (list 4 lst1 5))))))))))))))\n\t(set! (cdr (cdr lst1)) lst1)\n\t(string=? (object->string lst2) \"(((1 (((2 (((3 (((4 #1=(1 2 . #1#) 5))))))))))))\"))\n      #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

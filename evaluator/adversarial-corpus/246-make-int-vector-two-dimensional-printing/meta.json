@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "multidimensional int-vector printing should preserve #i2d prefix.",
+  "expected_to_fail_candidate": true
+}

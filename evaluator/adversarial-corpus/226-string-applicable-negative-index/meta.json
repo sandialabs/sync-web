@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "string"
+  ],
+  "description": "Applicable string negative index should be out-of-range, not null char.",
+  "expected_to_fail_candidate": true
+}

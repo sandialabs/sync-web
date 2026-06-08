@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "vector-ref with multiple values in object position should match s7 argument behavior.",
+  "expected_to_fail_candidate": true
+}

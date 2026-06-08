@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "zero-size multidimensional float-vector printing should preserve #r2d prefix.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,8 @@
+{
+  "category": "tail-call",
+  "description": "Deep tail-recursive numeric loop; stresses tail-call trampoline and arithmetic.",
+  "scale": "1000000 iterations",
+  "tags": [
+    "benchmark"
+  ]
+}

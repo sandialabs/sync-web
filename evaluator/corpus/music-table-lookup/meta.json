@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "music-dsp",
+  "features": [
+    "float-vector",
+    "applicable-vectors",
+    "floor",
+    "interpolation"
+  ],
+  "description": "Interpolated wavetable lookup."
+}

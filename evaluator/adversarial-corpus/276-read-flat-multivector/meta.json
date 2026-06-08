@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "Reader should reject flat data for explicit multidimensional vector constants.",
+  "expected_to_fail_candidate": true
+}

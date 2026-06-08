@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "errors-catch",
+  "features": [
+    "error",
+    "formatting",
+    "catch"
+  ],
+  "description": "Error info shape for formatted error arguments."
+}

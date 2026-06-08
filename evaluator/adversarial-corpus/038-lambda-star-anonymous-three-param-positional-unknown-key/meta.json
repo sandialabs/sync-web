@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star",
+    "diagnostics"
+  ],
+  "description": "Anonymous lambda* positional+unknown-key diagnostic should handle more than two optional params.",
+  "expected_to_fail_candidate": true
+}

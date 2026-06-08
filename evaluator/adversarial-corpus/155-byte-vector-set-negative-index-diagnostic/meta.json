@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "byte-vector",
+    "vector"
+  ],
+  "description": "byte-vector-set! negative index diagnostic should match s7.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "port",
+    "string"
+  ],
+  "description": "make-string symbol fill diagnostic should report symbol type.",
+  "expected_to_fail_candidate": true
+}

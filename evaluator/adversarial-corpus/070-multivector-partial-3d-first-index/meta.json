@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multivector"
+  ],
+  "description": "Partial 3D vector-ref should preserve multidimensional shape, not flatten to a plain vector.",
+  "expected_to_fail_candidate": true
+}

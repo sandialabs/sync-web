@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "substring"
+  ],
+  "description": "substring negative end below start should use s7 out-of-range reason.",
+  "expected_to_fail_candidate": true
+}

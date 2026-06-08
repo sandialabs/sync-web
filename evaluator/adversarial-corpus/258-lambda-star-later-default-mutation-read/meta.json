@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* later default evaluation should not overwrite prior mutation of that binding.",
+  "expected_to_fail_candidate": true
+}

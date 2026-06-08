@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "float-vector",
+    "hash"
+  ],
+  "description": "hash-table-ref applying float-vector views should preserve ref name and index diagnostics.",
+  "expected_to_fail_candidate": true
+}

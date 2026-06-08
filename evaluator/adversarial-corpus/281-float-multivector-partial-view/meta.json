@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "float-vector"
+  ],
+  "description": "float multivector partial application should return a float-vector view, not generic vector.",
+  "expected_to_fail_candidate": true
+}

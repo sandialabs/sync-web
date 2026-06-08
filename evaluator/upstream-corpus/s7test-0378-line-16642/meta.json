@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16642,
+  "source_form": "(test (catch #t (lambda () (let ((L (inlet 'a (inlet 'b 1)))) (L 'a 'b 'c))) (lambda (typ info) (apply format #f info)))\n      \"((inlet 'b 1) 'b 'c) becomes (1 'c), but 1 can't take arguments\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

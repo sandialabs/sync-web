@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multivector"
+  ],
+  "description": "vector-set! with too few multivector indices should use s7 wrong-number diagnostic.",
+  "expected_to_fail_candidate": true
+}

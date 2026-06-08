@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "errors-catch",
+  "features": [
+    "catch",
+    "throw",
+    "error",
+    "formatting"
+  ],
+  "description": "Catch/throw/error observable argument shape."
+}

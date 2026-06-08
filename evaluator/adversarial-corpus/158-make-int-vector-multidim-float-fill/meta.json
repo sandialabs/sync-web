@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector"
+  ],
+  "description": "multidimensional make-int-vector fill must be integer, not truncated real.",
+  "expected_to_fail_candidate": true
+}

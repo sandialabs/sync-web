@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15648,
+  "source_form": "(test (let ((lst (list 1 2 3))\n\t    (ctr 0))\n\t(set! (cdr (cddr lst)) lst)\n\t(for-each (lambda (a b)\n\t\t    (set! ctr (+ ctr (+ a b))))\n\t\t  lst ())\n\tctr)\n      0)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

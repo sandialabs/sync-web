@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "eval",
+  "features": [
+    "eval",
+    "define-macro",
+    "environment",
+    "quasiquote"
+  ],
+  "description": "Eval installs and uses a macro in an explicit first-class environment."
+}

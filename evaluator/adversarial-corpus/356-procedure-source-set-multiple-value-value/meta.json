@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "procedure-source",
+    "set"
+  ],
+  "description": "procedure-source generalized set! should use s7 syntax-error form for multiple value assignment.",
+  "expected_to_fail_candidate": true
+}

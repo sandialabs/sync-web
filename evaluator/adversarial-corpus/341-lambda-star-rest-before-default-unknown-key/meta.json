@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* :rest before formals should treat keyword-looking positional data according to s7 rest/default binding behavior.",
+  "expected_to_fail_candidate": true
+}

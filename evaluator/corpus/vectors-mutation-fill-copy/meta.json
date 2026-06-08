@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "vectors",
+  "features": [
+    "vectors",
+    "mutation",
+    "copy",
+    "fill!"
+  ],
+  "description": "Vector mutation, copy, and fill behavior."
+}

@@ -1,0 +1,14 @@
+{
+  "status": "required",
+  "category": "long-programs",
+  "features": [
+    "collatz",
+    "recursive-sequence-generation",
+    "integer-arithmetic",
+    "range-analysis",
+    "records",
+    "max",
+    "even?"
+  ],
+  "description": "Collatz sequence generator plus length, peak, and record-holder analysis over a range."
+}

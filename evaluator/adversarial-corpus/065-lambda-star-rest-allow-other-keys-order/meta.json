@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* :allow-other-keys with :rest should drop unknown keyword pairs but keep ordinary rest order.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "hash"
+  ],
+  "description": "hash-table-ref applying int-vector values should preserve s7 extra-index diagnostics.",
+  "expected_to_fail_candidate": true
+}

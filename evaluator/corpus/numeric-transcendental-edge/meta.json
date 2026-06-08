@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "numbers",
+  "features": [
+    "sqrt",
+    "complex",
+    "transcendentals",
+    "expt"
+  ],
+  "description": "Transcendental and exponentiation numeric behavior."
+}

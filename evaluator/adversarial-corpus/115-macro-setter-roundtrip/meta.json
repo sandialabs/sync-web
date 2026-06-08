@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "macro"
+  ],
+  "description": "Macro setters should be settable/retrievable like procedure setters.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "hash-table-ref default argument should follow applicable error semantics.",
+  "expected_to_fail_candidate": true
+}

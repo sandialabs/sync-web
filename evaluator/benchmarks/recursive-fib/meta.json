@@ -1,0 +1,11 @@
+{
+  "category": "recursion",
+  "tags": [
+    "benchmark",
+    "procedure",
+    "recursion",
+    "non-tail"
+  ],
+  "description": "Classic non-tail recursive procedure-call workload.",
+  "scale": "fib 24"
+}

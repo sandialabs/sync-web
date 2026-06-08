@@ -1,0 +1,14 @@
+{
+  "status": "required",
+  "category": "numbers",
+  "features": [
+    "integer-arithmetic",
+    "ratios",
+    "quotient",
+    "remainder",
+    "modulo",
+    "gcd",
+    "lcm"
+  ],
+  "description": "Additional numeric operations and ratio printing."
+}

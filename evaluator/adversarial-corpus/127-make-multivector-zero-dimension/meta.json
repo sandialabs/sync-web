@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multivector"
+  ],
+  "description": "Multidimensional vector with zero dimension should print/shape like s7.",
+  "expected_to_fail_candidate": true
+}

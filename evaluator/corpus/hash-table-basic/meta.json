@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "hash-table",
+  "features": [
+    "hash-table",
+    "hash-table-ref",
+    "hash-table-set!",
+    "applicable-hash-table"
+  ],
+  "description": "Hash table construction, mutation, and applicable lookup."
+}

@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "predicates",
+  "features": [
+    "type-of",
+    "predicates",
+    "values"
+  ],
+  "description": "Basic type predicates and s7 type-of output."
+}

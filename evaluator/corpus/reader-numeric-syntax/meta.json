@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "numeric-reader",
+    "ratios",
+    "complex"
+  ],
+  "description": "s7 numeric reader syntax for bases, ratios, and complex values."
+}

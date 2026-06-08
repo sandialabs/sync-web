@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "reader",
+    "vector",
+    "float-vector"
+  ],
+  "description": "typed #r1d reader should diagnose nil element as float-vector element type error.",
+  "expected_to_fail_candidate": true
+}

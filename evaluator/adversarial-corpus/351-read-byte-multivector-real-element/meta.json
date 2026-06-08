@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "reader",
+    "vector",
+    "multivector"
+  ],
+  "description": "typed byte multivector reader should diagnose real element as requiring a byte.",
+  "expected_to_fail_candidate": true
+}

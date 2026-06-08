@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "reader"
+  ],
+  "description": "reader should reject ragged constant multivectors without panicking.",
+  "expected_to_fail_candidate": true
+}

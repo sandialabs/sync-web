@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sequences",
+  "features": [
+    "subvector",
+    "substring",
+    "copy",
+    "float-vector"
+  ],
+  "description": "Subsequence operations across vectors, float-vectors, and strings."
+}

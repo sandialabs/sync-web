@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "vector-set! with multiple values should use s7 wrong-number-of-args diagnostic.",
+  "expected_to_fail_candidate": true
+}

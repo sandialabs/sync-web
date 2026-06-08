@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "int-vector",
+    "hash"
+  ],
+  "description": "hash-table-ref applying int-vector views should preserve too-many-index diagnostics.",
+  "expected_to_fail_candidate": true
+}

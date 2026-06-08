@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 16615,
+  "source_form": "(test (catch #t (lambda () (let ((h (hash-table))) (hash-table-ref h 'a 'asdf))) (lambda (typ info) (apply format #f info)))\n      \"(hash-table-ref (hash-table) 'a 'asdf) becomes (#f 'asdf), but #f can't take arguments\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

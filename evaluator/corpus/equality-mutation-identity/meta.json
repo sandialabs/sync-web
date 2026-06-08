@@ -1,0 +1,12 @@
+{
+  "status": "required",
+  "category": "equality",
+  "features": [
+    "eq?",
+    "eqv?",
+    "equal?",
+    "mutation",
+    "identity"
+  ],
+  "description": "Identity-sensitive mutation and equality family basics."
+}

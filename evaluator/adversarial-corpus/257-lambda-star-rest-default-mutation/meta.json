@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "lambda* defaults should be able to mutate the rest binding before the body.",
+  "expected_to_fail_candidate": true
+}

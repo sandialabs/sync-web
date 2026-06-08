@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "radix-prefixes",
+    "exactness-prefixes",
+    "numeric-reader"
+  ],
+  "description": "Radix and exactness reader prefixes, including combined forms."
+}

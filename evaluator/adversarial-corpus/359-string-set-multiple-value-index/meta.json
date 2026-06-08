@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "set"
+  ],
+  "description": "generalized string set! should diagnose multiple-value indices like s7 string-set!.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "music-dsp",
+  "features": [
+    "closures",
+    "lambda*",
+    "keywords",
+    "sin",
+    "pi",
+    "stateful-generator"
+  ],
+  "description": "Stateful sine oscillator closure with keyword defaults."
+}

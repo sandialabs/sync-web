@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 35733,
+  "source_form": "(test (catch #t\n\t(lambda ()\n\t  (let ((x (vector 1)))\n\t    (set! (x 0) (values 1 2))))\n\t(lambda (type info)\n\t  (apply format #f info)))\n      \"(set! (x 0) (values 1 2)): too many arguments to set!\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

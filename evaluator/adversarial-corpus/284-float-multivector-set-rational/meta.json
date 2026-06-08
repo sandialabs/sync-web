@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector"
+  ],
+  "description": "float multivector set should coerce rational values to real floats like s7.",
+  "expected_to_fail_candidate": true
+}

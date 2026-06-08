@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 5103,
+  "source_form": "(test (let ((sym000000000000000000000 3))\n\t(let ((sym000000000000000000001 4))\n\t  (+ sym000000000000000000000 sym000000000000000000001)))\n      7)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

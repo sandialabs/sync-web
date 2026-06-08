@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "reader"
+  ],
+  "description": "reader should reject dotted rows in constant multivectors with s7 read-error.",
+  "expected_to_fail_candidate": true
+}

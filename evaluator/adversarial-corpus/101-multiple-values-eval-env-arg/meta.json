@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values",
+    "environment"
+  ],
+  "description": "eval with multiple values should treat the second value as the environment argument and type-check it.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,1 @@
+(upstream-test 16654 (value "in (set! (h 'b 'asdf) 32), ((hash-table 'b 1) 'b) is 1 which can't take arguments") (value "in (set! (h 'b 'asdf) 32), ((hash-table 'b 1) 'b) is 1 which can't take arguments") #t)

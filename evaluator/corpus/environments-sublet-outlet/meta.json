@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "inlet",
+    "sublet",
+    "outlet",
+    "generalized-set!"
+  ],
+  "description": "Nested first-class environments and outlet lookup/mutation."
+}

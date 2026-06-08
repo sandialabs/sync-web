@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "format",
+  "features": [
+    "format-directives",
+    "iteration",
+    "radix-output"
+  ],
+  "description": "Additional format directives for display/write/radix/iteration/newline."
+}

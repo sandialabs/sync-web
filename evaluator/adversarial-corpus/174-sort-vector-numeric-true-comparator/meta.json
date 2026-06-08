@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector",
+    "numeric"
+  ],
+  "description": "vector sort! should treat any non-#f comparator result as true.",
+  "expected_to_fail_candidate": true
+}

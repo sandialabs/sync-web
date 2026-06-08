@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "funclet",
+    "closures",
+    "let-ref",
+    "let-set!"
+  ],
+  "description": "Inspect and mutate a closure's captured environment."
+}

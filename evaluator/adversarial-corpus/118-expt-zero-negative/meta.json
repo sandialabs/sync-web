@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "expt 0 negative should be division-by-zero error, not +inf.0.",
+  "expected_to_fail_candidate": true
+}

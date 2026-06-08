@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": ":allow-other-keys in lambda* must be the last parameter.",
+  "expected_to_fail_candidate": true
+}

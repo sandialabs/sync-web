@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "hash"
+  ],
+  "description": "hash-table-ref into float multivector should report float-vector-ref third-argument diagnostic for second index.",
+  "expected_to_fail_candidate": true
+}

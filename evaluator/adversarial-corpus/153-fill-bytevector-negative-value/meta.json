@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "byte-vector",
+    "vector"
+  ],
+  "description": "fill! on byte-vector should reject negative unsigned-byte values.",
+  "expected_to_fail_candidate": true
+}

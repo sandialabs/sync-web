@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "errors-catch",
+  "features": [
+    "reader-errors",
+    "open-input-string",
+    "read",
+    "catch"
+  ],
+  "description": "Caught reader error shapes from malformed input strings."
+}

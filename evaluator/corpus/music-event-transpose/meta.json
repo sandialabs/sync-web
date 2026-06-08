@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "music-structure",
+  "features": [
+    "alist",
+    "map",
+    "event-transform",
+    "symbols"
+  ],
+  "description": "Common Music-style symbolic event transformation over alists."
+}

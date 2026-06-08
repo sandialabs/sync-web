@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "multiple-values"
+  ],
+  "description": "hash-table-set! with multiple values should use s7 arity diagnostic.",
+  "expected_to_fail_candidate": true
+}

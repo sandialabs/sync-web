@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "lambda-star",
+  "features": [
+    "named-let*",
+    "keywords",
+    "recursion"
+  ],
+  "description": "s7 named let* uses lambda* argument semantics including keywords."
+}

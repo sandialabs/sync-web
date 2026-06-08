@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector"
+  ],
+  "description": "sort! comparator result 0 is true in Scheme and should sort vectors.",
+  "expected_to_fail_candidate": true
+}

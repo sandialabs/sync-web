@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "lambda-star"
+  ],
+  "description": "Required formal after :rest should bind from the corresponding argument per s7.",
+  "expected_to_fail_candidate": true
+}

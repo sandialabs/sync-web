@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "sort",
+    "vector"
+  ],
+  "description": "vector sort! should handle comparator multiple values after earlier swaps like s7.",
+  "expected_to_fail_candidate": true
+}

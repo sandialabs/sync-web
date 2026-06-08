@@ -1,0 +1,1 @@
+(upstream-test 16669 (value "in (set! (L 'a :asdf) 32), ((inlet) 'a) is #<undefined> which can't take arguments") (value "in (set! (L 'a :asdf) 32), ((inlet) 'a) is #<undefined> which can't take arguments") #t)

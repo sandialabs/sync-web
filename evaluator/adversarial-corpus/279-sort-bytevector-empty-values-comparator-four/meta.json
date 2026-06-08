@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "sort",
+    "vector",
+    "byte-vector"
+  ],
+  "description": "byte-vector sort! should handle zero-value comparator results like s7.",
+  "expected_to_fail_candidate": true
+}

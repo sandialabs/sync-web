@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort"
+  ],
+  "description": "sort! should honor comparator for float-vectors.",
+  "expected_to_fail_candidate": true
+}

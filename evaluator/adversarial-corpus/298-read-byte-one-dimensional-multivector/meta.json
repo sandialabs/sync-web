@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "multivector",
+    "byte-vector",
+    "reader"
+  ],
+  "description": "reader should collapse #u1d constants to byte-vectors like s7.",
+  "expected_to_fail_candidate": true
+}

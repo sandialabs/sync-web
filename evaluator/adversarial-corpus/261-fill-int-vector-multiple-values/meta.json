@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "vector",
+    "fill",
+    "multiple-values"
+  ],
+  "description": "fill! with multiple values on int-vector should follow s7 value propagation behavior.",
+  "expected_to_fail_candidate": true
+}

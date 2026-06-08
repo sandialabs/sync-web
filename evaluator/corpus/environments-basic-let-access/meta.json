@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "environments",
+  "features": [
+    "environments",
+    "inlet",
+    "let-ref",
+    "let-set!",
+    "varlet",
+    "applicable-environments"
+  ],
+  "description": "First-class environment access and mutation."
+}

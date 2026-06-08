@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "values"
+  ],
+  "description": "sort! must actually call comparator and handle zero-values comparator result for arbitrary length-5 list input.",
+  "expected_to_fail_candidate": true
+}

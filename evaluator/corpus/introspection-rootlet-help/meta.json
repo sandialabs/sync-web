@@ -1,0 +1,13 @@
+{
+  "status": "required",
+  "category": "introspection",
+  "features": [
+    "rootlet",
+    "help",
+    "documentation",
+    "signature",
+    "catch",
+    "introspection"
+  ],
+  "description": "Call help/documentation/signature across rootlet bindings and summarize results."
+}

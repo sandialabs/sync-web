@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "reader-printer",
+  "features": [
+    "quote",
+    "quasiquote",
+    "unquote",
+    "unquote-splicing"
+  ],
+  "description": "Quote and quasiquote behavior needed by macro-heavy code."
+}

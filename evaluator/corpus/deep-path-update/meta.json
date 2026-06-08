@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "sync-web-critical",
+  "features": [
+    "paths",
+    "recursive-update",
+    "alist",
+    "byte-vectors"
+  ],
+  "description": "Small recursive path update over alist tree, analogous to tree/object update shape."
+}

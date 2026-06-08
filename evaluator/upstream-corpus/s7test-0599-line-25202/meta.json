@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 25202,
+  "source_form": "(test (object->string\n       (inlet 'a (let ((iter (make-iterator (float-vector 1 2 3)))) (iter) iter)) :readable)\n      \"(inlet :a (let ((iter (make-iterator #r(1.0 2.0 3.0)))) (iter) iter))\")",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

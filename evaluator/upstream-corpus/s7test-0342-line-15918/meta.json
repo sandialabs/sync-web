@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 15918,
+  "source_form": "(test (let ((v1 (make-vector 16 0))\n\t    (v2 (make-vector 16 0)))\n\t(set! (v2 12) v2)\n\t(set! (v1 12) v1)\n\t(equal? v1 v2))        ; hmmm -- not sure this is correct\n      #t)",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

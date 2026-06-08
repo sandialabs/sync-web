@@ -1,0 +1,10 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch"
+  ],
+  "description": "macroexpand on anonymous macro-looking form should match s7 syntax error.",
+  "expected_to_fail_candidate": true
+}

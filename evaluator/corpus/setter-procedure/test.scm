@@ -1,0 +1,5 @@
+(let ((box (list 0)))
+  (define (get-box) (car box))
+  (set! (setter get-box) (lambda (val) (set-car! box val)))
+  (set! (get-box) 123)
+  (list (get-box) box))

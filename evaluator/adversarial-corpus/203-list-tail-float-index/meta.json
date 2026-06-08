@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "list"
+  ],
+  "description": "list-tail index must be an integer, not truncated real.",
+  "expected_to_fail_candidate": true
+}

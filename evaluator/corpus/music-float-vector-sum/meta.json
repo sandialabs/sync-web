@@ -1,0 +1,11 @@
+{
+  "status": "required",
+  "category": "music-dsp",
+  "features": [
+    "float-vector",
+    "do",
+    "mutation",
+    "numeric-loop"
+  ],
+  "description": "Float-vector fill and accumulation pattern from DSP/vector code."
+}

@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "hash"
+  ],
+  "description": "hash-table-ref should reject too many extra args for string values.",
+  "expected_to_fail_candidate": true
+}

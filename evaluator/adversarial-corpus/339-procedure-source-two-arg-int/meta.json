@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "procedure-source"
+  ],
+  "description": "procedure-source applied to extra argument should report s7 cant-take-arguments syntax error.",
+  "expected_to_fail_candidate": true
+}

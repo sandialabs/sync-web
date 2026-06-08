@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "list"
+  ],
+  "description": "make-float-vector should support multidimensional float vectors.",
+  "expected_to_fail_candidate": true
+}

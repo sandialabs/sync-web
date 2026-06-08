@@ -1,0 +1,10 @@
+{
+  "status": "required",
+  "category": "format",
+  "features": [
+    "format",
+    "strings",
+    "printer"
+  ],
+  "description": "String formatting used by errors and diagnostics."
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "upstream-s7test-isolated",
+  "source": "/home/tdinh/projects/miscellaneous/s7/s7test.scm",
+  "source_line": 10189,
+  "source_form": "(test (let ((tree1 (list ''a (list ''b ''c))) (tree2 (list ''a (list ''b ''c)))) tree2) '('a ('b 'c)))",
+  "features": [
+    "upstream-s7test",
+    "isolated-assertion"
+  ],
+  "notes": "Imported only if the C oracle passes the isolated assertion."
+}

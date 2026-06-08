@@ -1,0 +1,14 @@
+{
+  "status": "required",
+  "category": "long-programs",
+  "features": [
+    "towers-of-hanoi",
+    "recursive-generation",
+    "state-simulation",
+    "alist-update",
+    "validation",
+    "append",
+    "error-paths"
+  ],
+  "description": "Recursive Towers of Hanoi move generator plus state simulator and legality/final-state validation."
+}

@@ -1,0 +1,5 @@
+(let ((v (vector 1 2 3 4)))
+  (vector-set! v 2 99)
+  (let ((w (copy v)))
+    (fill! w 7)
+    (list v w (length v))))

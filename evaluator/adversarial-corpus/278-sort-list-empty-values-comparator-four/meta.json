@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "sort"
+  ],
+  "description": "sort! should treat zero values from comparator like s7 on longer lists.",
+  "expected_to_fail_candidate": true
+}

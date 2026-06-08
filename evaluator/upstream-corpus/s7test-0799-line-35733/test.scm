@@ -1,0 +1,24 @@
+;; Imported from upstream s7test.scm line 35733.
+;; Original form:
+;; (test (catch #t
+;; 	(lambda ()
+;; 	  (let ((x (vector 1)))
+;; 	    (set! (x 0) (values 1 2))))
+;; 	(lambda (type info)
+;; 	  (apply format #f info)))
+;;       "(set! (x 0) (values 1 2)): too many arguments to set!")
+
+(define (upstream-safe thunk)
+  (catch #t
+    (lambda () (list 'value (thunk)))
+    (lambda args (list 'error args))))
+
+(let* ((actual (upstream-safe (lambda () (catch #t
+	(lambda ()
+	  (let ((x (vector 1)))
+	    (set! (x 0) (values 1 2))))
+	(lambda (type info)
+	  (apply format #f info))))))
+       (expected (upstream-safe (lambda () "(set! (x 0) (values 1 2)): too many arguments to set!")))
+       (ok? (equal? actual expected)))
+  (list 'upstream-test 35733 actual expected ok?))
