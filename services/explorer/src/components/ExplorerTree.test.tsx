@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitForElementToBeRemoved } from '@testing-library/react';
 import ExplorerTree from './ExplorerTree';
 import { JournalService } from '../services/JournalService';
 
@@ -23,7 +23,7 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="stage"
-        rootPath={[['*state*']]}
+        rootPath={['*state*']}
         selected={null}
         expandedNodes={new Set()}
         journalService={mockJournalService}
@@ -48,7 +48,7 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="stage"
-        rootPath={[['*state*']]}
+        rootPath={['*state*']}
         selected={null}
         expandedNodes={new Set()}
         journalService={mockJournalService}
@@ -61,6 +61,34 @@ describe('ExplorerTree', () => {
     expect(await screen.findByText('No local documents yet.')).toBeInTheDocument();
   });
 
+  it('shows per-node loading feedback while expanding a directory', async () => {
+    let resolveChildren: (value: Array<{ name: string; type: 'value' }>) => void = () => {};
+    (mockJournalService.getDirectoryEntries as jest.Mock)
+      .mockResolvedValueOnce([{ name: 'docs', type: 'directory' }])
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveChildren = resolve;
+      }));
+
+    render(
+      <ExplorerTree
+        mode="stage"
+        rootPath={['*state*']}
+        selected={null}
+        expandedNodes={new Set()}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={jest.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('▶'));
+    expect(screen.getByLabelText('Loading docs')).toHaveAttribute('aria-busy', 'true');
+
+    resolveChildren([{ name: 'note.txt', type: 'value' }]);
+    await waitForElementToBeRemoved(() => screen.queryByLabelText('Loading docs'));
+  });
+
   it('emits a selection when a node is clicked', async () => {
     const onSelect = jest.fn();
     (mockJournalService.getDirectoryEntries as jest.Mock).mockResolvedValue([
@@ -70,7 +98,7 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="stage"
-        rootPath={[['*state*']]}
+        rootPath={['*state*']}
         selected={null}
         expandedNodes={new Set()}
         journalService={mockJournalService}
@@ -84,7 +112,7 @@ describe('ExplorerTree', () => {
     fireEvent.click(node);
 
     expect(onSelect).toHaveBeenCalledWith({
-      path: [['*state*', 'draft.txt']],
+      path: ['*state*', 'draft.txt'],
       type: 'file',
     });
   });

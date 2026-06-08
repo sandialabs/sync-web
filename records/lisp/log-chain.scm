@@ -36,13 +36,16 @@
            (modifier (if (= (- (cadr domain) (car domain)) (expt 2 level)) 0 1))
            (offset (modulo index (expt 2 level))))
       (let loop-1 ((node (self '(1 1))) (depth 1))
-        (if (= depth level)
-            (let loop-2 ((node (sync-car node)) (depth (- depth modifier)) (offset offset))
-              (if (= depth 0) node
-                  (if (< offset (expt 2 (- depth 1)))
-                      (loop-2 (sync-car node) (- depth 1) (modulo offset (expt 2 (- depth 1))))
-                      (loop-2 (sync-cdr node) (- depth 1) (modulo offset (expt 2 (- depth 1)))))))
-            (loop-1 (sync-cdr node) (+ depth 1))))))
+        (cond ((or (sync-stub? node) (not (sync-pair? node))) '(unknown))
+              ((= depth level)
+               (let loop-2 ((node (sync-car node)) (depth (- depth modifier)) (offset offset))
+                 (cond ((or (sync-stub? node) (and (> depth 0) (not (sync-pair? node)))) '(unknown))
+                       ((= depth 0) node)
+                       ((< offset (expt 2 (- depth 1)))
+                        (loop-2 (sync-car node) (- depth 1) (modulo offset (expt 2 (- depth 1)))))
+                       (else
+                        (loop-2 (sync-cdr node) (- depth 1) (modulo offset (expt 2 (- depth 1))))))))
+              (else (loop-1 (sync-cdr node) (+ depth 1)))))))
 
   (define-method (previous self index)
     ;; Build a proof chain ending at index.
@@ -258,4 +261,4 @@
     ;;     integer: normalized index.
     (let ((index (if (< index 0) (+ size index) index)))
       (if (and (>= index 0) (< index size)) index
-          (error 'index-error "Index is out of bounds")))))
+          (error 'index-error "Index is out of bounds: ~S" index)))))

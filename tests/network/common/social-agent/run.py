@@ -160,8 +160,6 @@ def acquire_api_token(nodes):
             logger.info("API token acquired for %s", NODE_NAME)
             return
         except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code < 500:
-                raise
             logger.warning("API token acquisition failed (%s), retrying in %ds", e, delay)
         except requests.RequestException as e:
             logger.warning("API token acquisition failed (%s), retrying in %ds", e, delay)
@@ -171,6 +169,22 @@ def acquire_api_token(nodes):
 
 def is_indexed_path(path):
     return bool(path) and isinstance(path, list) and path[0] == -1
+
+
+def text_to_byte_vector(text):
+    return {"*type/byte-vector*": text.encode("utf-8").hex()}
+
+
+def byte_vector_text(value):
+    if not isinstance(value, dict):
+        return None
+    hex_text = value.get("*type/byte-vector*")
+    if not isinstance(hex_text, str):
+        return None
+    try:
+        return bytes.fromhex(hex_text).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
 
 
 def format_log_value(value, limit=LOG_VALUE_LIMIT):
@@ -437,6 +451,8 @@ def call(nodes, operation, arguments=None, client_id=None):
                     "pinned?": False,
                     "proof?": False,
                 }
+                if "expression?" in arguments:
+                    body["expression?"] = arguments["expression?"]
 
         url = f"{local_gateway_base(nodes)}/{effective_operation}"
 
@@ -486,14 +502,29 @@ def run(nodes, edges):
 
     acquire_api_token(nodes)
 
-    for peer_node in edges.get(NODE_NAME, []):
+    for edge in edges.get(NODE_NAME, []):
+        if isinstance(edge, dict):
+            peer_node = edge["node"]
+            bridge_mode = edge.get("mode", "pull")
+        else:
+            peer_node = edge
+            bridge_mode = "pull"
         peer_router_host = nodes[peer_node]["router_host"]
         while result := call(
             nodes,
             "bridge",
             {
                 "name": peer_node,
-                "interface": {"*type/string*": f"http://{peer_router_host}/api/v1/journal/interface"},
+                "info-local": {
+                    "interface": {"*type/string*": f"http://{peer_router_host}/api/v1/journal/interface"},
+                    "policy": (
+                        {"publish": "push", "subscribe": "none"}
+                        if bridge_mode == "push"
+                        else {"publish": "none", "subscribe": "pull"}
+                    ),
+                    "role": "publisher" if bridge_mode == "push" else False,
+                    "remote-name": NODE_NAME,
+                },
             },
             client_id="setup",
         ):
@@ -512,8 +543,8 @@ def run(nodes, edges):
             nodes,
             "set",
             {
-                "path": [["*state*", "admin", "data", f"key-{i}"]],
-                "value": {"*type/string*": " ".join(choice(WORDS, NUM_WORDS))},
+                "path": ["*state*", "admin", "data", f"key-{i}"],
+                "value": text_to_byte_vector(" ".join(choice(WORDS, NUM_WORDS))),
             },
             client_id="setup",
         )
@@ -529,11 +560,12 @@ def run(nodes, edges):
                 while choice(2) and edges.get(node_name):
                     if not edges.get(node_name):
                         break
-                    node_name = choice(edges[node_name])
+                    edge = choice(edges[node_name])
+                    node_name = edge["node"] if isinstance(edge, dict) else edge
                     traversal.append(node_name)
-                    path += [-1, ["*bridge*", node_name, "chain"]]
+                    path += [-1, "*bridge*", node_name]
 
-                path += [-1, ["*state*", "admin", "data", f"key-{randint(0, size)}"]]
+                path += [-1, "*state*", "admin", "data", f"key-{randint(0, size)}"]
 
                 if len(traversal) > 1:
                     METRICS.record_inferred_hops(
@@ -543,28 +575,38 @@ def run(nodes, edges):
                 if choice(2):
                     total_requests += 1
                     result = call(nodes, "get", {"path": path}, client_id=client_id)
+                    text = byte_vector_text(result)
 
-                    if type(result) is not dict or "*type/string*" not in result:
+                    if text is None:
                         logger.warning("Cannot complete action")
                         return
                     successful_requests += 1
 
-                    words = result["*type/string*"].split(" ")
-                    words[randint(0, NUM_WORDS)] = choice(WORDS)
+                    words = text.split(" ")
+                    if not words:
+                        logger.warning("Cannot complete action")
+                        return
+                    words[randint(0, len(words) - 1)] = choice(WORDS)
 
                     total_requests += 1
                     set_result = call(
                         nodes,
                         "set",
                         {
-                            "path": [["*state*", "admin", "data", f"key-{randint(0, size)}"]],
-                            "value": {"*type/string*": " ".join(words)},
+                            "path": ["*state*", "admin", "data", f"key-{randint(0, size)}"],
+                            "value": text_to_byte_vector(" ".join(words)),
                         },
                         client_id=client_id,
                     )
                     if set_result is True:
                         successful_requests += 1
                 else:
+                    if "*bridge*" in path:
+                        total_requests += 1
+                        target = call(nodes, "get", {"path": path}, client_id=client_id)
+                        if target in (["nothing"], ["unknown"]):
+                            return
+                        successful_requests += 1
                     total_requests += 1
                     pin_result = call(nodes, "pin", {"path": path}, client_id=client_id)
                     if pin_result is not True:

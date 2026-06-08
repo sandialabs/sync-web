@@ -228,10 +228,20 @@ impl Evaluator {
         unsafe {
             unsafe {
                 // execute query and return
+                let handler = concat!(
+                    "(let* ((type (car x)) ",
+                    "(data (if (pair? (cdr x)) (cadr x) '())) ",
+                    "(message (catch #t ",
+                    "(lambda () (if (and (pair? data) (string? (car data))) ",
+                    "(apply format (cons #f data)) ",
+                    "(object->string data))) ",
+                    "(lambda args (object->string data))))) ",
+                    "`(error ',type ,message ((data ,data))))",
+                );
                 let wrapped = CString::new(format!(
                     "(catch #t (lambda () (eval (read (open-input-string \"{}\")))) (lambda x {}))",
                     code.replace("\\", "\\\\").replace("\"", "\\\""),
-                    "`(error ',(car x) ,(apply format (cons #f (cadr x))))",
+                    handler,
                 ))
                 .expect("failed to create CString for evaluation");
                 let s7_obj = s7_eval_c_string(self.sc, wrapped.as_ptr());
@@ -853,7 +863,7 @@ unsafe fn is_proper_assoc_list(sc: *mut s7_scheme, obj: s7_pointer) -> bool {
     }
 }
 
-static REMOVE: [&'static CStr; 84] = [
+static REMOVE: [&'static CStr; 83] = [
     c"*autoload*",
     c"*autoload-hook*",
     c"*cload-directory*",
@@ -928,7 +938,6 @@ static REMOVE: [&'static CStr; 84] = [
     c"require",
     c"s7-optimize",
     c"set-current-error-port",
-    c"stacktrace",
     c"unlet",
     c"with-baffle",
     c"with-input-from-file",

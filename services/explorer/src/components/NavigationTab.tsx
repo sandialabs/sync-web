@@ -15,26 +15,12 @@ interface NavigationTabProps {
 const buildChildPath = (parentPath: JournalPath, itemName: string): JournalPath => {
   const lastSegment = parentPath[parentPath.length - 1];
 
-  if (!Array.isArray(lastSegment)) {
-    return parentPath;
+  if (lastSegment === '*bridge*') {
+    return [...parentPath, itemName, -1];
   }
 
-  const segmentType = lastSegment[0];
-
-  if (segmentType === '*bridge*') {
-    if (lastSegment.length === 1) {
-      // Listing bridges - create bridge chain path
-      return [...parentPath.slice(0, -1), ['*bridge*', itemName, 'chain'], -1];
-    }
-    if (lastSegment.length === 3) {
-      // Already in bridge's chain
-      return [...parentPath, -1, ['*bridge*', itemName, 'chain'], -1];
-    }
-  }
-
-  if (segmentType === '*state*') {
-    // In a state directory - extend the state segment
-    return [...parentPath.slice(0, -1), ['*state*', ...lastSegment.slice(1), itemName]];
+  if (parentPath.includes('*state*')) {
+    return [...parentPath, itemName];
   }
 
   return parentPath;
@@ -76,14 +62,14 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
         id: 'local-state',
         label: 'state',
         type: 'directory',
-        path: [['*state*']],
+        path: ['*state*'],
         isLocal: true,
       },
       {
         id: 'bridges',
         label: 'bridge',
         type: 'directory',
-        path: [appState.rootIndex, ['*bridge*']],
+        path: [appState.rootIndex, '*bridge*'],
         isLocal: false,
       },
     ];
@@ -106,17 +92,9 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
   };
 
   const isBridgeChainNode = (path: JournalPath): boolean => {
-    if (path.length < 2) return false;
-    
+    if (path.length < 3) return false;
     const lastSegment = path[path.length - 1];
-    const previousSegment = path[path.length - 2];
-    
-    return (
-      typeof lastSegment === 'number' &&
-      Array.isArray(previousSegment) &&
-      previousSegment[0] === '*bridge*' &&
-      previousSegment.length === 3
-    );
+    return typeof lastSegment === 'number' && path[path.length - 3] === '*bridge*';
   };
 
   const createBridgeChainChildren = (node: TreeNode): TreeNode[] => [
@@ -125,7 +103,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
       label: 'state',
       type: 'directory',
       valueType: 'directory',
-      path: [...node.path, ['*state*']],
+      path: [...node.path, '*state*'],
       isLocal: false,
     },
     {
@@ -133,7 +111,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
       label: 'bridge',
       type: 'directory',
       valueType: 'directory',
-      path: [...node.path, ['*bridge*']],
+      path: [...node.path, '*bridge*'],
       isLocal: false,
     },
   ];
@@ -211,19 +189,14 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
     const fileName = prompt('Enter file name:');
     if (!fileName) return;
 
-    const lastSegment = node.path[node.path.length - 1];
-    
-    if (!Array.isArray(lastSegment) || lastSegment[0] !== '*state*') {
+    if (!node.path.includes('*state*')) {
       return;
     }
 
-    const filePath: JournalPath = [
-      ...node.path.slice(0, -1), 
-      ['*state*', ...lastSegment.slice(1), fileName]
-    ];
+    const filePath: JournalPath = [...node.path, fileName];
 
     try {
-      await journalService.set(filePath, { '*type/string*': '' });
+      await journalService.set(filePath, JournalService.textToByteVector(''));
       await loadChildren(node);
     } catch (error) {
       alert(`Failed to add file: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -236,20 +209,15 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
     const dirName = prompt('Enter directory name:');
     if (!dirName) return;
 
-    const lastSegment = node.path[node.path.length - 1];
-    
-    if (!Array.isArray(lastSegment) || lastSegment[0] !== '*state*') {
+    if (!node.path.includes('*state*')) {
       return;
     }
 
     // Create a dummy file inside the new directory to mark it as a directory
-    const dirMarkerPath: JournalPath = [
-      ...node.path.slice(0, -1), 
-      ['*state*', ...lastSegment.slice(1), dirName, '*directory*']
-    ];
+    const dirMarkerPath: JournalPath = [...node.path, dirName, '*directory*'];
 
     try {
-      await journalService.set(dirMarkerPath, true);
+      await journalService.set(dirMarkerPath, JournalService.textToByteVector(''));
       await loadChildren(node);
     } catch (error) {
       alert(`Failed to add directory: ${error instanceof Error ? error.message : 'Unknown error'}`);

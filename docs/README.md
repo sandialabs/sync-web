@@ -17,7 +17,7 @@ Everything lives in [sandialabs/sync-web](https://github.com/sandialabs/sync-web
 | `journal/` | Rust journal-sdk: HTTP server, S7 Scheme evaluator, RocksDB persistence |
 | `records/` | Scheme record logic: `root`, `standard`, `tree`, `chain`, `ledger`, `interface` |
 | `services/` | Web services: `gateway`, `router`, `explorer`, `workbench`, `file-system` |
-| `deploy/` | Docker Compose deployment config for a single-node stack |
+| `deploy/` | Compose-compatible deployment config for a single-node stack |
 | `tests/` | Smoke tests (`api/`), load tests (`load/`), network tests (`network/`) |
 | `docs/` | Documentation site (Astro/Starlight) |
 
@@ -29,3 +29,4 @@ See `deploy/compose/general/README.md` for single-node deployment instructions.
 
 - `tests/api/local-compose.sh smoke` — single-node full-stack smoke test
 - `tests/network/compose/local-compose.sh up` — multi-node social-agent network
+- `docs/development-checks.md` — check matrix and required tools

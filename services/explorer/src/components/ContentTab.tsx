@@ -48,8 +48,7 @@ const ContentTab: React.FC<ContentTabProps> = ({
         proof: response.proof,
       });
       
-      const { value } = JournalService.extractSchemeValue(response.content);
-      setEditValue(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+      setEditValue(JournalService.documentContentToText(response.content));
     } catch (error) {
       setContent({
         path: selectedPath,
@@ -67,14 +66,7 @@ const ContentTab: React.FC<ContentTabProps> = ({
 
     setIsLoading(true);
     try {
-      let valueToSave: any;
-      try {
-        valueToSave = JSON.parse(editValue);
-      } catch {
-        valueToSave = { '*type/string*': editValue };
-      }
-
-      await journalService.set(selectedPath, valueToSave);
+      await journalService.setText(selectedPath, editValue);
       setIsEditing(false);
       // Reload content to show the saved value without resetting the tree
       await loadContent();
@@ -118,7 +110,7 @@ const ContentTab: React.FC<ContentTabProps> = ({
     }
     
     const firstElement = path[0];
-    const isLocal = Array.isArray(firstElement);
+    const isLocal = firstElement === '*state*';
     const isNonStaging = typeof firstElement === 'number';
     const isHistorical = isNonStaging && firstElement < 0;
     
@@ -148,7 +140,7 @@ const ContentTab: React.FC<ContentTabProps> = ({
   const renderContent = () => {
     if (!content) return null;
 
-    const { value: displayContent } = JournalService.extractSchemeValue(content.content);
+    const displayContent = JournalService.documentContentToText(content.content);
 
     // Check for directory content
     const directory = JournalService.parseDirectoryResponse(content.content);
@@ -157,11 +149,11 @@ const ContentTab: React.FC<ContentTabProps> = ({
     }
 
     // Check for special content types
-    if (Array.isArray(displayContent)) {
-      if (displayContent[0] === 'nothing') {
+    if (Array.isArray(content.content)) {
+      if (content.content[0] === 'nothing') {
         return <div className="empty-state">Empty document</div>;
       }
-      if (displayContent[0] === 'unknown') {
+      if (content.content[0] === 'unknown') {
         return <div className="empty-state">Document has been pruned</div>;
       }
     }

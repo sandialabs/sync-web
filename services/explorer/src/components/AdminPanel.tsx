@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { JournalService } from '../services/JournalService';
 import { AdminConfig } from '../types';
 import './AdminPanel.css';
@@ -23,9 +23,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
   const [bridgeName, setBridgeName] = useState('');
   const [bridgeEndpoint, setBridgeEndpoint] = useState('');
   const [windowInput, setWindowInput] = useState('');
+  const windowInputDirtyRef = useRef(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const bridgeEndpointForSharing = `${window.location.origin}/api/v1/journal/interface`;
 
@@ -39,8 +41,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     setError(null);
     try {
       const nextConfig = await journalService.getAdminConfig();
-      setConfig(nextConfig);
-      setWindowInput(nextConfig.windowSize === null ? '' : String(nextConfig.windowSize));
+      setConfig((prev) =>
+        JSON.stringify(prev) === JSON.stringify(nextConfig) ? prev : nextConfig,
+      );
+      const nextWindowInput = nextConfig.windowSize === null ? '' : String(nextConfig.windowSize);
+      if (!windowInputDirtyRef.current) {
+        setWindowInput((prev) => (prev === nextWindowInput ? prev : nextWindowInput));
+      }
+      setHasLoaded(true);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load admin config');
     } finally {
@@ -149,6 +157,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     try {
       await journalService.setWindowSize(nextWindow);
       setConfig((prev) => ({ ...prev, windowSize: nextWindow }));
+      setWindowInput(String(nextWindow));
+      windowInputDirtyRef.current = false;
       setStatus(`Updated window size to ${nextWindow}.`);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not update window size');
@@ -168,7 +178,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !hasLoaded) {
     return (
       <div className="admin-panel">
         <div className="admin-loading">Loading admin controls...</div>
@@ -245,7 +255,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
             min="1"
             step="1"
             value={windowInput}
-            onChange={(event) => setWindowInput(event.target.value)}
+            onChange={(event) => {
+              setWindowInput(event.target.value);
+              windowInputDirtyRef.current = true;
+            }}
             disabled={isSaving}
           />
           <button className="button button-primary" type="submit" disabled={isSaving || !windowInput.trim()}>

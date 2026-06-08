@@ -49,10 +49,9 @@ class HelloWorldUserTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 1)
         path, payload, headers = client.calls[0]
         self.assertEqual(path, "/api/v1/general/set")
-        self.assertEqual(payload["path"], [["*state*", "locust", "key-111"]])
-        self.assertEqual(
-            payload["value"], {"*type/string*": "val-222"}
-        )
+        self.assertEqual(payload["path"], ["*state*", "locust", "key-111"])
+        self.assertEqual(payload["value"], "val-222")
+        self.assertTrue(payload["expression?"])
         self.assertEqual(
             headers, {"Authorization": "Bearer sync-test-token"}
         )

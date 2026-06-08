@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ContentTab from './ContentTab';
 import { JournalService } from '../services/JournalService';
 import { AppState } from '../types';
@@ -9,12 +9,19 @@ jest.mock('../services/JournalService', () => ({
   JournalService: {
     parseDirectoryResponse: jest.fn(),
     extractSchemeValue: jest.fn((value) => ({ value, schemeType: null })),
+    documentContentToText: jest.fn((value) => {
+      if (value && typeof value === 'object' && '*type/byte-vector*' in value) {
+        return value['*type/byte-vector*'] === '48656c6c6f20576f726c64' ? 'Hello World' : 'content';
+      }
+      return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    }),
   },
 }));
 
 const mockJournalService = {
   get: jest.fn(),
   set: jest.fn(),
+  setText: jest.fn(),
   pin: jest.fn(),
   unpin: jest.fn(),
 } as unknown as JournalService;
@@ -34,6 +41,12 @@ describe('ContentTab', () => {
     jest.clearAllMocks();
     // Reset the mock to default behavior
     (JournalService.extractSchemeValue as jest.Mock).mockImplementation((value) => ({ value, schemeType: null }));
+    (JournalService.documentContentToText as jest.Mock).mockImplementation((value) => {
+      if (value && typeof value === 'object' && '*type/byte-vector*' in value) {
+        return value['*type/byte-vector*'] === '48656c6c6f20576f726c64' ? 'Hello World' : 'content';
+      }
+      return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    });
     (JournalService.parseDirectoryResponse as jest.Mock).mockReturnValue(null);
   });
 
@@ -54,11 +67,11 @@ describe('ContentTab', () => {
 
   it('should load and display content when path is selected', async () => {
     const appState = createAppState({
-      selectedPath: [['*state*', 'test']],
+      selectedPath: ['*state*', 'test'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({
-      content: { '*type/string*': 'Hello World' },
+      content: { '*type/byte-vector*': '48656c6c6f20576f726c64' },
       'pinned?': null,
       proof: {},
     });
@@ -76,14 +89,15 @@ describe('ContentTab', () => {
       />
     );
 
-    await waitFor(() => {
-      expect(screen.getByText('Hello World')).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
     });
+    expect(screen.getByText('Hello World')).toBeInTheDocument();
   });
 
   it('should display directory contents', async () => {
     const appState = createAppState({
-      selectedPath: [['*state*']],
+      selectedPath: ['*state*'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({
@@ -115,11 +129,11 @@ describe('ContentTab', () => {
 
   it('should show edit button for local paths', async () => {
     const appState = createAppState({
-      selectedPath: [['*state*', 'test']],
+      selectedPath: ['*state*', 'test'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({
-      content: { '*type/string*': 'editable content' },
+      content: { '*type/byte-vector*': '6564697461626c6520636f6e74656e74' },
       'pinned?': null,
       proof: {},
     });
@@ -144,11 +158,11 @@ describe('ContentTab', () => {
 
   it('should show pin button for non-local versioned paths', async () => {
     const appState = createAppState({
-      selectedPath: [-1, ['*peer*', 'alice', 'chain'], -1, ['*state*', 'test']],
+      selectedPath: [-1, '*bridge*', 'alice', -1, '*state*', 'test'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({
-      content: { '*type/string*': 'peer content' },
+      content: { '*type/byte-vector*': '7065657220636f6e74656e74' },
       'pinned?': null,
       proof: {},
     });
@@ -173,11 +187,11 @@ describe('ContentTab', () => {
 
   it('should handle pin action', async () => {
     const appState = createAppState({
-      selectedPath: [-1, ['*state*', 'test']],
+      selectedPath: [-1, '*state*', 'test'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({
-      content: { '*type/string*': 'content' },
+      content: { '*type/byte-vector*': '636f6e74656e74' },
       'pinned?': null,
       proof: {},
     });
@@ -203,13 +217,13 @@ describe('ContentTab', () => {
     fireEvent.click(screen.getByText('📌 Pin'));
 
     await waitFor(() => {
-      expect(mockJournalService.pin).toHaveBeenCalledWith([-1, ['*state*', 'test']]);
+      expect(mockJournalService.pin).toHaveBeenCalledWith([-1, '*state*', 'test']);
     });
   });
 
   it('should display empty document message', async () => {
     const appState = createAppState({
-      selectedPath: [['*state*', 'empty']],
+      selectedPath: ['*state*', 'empty'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({
@@ -233,7 +247,7 @@ describe('ContentTab', () => {
 
   it('should display pruned document message', async () => {
     const appState = createAppState({
-      selectedPath: [-100, ['*state*', 'old']],
+      selectedPath: [-100, '*state*', 'old'],
     });
 
     (mockJournalService.get as jest.Mock).mockResolvedValue({

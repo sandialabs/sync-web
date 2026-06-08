@@ -51,13 +51,20 @@ run_startup() {
     chain=$( cat "$(resolve_lisp_file log-chain.scm)" )
     tree=$( cat "$(resolve_lisp_file tree.scm)" )
     ledger=$( cat "$(resolve_lisp_file ledger.scm)" )
+    document=$( cat "$(resolve_lisp_file document.scm)" )
     interface=$( cat "$(resolve_lisp_file interface.scm)" )
     admins=$( build_admins_list )
-    expr="($interface $clear_flag \"$SECRET\" \"$SECRET\" $admins $WINDOW $root '$standard '$chain '$tree '$ledger)"
+    interface_url="${INTERFACE:-$SECRET}"
+    journal_name="${JOURNAL_NAME:-$interface_url}"
+    bridge_publish="${BRIDGE_PUBLISH:-push}"
+    bridge_subscribe="${BRIDGE_SUBSCRIBE:-pull}"
+    bridge_policy="((publish $bridge_publish) (subscribe $bridge_subscribe))"
+    config="((clear? $clear_flag) (root-secret \"$SECRET\") (interface-secret \"$SECRET\") (admins $admins) (window $WINDOW) (root $root) (interface \"$interface_url\") (name \"$journal_name\") (push-enabled? #t) (bridge-policy $bridge_policy))"
+    expr="($interface $config '$standard '$chain '$tree '$ledger '$document)"
     if [ "$clear_flag" = "#f" ]; then
         expr="(*eval* \"$SECRET\" $expr)"
     fi
-    RUST_LOG=$RUST_LOG ./journal-sdk -e "$expr" -d database
+    printf '%s' "$expr" | RUST_LOG=$RUST_LOG ./journal-sdk -e - -d database
 }
 
 if [ -d database ] && [ -n "$(find database -mindepth 1 -print -quit 2>/dev/null)" ]; then

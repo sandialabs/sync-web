@@ -104,7 +104,7 @@ describe('NavigationTab', () => {
 
     fireEvent.click(screen.getByText('state'));
 
-    expect(onPathSelect).toHaveBeenCalledWith([['*state*']]);
+    expect(onPathSelect).toHaveBeenCalledWith(['*state*']);
   });
 
   it('should show action buttons on hover for local nodes', async () => {

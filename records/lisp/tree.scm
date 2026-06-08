@@ -63,7 +63,7 @@
                              (sync-cons (sync-cons key value) node))
                             ((and (not (zero? (car bits-new))) (zero? (car bits-old)))
                              (sync-cons node (sync-cons key value)))
-                            (else (error 'logic-error "Missing conditions"))))))))))
+                            (else (error 'logic-error "Missing tree merge condition for key: ~S" key))))))))))
 
   (define-method (~dir-delete self node key)
     ;; Delete key from directory node and collapse empty branches.
@@ -148,7 +148,7 @@
              (sync-cons (recurse (sync-car node-1) (sync-car node-2))
                         (recurse (sync-cdr node-1) (sync-cdr node-2))))
             ((equal? node-1 node-2) node-1)
-            (else (error 'invalid-structure "Cannot merge incompatible structure")))))
+            (else (error 'structure-error "Cannot merge incompatible tree structures: ~S and ~S" node-1 node-2)))))
 
   (define-method (~dir-all self node values?)
     ;; Collect all keys in a directory node and whether it is fully known.
@@ -190,7 +190,7 @@
     ;;     key (any): lookup key.
     ;;   Returns:
     ;;     byte-vector: tagged encoding of key.
-    (cond ((sync-node? key) (error 'invalid-type "Keys cannot be sync nodes"))
+    (cond ((sync-node? key) (error 'type-error "Tree keys cannot be sync nodes: ~S" key))
           ((byte-vector? key) (append #u(0) key))
           (else (append #u(1) (expression->byte-vector key)))))
 
@@ -203,7 +203,7 @@
     (case (bytes 0)
       ((0) (subvector bytes 1))
       ((1) (byte-vector->expression (subvector bytes 1)))
-      (else (error 'invalid-type "Key type encoding not recognized"))))
+      (else (error 'encoding-error "Tree key type encoding not recognized: ~S" (bytes 0)))))
 
   (define-method (~struct-tag self)
     ;; Return the tag used to identify embedded structure nodes.
@@ -251,7 +251,7 @@
         ((struct) (sync-cons ((self '~struct-tag)) value))
         ((bytes) (append #u(0) value))
         ((expr) (append #u(1) (expression->byte-vector value)))
-        (else (error 'value-error "Wrapped tree value type is invalid")))))
+        (else (error 'value-error "Wrapped tree value type is invalid: ~S" type)))))
 
   (define-method (node->obj self node)
     ;; Decode a sync node into the internal wrapped tree-value form.
@@ -265,13 +265,13 @@
              (case (node 0)
                ((0) `(*tree* bytes ,(subvector node 1)))
                ((1) `(*tree* expr ,(byte-vector->expression (subvector node 1))))
-               (else (error 'invalid-type "Type encoding unrecognized"))))
+               (else (error 'encoding-error "Tree value type encoding not recognized: ~S" (node 0)))))
             ((sync-null? node) `(*tree* node ,node))
             ((sync-stub? node) `(*tree* node ,node))
             ((sync-pair? node)
              (if (not (struct? node)) `(*tree* node ,node)
                  `(*tree* struct ,(sync-cdr node))))
-            (else (error 'invalid-type "Invalid value type")))))
+            (else (error 'type-error "Invalid tree value type: ~S" node)))))
 
   (define-method (get self path)
     ;; Get value at path, decoding node types and directory info.
@@ -333,11 +333,11 @@
     ;;   Returns:
     ;;     boolean: #t after mutation.
     (cond ((equal? value '(unknown))
-           (error 'value-error "Value conflicts with key expression '(unknown)"))
+           (error 'value-error "Tree values cannot use reserved value: ~S" value))
           ((and (list? value) (not (null? value)) (eq? (car value) 'directory))
-           (error 'value-error "Value resembles key expression pattern '(directory ..)"))
+           (error 'value-error "Tree values cannot use reserved directory form: ~S" value))
           ((or (procedure? value) (macro? value))
-           (error 'value-error "Cannot write function or macro values into tree data"))
+           (error 'value-error "Cannot write function or macro into tree data: ~S" value))
           ((equal? value '(nothing))
            (set! (self '(1))
                  (let ((path (map (self '~key->bytes) path)))

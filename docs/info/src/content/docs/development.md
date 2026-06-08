@@ -256,7 +256,7 @@ Public API (`ledger.scm`):
 | `config` | `(config self (path '()))` | Return full configuration or a nested configuration path. |
 | `info` | `(info self)` | Return public configuration subset. |
 | `size` | `(size self)` | Return permanent chain length. |
-| `bridge!` | `(bridge! self name interface info)` | Register/update bridge metadata and cached public key. |
+| `bridge!` | `(bridge! self name info-local info-remote)` | Register/update bridge or publication metadata and cached public key. |
 | `get` | `(get self path)` | Read staged content at path. |
 | `set!` | `(set! self path value)` | Stage local state mutation. |
 | `resolve` | `(resolve self path pinned? proof? head)` | Resolve committed content, optionally including pin/proof detail. |
@@ -306,16 +306,18 @@ Use `tests/api/local-compose.sh` when you need to validate the integrated runtim
 - `/workbench`
 - `/docs`
 - `/api/v1/...`
-- the SMB-backed file-system projection
+- the WebDAV-backed file-system projection
 
 Prerequisites:
 
-You need Docker Engine with the `docker compose` plugin and `curl` for route and API checks.
+You need a Compose-compatible container runtime (Docker Compose, Podman Compose, or `podman-compose`) and `curl` for route and API checks.
 
 Run interactive stack (from repo root):
 
 ```bash
-SECRET=password PORT=8192 tests/api/local-compose.sh up
+COMPOSE_PROJECT_NAME=sync-local SECRET=password \
+HTTP_PORT=8192 HTTPS_PORT=8193 \
+tests/api/local-compose.sh up
 ```
 
 Run automated health/smoke checks:
@@ -328,7 +330,7 @@ The smoke script verifies route readiness, key API behavior (for example `size` 
 
 ### Service-Level Tests
 
-`services/explorer` and `services/workbench` include client-side unit tests, and `services/file-system` includes .NET contract tests for filesystem projection behavior.
+`services/explorer` and `services/workbench` include client-side unit tests, and `services/file-system` includes Go tests for WebDAV path projection behavior.
 
 Prerequisites:
 
@@ -350,7 +352,7 @@ npm test
 
 ```bash
 cd services/file-system
-dotnet test tests/FileSystem.Server.Tests/FileSystem.Server.Tests.csproj
+go test ./...
 ```
 
 ### Stress Testing
@@ -385,7 +387,7 @@ Use `tests/network/compose` when you want a local multi-node network with one fu
 
 Prerequisites:
 
-You need Docker Engine with the `docker compose` plugin, Python 3, and `PyYAML` available in the environment where you run the generator.
+You need a Compose-compatible container runtime, Python 3, and `PyYAML` available in the environment where you run the generator.
 
 Build images and generate the stack (from repo root):
 
@@ -416,7 +418,7 @@ Network model:
 - each node gets its own `private-<n>` network
 - all routers and journals join a shared `public` network
 - routers remain the named HTTP boundary between nodes
-- file-system remains the SMB boundary per node
+- file-system remains the WebDAV boundary per node through each router's `/webdav/` route
 - social agents live on `public` and talk through routers
 
 Generated topology artifacts:
@@ -435,7 +437,7 @@ Generated topology artifacts:
 Port allocation:
 
 - router HTTP starts at `8192` and increments by node index
-- SMB uses `445` for node `0`, then `1445`, `1446`, and so on
+- WebDAV is exposed through each router under `/webdav/`
 
 Metrics output:
 

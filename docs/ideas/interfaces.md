@@ -17,26 +17,6 @@ Primary interface for AI agents and coding tools (Claude Code, Cursor, etc.).
 - Auth: Kratos session token or PAT via `X-Session-Token` header
 - Implemented in interpreter service (Rust) alongside MCP; shares the live Scheme eval context
 
-## WebDAV
-
-Filesystem mounting for humans and desktop applications; replaces SMB.
-
-- HTTP-native; simpler than SMB (no dialect negotiation, no NTLM, no handle lifecycle)
-- Auth: Basic Auth over HTTPS → Kratos login → session token; OIDC/passkey users use PATs
-- Implemented in storage service (Go); nginx router proxies `/webdav/`
-- macOS native WebDAV client has aggressive ~30s stat cache; use rclone
-  (`--vfs-cache-mode off`) to bypass it
-- `Content-Length` in PROPFIND: omit rather than guess for values whose size requires a fetch
-
-## S3
-
-Programmatic blob access for pipelines and tools that hardcode S3.
-
-- Maps naturally: bucket → journal root, key → path, ETag → content hash (free)
-- File size limit (~1MB) is coherent; eliminates need for multipart upload
-- Not for large binary assets — those belong in real S3; sync-web stores metadata/references
-- Implemented in storage service (Go) alongside WebDAV
-
 ## SSH / WebSocket REPL
 
 Terminal interface for advanced users and autonomous agents.
@@ -48,16 +28,6 @@ Terminal interface for advanced users and autonomous agents.
 - WebSocket REPL alternative: xterm.js in workbench for browser access; websocat for CLI;
   auth via standard HTTP headers on the upgrade request
 - Implemented in interpreter service (Rust) alongside MCP; shares the live Scheme eval context
-
-## SSE (Server-Sent Events)
-
-Push notifications for connected clients (browser UIs, long-running agents).
-
-- Embedded in gateway; ~30 lines with Fastify raw response API, no library needed
-- Client subscribes with path prefix filter: `GET /api/v1/events?prefix=...`
-- Value included in payload; clients filter further locally without a round-trip
-- `Last-Event-ID` enables catch-up after reconnect; gateway maintains a short ring buffer
-- Webhooks deferred: external systems poll ledger `size` as a cheap change signal for now
 
 ## Web Server
 

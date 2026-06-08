@@ -12,7 +12,7 @@
           "title": "Username",
           "minLength": 3,
           "maxLength": 32,
-          "pattern": "^[a-zA-Z0-9_-]+$",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
           "ory.sh/kratos": {
             "credentials": { "password": { "identifier": true } }
           }

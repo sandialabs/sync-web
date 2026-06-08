@@ -31,6 +31,7 @@ Canonical public paths:
 - `/metrics` -> gateway Prometheus metrics
 - `/explorer` -> explorer UI
 - `/workbench` -> workbench UI
+- `/webdav/` -> file-system WebDAV service
 
 Compatibility/internal path retained for bridge communication:
 - `/interface` -> raw journal Scheme interface

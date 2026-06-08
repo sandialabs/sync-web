@@ -1,4 +1,4 @@
-FROM oryd/kratos:v1.3.1
+FROM docker.io/oryd/kratos:v1.3.1
 
 USER root
 

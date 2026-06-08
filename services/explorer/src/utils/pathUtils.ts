@@ -25,34 +25,41 @@ export const decodeHashToPath = (hash: string): JournalPath | null => {
   }
 };
 
+export const stripLeadingIndex = (path: JournalPath): JournalPath =>
+  typeof path[0] === 'number' ? path.slice(1) : [...path];
+
+export const findLastMarkerIndex = (path: JournalPath, marker: string): number => {
+  for (let i = path.length - 1; i >= 0; i--) {
+    if (path[i] === marker) return i;
+  }
+  return -1;
+};
+
+export const isStagePath = (path: JournalPath): boolean => path[0] === '*state*';
+
 /**
- * Generate expanded nodes set from a path
- * This ensures all parent nodes are expanded so the selected path is visible
+ * Generate expanded nodes set from a path.
+ * This ensures all parent nodes are expanded so the selected path is visible.
  */
 export const generateExpandedNodesFromPath = (path: JournalPath): Set<string> => {
   const expanded = new Set<string>();
-  
-  // Build up partial paths and add them to expanded set
+
   for (let i = 1; i <= path.length; i++) {
-    const partialPath = path.slice(0, i);
-    expanded.add(JSON.stringify(partialPath));
+    expanded.add(JSON.stringify(path.slice(0, i)));
   }
-  
+
   return expanded;
 };
 
 /**
- * Extract the "base" path by removing version numbers, for comparison purposes.
- * This helps determine if we're looking at the same document or a different one.
+ * Extract the marker/key segments without history indices, for comparison purposes.
  */
 export const getBasePath = (path: JournalPath): string => {
-  // Filter out numbers and stringify for comparison
-  const filtered = path.filter(segment => Array.isArray(segment));
-  return JSON.stringify(filtered);
+  return JSON.stringify(path.filter(segment => typeof segment !== 'number'));
 };
 
 /**
- * Build a path with a specific version offset for a given tab index
+ * Build a path with a specific version offset for a given tab index.
  */
 export const buildVersionPath = (
   basePath: JournalPath,
@@ -60,23 +67,18 @@ export const buildVersionPath = (
   versionOffset: number
 ): JournalPath => {
   if (tabIndex === 0) {
-    // For the local journal
-    if (Array.isArray(basePath[0])) {
-      // Path starts with a list (staged) - prepend the version offset
-      return [versionOffset, ...basePath];
-    }
-    // Path already starts with a number - replace it
-    return [versionOffset, ...basePath.slice(1)];
+    return typeof basePath[0] === 'number'
+      ? [versionOffset, ...basePath.slice(1)]
+      : [versionOffset, ...basePath];
   }
 
-  // For bridged journals - update the appropriate index in the path
   const modifiedPath = [...basePath];
-  let bridgeCount = 0;
+  let indexCount = 0;
 
   for (let i = 0; i < modifiedPath.length; i++) {
     if (typeof modifiedPath[i] === 'number') {
-      bridgeCount++;
-      if (bridgeCount === tabIndex + 1) {
+      indexCount++;
+      if (indexCount === tabIndex + 1) {
         modifiedPath[i] = versionOffset;
         break;
       }
@@ -87,52 +89,32 @@ export const buildVersionPath = (
 };
 
 /**
- * Get the version index at a specific tab position in the path
+ * Get the version index at a specific tab position in the path.
  */
 export const getVersionAtTab = (path: JournalPath, tabIndex: number): number | null => {
-  if (tabIndex === 0) {
-    const firstElement = path[0];
-    return typeof firstElement === 'number' ? firstElement : null;
-  }
-
-  let bridgeCount = 0;
+  let indexCount = 0;
   for (const segment of path) {
     if (typeof segment === 'number') {
-      bridgeCount++;
-      if (bridgeCount === tabIndex + 1) {
-        return segment;
-      }
+      if (indexCount === tabIndex) return segment;
+      indexCount++;
     }
   }
   return null;
 };
 
 /**
- * Build the child path based on the parent node's path and the child item name
+ * Build the child path based on the parent node's path and the child item name.
  */
 export const buildChildPath = (parentPath: JournalPath, itemName: string): JournalPath => {
-  const lastSegment = parentPath[parentPath.length - 1];
+  const last = parentPath[parentPath.length - 1];
 
-  if (!Array.isArray(lastSegment)) {
-    return parentPath;
+  if (last === '*bridge*') {
+    return [...parentPath, itemName, -1];
   }
 
-  const segmentType = lastSegment[0];
-
-  if (segmentType === '*bridge*') {
-    if (lastSegment.length === 1) {
-      // Listing bridges - create bridge chain path
-      return [...parentPath.slice(0, -1), ['*bridge*', itemName, 'chain'], -1];
-    }
-    if (lastSegment.length === 3) {
-      // Already in bridge's chain
-      return [...parentPath, -1, ['*bridge*', itemName, 'chain'], -1];
-    }
-  }
-
-  if (segmentType === '*state*') {
-    // In a state directory - extend the state segment
-    return [...parentPath.slice(0, -1), ['*state*', ...lastSegment.slice(1), itemName]];
+  const stateIndex = findLastMarkerIndex(parentPath, '*state*');
+  if (stateIndex >= 0) {
+    return [...parentPath, itemName];
   }
 
   return parentPath;

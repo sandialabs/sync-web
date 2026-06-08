@@ -53,7 +53,7 @@ All components live in [sandialabs/sync-web](https://github.com/sandialabs/sync-
 | `journal/` | Rust runtime, HTTP interface, evaluator extensions, persistence |
 | `records/` | Lisp class logic (`root`, `standard`, `tree`, `chain`, `ledger`, `interface`) |
 | `services/` | Web services (`gateway`, `explorer`, `workbench`, `file-system`, `router`) |
-| `deploy/` | Docker Compose deployment for a single-node stack |
+| `deploy/` | Compose-compatible deployment for a single-node stack |
 | `tests/` | Smoke, load, and multi-node network tests |
 | `docs/` | This documentation site |
 

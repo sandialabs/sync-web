@@ -15,11 +15,10 @@ interface ExplorerTreeProps {
 }
 
 const buildStateChildPath = (parentPath: JournalPath, name: string): JournalPath => {
-  const last = parentPath[parentPath.length - 1];
-  if (!Array.isArray(last) || last[0] !== '*state*') {
+  if (!parentPath.includes('*state*')) {
     return parentPath;
   }
-  return [...parentPath.slice(0, -1), ['*state*', ...last.slice(1), name]];
+  return [...parentPath, name];
 };
 
 const createNode = (
@@ -60,6 +59,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
   onSelect,
 }) => {
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
+  const [loadingNodes, setLoadingNodes] = useState<Set<string>>(new Set());
 
   const loadDirectoryChildren = async (path: JournalPath, idPrefix: string): Promise<TreeNode[]> => {
     if (!journalService) {
@@ -75,6 +75,17 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
   useEffect(() => {
     let active = true;
 
+    const hydrateExpandedChildren = async (nodes: TreeNode[]): Promise<TreeNode[]> =>
+      Promise.all(
+        nodes.map(async (node) => {
+          if (node.type !== 'directory' || !expandedNodes.has(node.id)) {
+            return node;
+          }
+          const children = await loadDirectoryChildren(node.path, node.id);
+          return { ...node, children: await hydrateExpandedChildren(children) };
+        }),
+      );
+
     const loadRoot = async () => {
       if (!journalService) {
         setTreeData([]);
@@ -82,7 +93,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
       }
 
       try {
-        const children = await loadDirectoryChildren(rootPath, mode);
+        const children = await hydrateExpandedChildren(await loadDirectoryChildren(rootPath, mode));
         if (active) {
           setTreeData(children);
         }
@@ -133,6 +144,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
       return;
     }
 
+    setLoadingNodes((prev) => new Set(prev).add(node.id));
     try {
       const children = await loadDirectoryChildren(node.path, node.id);
       setTreeData((prev) => updateNodeChildren(prev, node.id, children));
@@ -147,6 +159,12 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
         },
       ];
       setTreeData((prev) => updateNodeChildren(prev, node.id, children));
+    } finally {
+      setLoadingNodes((prev) => {
+        const next = new Set(prev);
+        next.delete(node.id);
+        return next;
+      });
     }
   };
 
@@ -156,6 +174,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
     const isExpanded = expandedNodes.has(node.id);
     const isSelected = selectedKey === JSON.stringify(node.path);
     const selectionType: ExplorerSelection['type'] = node.type === 'file' ? 'file' : 'directory';
+    const isLoading = loadingNodes.has(node.id);
     const kindIcon = node.type === 'directory' ? '▣' : '▤';
 
     return (
@@ -167,8 +186,10 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
           <button
             className={`tree-node-icon ${node.type !== 'directory' ? 'disabled' : ''}`}
             onClick={() => node.type === 'directory' && toggleNode(node)}
+            aria-label={isLoading ? `Loading ${node.label}` : undefined}
+            aria-busy={isLoading || undefined}
           >
-            {node.type === 'directory' ? (isExpanded ? '▼' : '▶') : '•'}
+            {isLoading ? '…' : node.type === 'directory' ? (isExpanded ? '▼' : '▶') : '•'}
           </button>
           <button
             className="tree-node-label"

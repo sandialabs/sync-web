@@ -7,8 +7,17 @@ JOURNAL_HOST="${ROUTER_JOURNAL_HOST:-journal}"
 GATEWAY_HOST="${ROUTER_GATEWAY_HOST:-gateway}"
 EXPLORER_HOST="${ROUTER_EXPLORER_HOST:-explorer}"
 WORKBENCH_HOST="${ROUTER_WORKBENCH_HOST:-workbench}"
+FILE_SYSTEM_HOST="${ROUTER_FILE_SYSTEM_HOST:-file-system:8080}"
 
 cat > /etc/nginx/includes/nginx.routes.inc <<EOF
+location = / {
+    try_files /index.html =404;
+}
+
+location = /webdav-guide {
+    try_files /webdav-guide.html =404;
+}
+
 location /interface {
     proxy_pass http://${JOURNAL_HOST}/interface;
 }
@@ -51,6 +60,14 @@ location /explorer {
 
 location /workbench {
     proxy_pass http://${WORKBENCH_HOST}/;
+}
+
+location = /webdav {
+    proxy_pass http://${FILE_SYSTEM_HOST};
+}
+
+location /webdav/ {
+    proxy_pass http://${FILE_SYSTEM_HOST};
 }
 EOF
 

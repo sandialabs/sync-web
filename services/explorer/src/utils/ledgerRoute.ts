@@ -66,8 +66,7 @@ export const buildLedgerRouteBasePath = (
   const path: JournalPath = [firstHopToRootIndex(first.snapshot, rootIndex)];
 
   for (const hop of rest) {
-    path.push(['*bridge*', hop.name, 'chain']);
-    path.push(bridgeHopToIndex(hop.snapshot));
+    path.push('*bridge*', hop.name, bridgeHopToIndex(hop.snapshot));
   }
 
   return path;
@@ -76,9 +75,9 @@ export const buildLedgerRouteBasePath = (
 export const buildLedgerStateRootPath = (
   hops: LedgerHop[],
   rootIndex: number,
-): JournalPath => [...buildLedgerRouteBasePath(hops, rootIndex), ['*state*']];
+): JournalPath => [...buildLedgerRouteBasePath(hops, rootIndex), '*state*'];
 
 export const buildLedgerBridgesPath = (
   hops: LedgerHop[],
   rootIndex: number,
-): JournalPath => [...buildLedgerRouteBasePath(hops, rootIndex), ['*bridge*']];
+): JournalPath => [...buildLedgerRouteBasePath(hops, rootIndex), '*bridge*'];

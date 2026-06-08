@@ -1,28 +1,6 @@
-(lambda (standard-src)
+(lambda (assertions-src standard-src)
 
-  (define asserted 0)
-
-  (define-macro (assert expression expected)
-    `(let ((trunc (lambda (x y) (if (< (length x) y) x (append (substring x 0 y) " ...")))))
-       (catch #t
-              (lambda ()
-                (let* ((result~ ,expression)
-                       (expected~ ,expected)
-                       (check~ (cond ((not expected~) (lambda (x) #t))
-                                     ((procedure? expected~) expected~)
-                                     (else (lambda (result) (equal? result expected~))))))
-                  (if (check~ result~)
-                      (begin (set! asserted (+ asserted 1)) result~)
-                      (error 'assertion-failure
-                             (append "[Check " (object->string asserted) " failed] "
-                                     "[Expression " (object->string ',expression) "] "
-                                     "[Evaluated " (trunc (object->string result~) 256) "] "
-                                     "[Expected " (trunc (object->string expected~) 256) "]")))))
-              (lambda args
-                (error 'assertion-failure
-                       (append "[Check " (object->string asserted) " errored] "
-                               "[Expression " (object->string ',expression) "] "
-                               "[Error " (trunc (object->string args) 256) "]"))))))
+  (eval assertions-src)
 
   (define standard
     (let ((init (caddr standard-src)))

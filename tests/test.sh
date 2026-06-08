@@ -3,7 +3,16 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+if [ -z "${CONTAINER_RUNTIME+x}" ]; then
+    if command -v docker >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="docker"
+    elif command -v podman >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="podman"
+    else
+        echo "FAIL: neither docker nor podman is available" >&2
+        exit 1
+    fi
+fi
 CUSTOM_SETUP="${CUSTOM_SETUP:-}"
 
 build_args=()
@@ -30,7 +39,8 @@ echo "--- workbench ---"
 $CONTAINER_RUNTIME build --target test "${build_args[@]}" -f "$ROOT/services/workbench/Dockerfile" "$ROOT/services/workbench"
 
 echo "--- integration ---"
-CUSTOM_SETUP="$CUSTOM_SETUP" SECRET=password PORT=8192 SMB_PORT=1445 \
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-sync-test}" \
+CUSTOM_SETUP="$CUSTOM_SETUP" SECRET=password HTTP_PORT=8192 HTTPS_PORT=8193 \
   "$ROOT/tests/api/local-compose.sh" smoke
 
 echo "--- all passed ---"

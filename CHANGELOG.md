@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.0
+
+### Added
+
+- **Document records** — Added byte-vector-only document payloads with metadata support and explicit `expression?` public I/O codec for expression-oriented callers.
+- **WebDAV file-system service** — Replaced the previous file-system adapter with a gateway-backed WebDAV service and navigable ledger index paths.
+- **Gateway events** — Added authenticated Server-Sent Events change hints and Explorer live refresh integration.
+- **Router splash page** — Added a static journal node home page and WebDAV guide served directly by the router.
+
+### Changed
+
+- **Record paths** — Public ledger/interface paths now use flat path syntax for staged, indexed, and bridge traversal paths.
+- **Document adapters** — Explorer, WebDAV, gateway examples, social-agent, and load workloads now write normal document content as byte-vectors unless explicitly using `expression?`.
+- **Pinned state** — `pinned?` now reports local permanent proof value availability; confirmed values including `(nothing)` are pinned, while `(unknown)` is not.
+- **Compose defaults** — All service image tags default to `1.3.0`.
+
+### Fixed
+
+- **Bridge resolution** — Historical multi-hop bridge paths now return semantic values/unknowns instead of low-level sync-node access errors.
+- **Explorer stability** — Preserved active staged edits during background refreshes and fixed bridged file pin/unpin display.
+- **Batch JSON** — Normalized JSON batch subqueries and decoded batch results consistently.
+- **Directory discovery** — Explorer directory discovery uses content-only reads to avoid unnecessary proof/pin coupling.
+
 ## 1.2.0
 
 ### Added

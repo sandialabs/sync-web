@@ -18,13 +18,9 @@ const buildVersionPath = (
   versionOffset: number
 ): JournalPath => {
   if (tabIndex === 0) {
-    // For the local journal
-    if (Array.isArray(basePath[0])) {
-      // Path starts with a list (staged) - prepend the version offset
-      return [versionOffset, ...basePath];
-    }
-    // Path already starts with a number - replace it
-    return [versionOffset, ...basePath.slice(1)];
+    return typeof basePath[0] === 'number'
+      ? [versionOffset, ...basePath.slice(1)]
+      : [versionOffset, ...basePath];
   }
 
   // For bridged journals - update the appropriate index in the path
@@ -48,18 +44,13 @@ const buildVersionPath = (
  * Get the version index at a specific tab position in the path
  */
 const getVersionAtTab = (path: JournalPath, tabIndex: number): number | null => {
-  if (tabIndex === 0) {
-    const firstElement = path[0];
-    return typeof firstElement === 'number' ? firstElement : null;
-  }
-
-  let bridgeCount = 0;
+  let indexCount = 0;
   for (const segment of path) {
     if (typeof segment === 'number') {
-      bridgeCount++;
-      if (bridgeCount === tabIndex + 1) {
+      if (indexCount === tabIndex) {
         return segment;
       }
+      indexCount++;
     }
   }
   return null;
@@ -70,8 +61,8 @@ const getVersionAtTab = (path: JournalPath, tabIndex: number): number | null => 
  * This helps determine if we're looking at the same document or a different one.
  */
 const getBasePath = (path: JournalPath): string => {
-  // Filter out numbers and stringify for comparison
-  const filtered = path.filter(segment => Array.isArray(segment));
+  // Filter out version numbers and stringify for comparison
+  const filtered = path.filter(segment => typeof segment !== 'number');
   return JSON.stringify(filtered);
 };
 
@@ -103,10 +94,9 @@ const RightPane: React.FC<RightPaneProps> = ({
     // Extract journal names from the path
     const tabs: string[] = ['Self'];
     
-    for (let i = 1; i < selectedPath.length - 1; i += 2) {
-      const segment = selectedPath[i];
-      if (Array.isArray(segment) && segment[0] === '*bridge*' && segment[2] === 'chain') {
-        tabs.push(segment[1]);
+    for (let i = 0; i < selectedPath.length - 1; i++) {
+      if (selectedPath[i] === '*bridge*' && typeof selectedPath[i + 1] === 'string') {
+        tabs.push(String(selectedPath[i + 1]));
       }
     }
 
@@ -179,7 +169,7 @@ const RightPane: React.FC<RightPaneProps> = ({
     return currentVersion === entry.index;
   };
 
-  const isViewingStaged = selectedPath && Array.isArray(selectedPath[0]);
+  const isViewingStaged = selectedPath && selectedPath[0] === '*state*';
   const currentHistory = histories.get(historyTabs[activeTab]) || [];
 
   const formatEntryPreview = (content: any): string => {

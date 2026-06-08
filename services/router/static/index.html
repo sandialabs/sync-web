@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Synchronic Web Journal</title>
+  <style>
+    :root {
+      --blue: #00add0;
+      --medium-blue: #0076a9;
+      --dark-blue: #002b4c;
+      --bg-primary: #ffffff;
+      --bg-secondary: #f8f8f8;
+      --bg-tertiary: #f0f0f0;
+      --text-primary: #002b4c;
+      --text-secondary: #7d8ea0;
+      --border-color: #e0e0e0;
+      --hover-bg: #e8e8e8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+        Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    main {
+      width: min(1040px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0 40px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .kicker-logo {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+    }
+
+    .hero {
+      max-width: 760px;
+      margin-bottom: 34px;
+    }
+
+    h1 {
+      margin: 8px 0 14px;
+      font-size: clamp(2.6rem, 7vw, 5.4rem);
+      line-height: 0.96;
+      letter-spacing: -0.055em;
+    }
+
+    .lead {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: clamp(1.05rem, 2vw, 1.24rem);
+      line-height: 1.52;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card, .panel {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+    }
+
+    .card {
+      min-height: 178px;
+      padding: 20px;
+      transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+    }
+
+    .card:hover, .card:focus-visible {
+      outline: none;
+      background: var(--hover-bg);
+      border-color: var(--blue);
+      transform: translateY(-2px);
+    }
+
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 30px;
+      color: var(--medium-blue);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .arrow { font-size: 20px; line-height: 1; }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 21px;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      margin: 0;
+      color: var(--text-secondary);
+      line-height: 1.48;
+    }
+
+    .lower {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .panel { padding: 20px; }
+    .panel h2 { font-size: 18px; }
+
+    .status-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 10px;
+      border: 1px solid #cdebd4;
+      border-radius: 999px;
+      background: #f1fbf4;
+      color: #2c7a43;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #6cb312;
+      box-shadow: 0 0 0 4px rgba(108, 179, 18, 0.12);
+    }
+
+    .status-metric {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+    }
+
+    .metric-main {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .metric-label {
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .metric-value {
+      min-width: 32px;
+      color: var(--dark-blue);
+      font-size: 25px;
+      font-weight: 750;
+      line-height: 1.1;
+      letter-spacing: -0.035em;
+      transition: color 0.18s ease;
+    }
+
+    .metric-value.flash {
+      color: var(--medium-blue);
+    }
+
+
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+
+    .pill:hover, .pill:focus-visible {
+      outline: none;
+      border-color: var(--blue);
+      color: var(--medium-blue);
+    }
+
+    footer {
+      margin-top: 24px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      main { padding-top: 40px; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lower { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      main { width: min(100% - 24px, 1040px); }
+      .grid { grid-template-columns: 1fr; }
+      .card { min-height: auto; }
+      .card-top { margin-bottom: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="kicker"><img class="kicker-logo" src="/gateway-logo.png" alt="" aria-hidden="true"> Journal node</div>
+      <h1 id="page-title">Synchronic Web Journal</h1>
+      <p class="lead">A gateway into Synchronic Web records: browse ledger state, edit staged documents, bridge with other journals, and integrate through HTTP or WebDAV adapters.</p>
+    </section>
+
+    <section class="grid" aria-label="Primary destinations">
+      <a class="card" href="/explorer/">
+        <div class="card-top"><span>Browse</span><span class="arrow">→</span></div>
+        <h2>Explorer</h2>
+        <p>Navigate staged, committed, pinned, and bridged journal state with proof-aware views.</p>
+      </a>
+      <a class="card" href="/webdav-guide">
+        <div class="card-top"><span>Mount</span><span class="arrow">→</span></div>
+        <h2>WebDAV</h2>
+        <p>Connect a desktop file manager or WebDAV client to journal-backed documents.</p>
+      </a>
+      <a class="card" href="/api/v1/docs">
+        <div class="card-top"><span>Integrate</span><span class="arrow">→</span></div>
+        <h2>API docs</h2>
+        <p>Use the gateway HTTP API for applications, agents, automation, and admin workflows.</p>
+      </a>
+      <a class="card" href="/workbench/">
+        <div class="card-top"><span>Query</span><span class="arrow">→</span></div>
+        <h2>Workbench</h2>
+        <p>Run Scheme interface queries directly against the journal for development and operations.</p>
+      </a>
+    </section>
+
+    <section class="lower">
+      <div class="panel">
+        <h2>What this node exposes</h2>
+        <p>This router fronts the journal, gateway API, Explorer, Workbench, and WebDAV adapter. The ledger remains the source of truth; UI and protocol services are projections around it.</p>
+      </div>
+      <div class="panel">
+        <div class="status-head">
+          <h2>Status</h2>
+          <div class="live-badge"><span class="live-dot"></span> Live</div>
+        </div>
+        <div class="status-metric">
+          <div class="metric-main">
+            <div class="metric-label">Journal size</div>
+            <div class="metric-value" id="journal-size">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>Synchronic Web · verifiable records and bridged journal state</footer>
+  </main>
+  <script>
+    const sizeValue = document.getElementById('journal-size');
+    async function refreshJournalSize() {
+      try {
+        const response = await fetch('/api/v1/general/size', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const size = await response.json();
+        const nextSize = Number.isFinite(Number(size)) ? Number(size).toLocaleString() : String(size);
+        if (sizeValue.textContent !== nextSize) {
+          sizeValue.textContent = nextSize;
+          sizeValue.classList.add('flash');
+          window.setTimeout(() => sizeValue.classList.remove('flash'), 450);
+        }
+      } catch (_error) {
+        sizeValue.textContent = '—';
+      }
+    }
+
+    refreshJournalSize();
+    window.setInterval(refreshJournalSize, 2500);
+
+    try {
+      const events = new EventSource('/api/v1/events', { withCredentials: true });
+      events.addEventListener('sync-web-change', refreshJournalSize);
+      events.onerror = () => {
+        // Public/no-auth deployments may reject the event stream; polling above remains the fallback.
+      };
+    } catch (_error) {
+      // EventSource is optional; polling keeps the status useful without it.
+    }
+  </script>
+</body>
+</html>

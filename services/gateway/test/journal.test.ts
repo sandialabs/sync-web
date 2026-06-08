@@ -24,7 +24,7 @@ const respondWith = (body: unknown, status = 200) =>
 
 // --- callJson auth envelope ---
 
-test("callJson sends *journal* identity when no identityId provided", async (t) => {
+test("callJson omits identity when no identityId provided", async (t) => {
   let captured: string | undefined;
   t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
     captured = init.body as string;
@@ -32,7 +32,7 @@ test("callJson sends *journal* identity when no identityId provided", async (t) 
   });
   await makeClient().callJson({ functionName: "get", authentication: "secret" });
   const body = JSON.parse(captured!);
-  assert.equal(body.authentication.identity, "*journal*");
+  assert.equal("identity" in body.authentication, false);
   assert.deepEqual(body.authentication.credentials, { "*type/string*": "secret" });
 });
 

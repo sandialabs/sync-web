@@ -17,8 +17,10 @@
     ;;     sync node: element at index.
     (let ((index ((self '~adjust) index)))
       (let loop ((node (self '(1 1))) (i (- ((self 'size)) 1)))
-        (if (= i index) (sync-car node)
-            (loop (sync-cdr node) (- i 1))))))
+        (cond ((or (sync-stub? node) (not (sync-pair? node))) '(unknown))
+              ((= i index) (let ((value (sync-car node)))
+                             (if (sync-stub? value) '(unknown) value)))
+              (else (loop (sync-cdr node) (- i 1)))))))
 
   (define-method (previous self index)
     ;; Build a proof chain ending at index.
@@ -125,4 +127,4 @@
     (let* ((size ((self 'size)))
            (index (if (< index 0) (+ size index) index)))
       (if (and (>= index 0) (< index size)) index
-          (error 'index-error "Index is out of bounds")))))
+          (error 'index-error "Index is out of bounds: ~S" index)))))

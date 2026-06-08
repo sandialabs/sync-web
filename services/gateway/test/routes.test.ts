@@ -154,6 +154,15 @@ test("restricted route returns 401 without session cookie", async (t) => {
   assert.equal(body.error, "unauthorized");
 });
 
+test("event stream requires authentication", async (t) => {
+  const app = await createApp({ allowAdminRoutes: false });
+  t.after(async () => app.close());
+
+  const res = await app.inject({ method: "GET", url: "/api/v1/events" });
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.json().error, "unauthorized");
+});
+
 test("restricted route returns 401 when Kratos session is invalid", async (t) => {
   const failingKratos: KratosClient = {
     async whoami() { throw new Error("session invalid"); },
@@ -174,12 +183,35 @@ test("restricted route returns 401 when Kratos session is invalid", async (t) =>
   assert.equal(res.json().error, "unauthorized");
 });
 
+test("POST /api/v1/general/synchronize! forwards pushed payload without auth", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const args = { name: "peer-a", index: -1, response: [] };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/synchronize!",
+    headers: { "content-type": "application/json" },
+    payload: args,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mock.jsonCalls.length, 1);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "synchronize!",
+    args,
+    authentication: undefined,
+    identityId: undefined,
+  });
+});
+
 test("POST /api/v1/general/get accepts JSON keyword-object payload with Kratos session", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const args = { path: [["*state*", "docs"]] };
+  const args = { path: ["*state*", "docs"] };
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
@@ -247,7 +279,7 @@ test("POST /api/v1/general/get accepts legacy JSON array payload", async (t) => 
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const args = [[["path", [["*state*", "docs"]]]]];
+  const args = [[["path", ["*state*", "docs"]]]];
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/get",
@@ -274,7 +306,7 @@ test("POST /api/v1/general/get accepts Lisp payload and injects identity into ex
     method: "POST",
     url: "/api/v1/general/get",
     headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
-    payload: "(((path ((*state* docs)))))",
+    payload: "(((path (*state* docs))))",
   });
 
   assert.equal(res.statusCode, 200);
@@ -283,7 +315,7 @@ test("POST /api/v1/general/get accepts Lisp payload and injects identity into ex
   assert.match(mock.schemeCalls[0].expression, /^\(\(function get\) /);
   assert.match(
     mock.schemeCalls[0].expression,
-    /\(arguments \(\(\(path \(\(\*state\* docs\)\)\)\)\)\)/
+    /\(arguments \(\(\(path \(\*state\* docs\)\)\)\)\)/
   );
   assert.match(
     mock.schemeCalls[0].expression,
@@ -298,7 +330,7 @@ test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
 
   const args = {
     queries: [
-      { function: "get", arguments: { path: [["*state*", "docs"]] } },
+      { function: "get", arguments: { path: ["*state*", "docs"] } },
       { function: "config" },
     ],
   };
@@ -311,13 +343,42 @@ test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
   });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(mock.jsonCalls.length, 1);
-  assert.deepEqual(mock.jsonCalls[0], {
-    functionName: "batch!",
-    args,
-    authentication: JOURNAL_SECRET,
-    identityId: IDENTITY_ID,
+  assert.equal(mock.schemeCalls.length, 1);
+  assert.equal(mock.schemeCalls[0].functionName, "batch!");
+  assert.match(mock.schemeCalls[0].expression, /^\(\(function batch!\) /);
+  assert.ok(mock.schemeCalls[0].expression.includes("(queries "));
+  assert.ok(mock.schemeCalls[0].expression.includes("((function get) (arguments ((path (*state* docs))))"));
+  assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
+  assert.match(
+    mock.schemeCalls[0].expression,
+    /\(authentication \(\(identity test-user-id\) \(credentials "test-journal-secret"\)\)\)/
+  );
+});
+
+test("POST /api/v1/general/batch decodes Scheme batch results for JSON callers", async (t) => {
+  const mock = createMockJournal();
+  mock.client.callScheme = async (input: { expression: string; functionName: string }) => {
+    mock.schemeCalls.push(input);
+    return '(#t round3 (directory ((data directory)) #t) ((public ((window 1024)))) #u(1 2 255))';
+  };
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/batch",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: { queries: [{ function: "set!", arguments: { path: ["*state*", "admin", "x"], value: "round3", "expression?": true } }] },
   });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json(), [
+    true,
+    "round3",
+    ["directory", { data: "directory" }, true],
+    { public: { window: 1024 } },
+    { "*type/byte-vector*": "0102ff" },
+  ]);
 });
 
 test("POST /api/v1/general/batch accepts Lisp payload and injects identity into expression", async (t) => {
@@ -330,7 +391,7 @@ test("POST /api/v1/general/batch accepts Lisp payload and injects identity into 
     url: "/api/v1/general/batch",
     headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
     payload:
-      "(((queries (((function get) (arguments ((path ((*state* docs))))) ((function config))))))",
+      "(((queries (((function get) (arguments ((path (*state* docs)))) ((function config))))))",
   });
 
   assert.equal(res.statusCode, 200);
@@ -340,7 +401,7 @@ test("POST /api/v1/general/batch accepts Lisp payload and injects identity into 
   assert.ok(mock.schemeCalls[0].expression.includes("(queries "));
   assert.ok(
     mock.schemeCalls[0].expression.includes(
-      "((function get) (arguments ((path ((*state* docs)))))"
+      "((function get) (arguments ((path (*state* docs))))"
     )
   );
   assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
@@ -452,7 +513,7 @@ test("relays journal semantic error payloads as HTTP errors (JSON mode)", async 
     method: "POST",
     url: "/api/v1/general/get",
     headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
-    payload: { path: [["*state*", "docs"]], "pinned?": true, "proof?": true },
+    payload: { path: ["*state*", "docs"], "pinned?": true, "proof?": true },
   });
 
   assert.equal(res.statusCode, 400);
@@ -586,7 +647,7 @@ test("non-semantic journal error becomes 502", async (t) => {
     method: "POST",
     url: "/api/v1/general/get",
     headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
-    payload: { path: [["*state*", "docs"]] },
+    payload: { path: ["*state*", "docs"] },
   });
 
   assert.equal(res.statusCode, 502);
@@ -615,7 +676,7 @@ test("relays journal semantic error payloads as HTTP errors (Scheme mode)", asyn
     method: "POST",
     url: "/api/v1/general/set",
     headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
-    payload: "((path ((*state* alice foo))) (value bar))",
+    payload: "((path (*state* alice foo)) (value bar))",
   });
 
   assert.equal(res.statusCode, 400);
@@ -628,7 +689,7 @@ test("POST /api/v1/general/set forwards with auth in JSON mode", async (t) => {
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const args = { path: [["*state*", "mykey"]], value: "myvalue" };
+  const args = { path: ["*state*", "mykey"], value: "myvalue" };
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/set",
@@ -680,13 +741,21 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
   const schemaExample = (path: string) =>
     paths[path]?.post?.requestBody?.content?.["application/json"]?.schema?.example;
 
-  assert.deepEqual(schemaExample("/api/v1/general/get"), { path: [["*state*", "mykey"]] });
-  assert.deepEqual(schemaExample("/api/v1/general/bridge"), { name: "peer-a", interface: "http://peer-a/interface" });
+  assert.deepEqual(schemaExample("/api/v1/general/get"), { path: ["*state*", "mykey"], "expression?": true });
+  assert.deepEqual(schemaExample("/api/v1/general/bridge"), {
+    name: "peer-a",
+    "info-local": {
+      interface: "http://peer-a/interface",
+      policy: { publish: "push", subscribe: "pull" },
+      role: false,
+      "remote-name": "my-journal",
+    },
+  });
   assert.deepEqual(schemaExample("/api/v1/general/admins"), {});
   assert.deepEqual(schemaExample("/api/v1/general/set-admins"), { admins: ["admin", "alice"] });
   assert.deepEqual(schemaExample("/api/v1/general/set-window"), { value: 128 });
   assert.deepEqual(schemaExample("/api/v1/general/batch"), {
-    queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }],
+    queries: [{ function: "get", arguments: { path: ["*state*", "mykey"] } }, { function: "config" }],
   });
   assert.deepEqual(schemaExample("/api/v1/root/step"), []);
   assert.deepEqual(schemaExample("/api/v1/root/eval"), [["+", 1, 2]]);
@@ -694,8 +763,8 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
   const schemeExample = (path: string) =>
     paths[path]?.post?.requestBody?.content?.["text/plain"]?.schema?.example;
 
-  assert.equal(schemeExample("/api/v1/general/get"), "((path ((*state* mykey))))");
-  assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (interface "http://peer-a/interface"))');
+  assert.equal(schemeExample("/api/v1/general/get"), "((path (*state* mykey)))");
+  assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (info-local ((interface "http://peer-a/interface") (policy ((publish push) (subscribe pull))) (role #f) (remote-name my-journal))))');
   assert.equal(schemeExample("/api/v1/general/admins"), "()");
   assert.equal(schemeExample("/api/v1/general/set-admins"), "((admins (admin alice)))");
   assert.equal(schemeExample("/api/v1/general/set-window"), "((value 128))");

@@ -11,8 +11,9 @@ class HelloWorldUser(HttpUser):
         val = f"val-{random.randint(0, 2**20)}"
 
         request_data = {
-            "path": [["*state*", "locust", key]],
-            "value": {"*type/string*": val},
+            "path": ["*state*", "locust", key],
+            "value": val,
+            "expression?": True,
         }
         response = self.client.post(
             "/api/v1/general/set",

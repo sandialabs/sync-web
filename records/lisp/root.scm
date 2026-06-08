@@ -12,7 +12,7 @@
          (define (authenticate secret)
            (let ((secret-hash secret-node))
              (if (not (equal? (sync-hash (expression->byte-vector secret)) secret-hash))
-                 (error 'authentication-failure "Could not identify as admin"))))
+                 (error 'authentication-error "Could not authenticate as root admin"))))
 
          (define (update! result)
            (set! *sync-state* (sync-cons transition-node (sync-cons node-10 (sync-cons secret-node (root)))))
@@ -97,7 +97,7 @@
                                   (sync-cons (sync-cons key value) node))
                                  ((and (not (zero? (car bits-new))) (zero? (car bits-old)))
                                   (sync-cons node (sync-cons key value)))
-                                 (else (error 'logic-error "Missing conditions"))))))))))
+                                 (else (error 'logic-error "Missing root merge condition for key: ~S" key))))))))))
 
        (define (dir-delete node key)
          (let loop ((node node) (bits (key-bits key)))
@@ -165,11 +165,11 @@
        (define (root-set! path value)
          (let ((path (map expression->byte-vector path)))
            (cond ((equal? value '(unknown))
-                  (error 'value-error "Value conflicts with key expression '(unknown)"))
+                  (error 'value-error "Root values cannot use reserved value: ~S" value))
                  ((and (list? value) (not (null? value)) (eq? (car value) 'directory))
-                  (error 'value-error "Value resembles key expression pattern '(directory ..)"))
+                  (error 'value-error "Root values cannot use reserved directory form: ~S" value))
                  ((or (procedure? value) (macro? value))
-                  (error 'value-error "Cannot write function or macro values into root data"))
+                  (error 'value-error "Cannot write function or macro into root data: ~S" value))
                  ((equal? value '(nothing)) (node-delete! path))
                  (else (node-set! path (cond ((sync-node? value) (sync-cons struct-tag value))
                                              ((byte-vector? value) (append #u(0) value))
@@ -204,7 +204,7 @@
               ((copy!) root-copy!)
               ((equal?) root-equal?)
               ((equivalent?) root-equivalent?)
-              (else (error 'unimplemented-method "Basic record does not implement method")))))))
+              (else (error 'method-error "Root object does not implement method: ~S" function)))))))
 
   (define step
     '(lambda (root secret query)

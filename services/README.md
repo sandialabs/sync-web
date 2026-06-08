@@ -6,30 +6,33 @@ Service components of the Synchronic Web monorepo:
 - `router` for edge routing and optional TLS termination
 - `explorer` for browsing/editing journal content
 - `workbench` for developer-oriented journal queries
-- `file-system` for SMB projection of `/stage`, `/ledger`, and `/control`
+- `file-system` for WebDAV projection of `/stage`, `/ledger`, and `/control`
 
 ## Quick Start
 
 Run the compose stack from the repo root:
 
 ```bash
-SECRET=password PORT=8192 tests/api/local-compose.sh up
+COMPOSE_PROJECT_NAME=sync-local SECRET=password \
+HTTP_PORT=8192 HTTPS_PORT=8193 \
+tests/api/local-compose.sh up
 ```
 
 Run with direct HTTP compose deployment (no TLS):
 
 ```bash
-SECRET=password PORT=8192 \
+COMPOSE_PROJECT_NAME=sync-dev SECRET=password \
+HTTP_PORT=8192 HTTPS_PORT=8193 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 Run with optional TLS (single compose file; router auto-enables TLS if cert/key files exist):
 
 ```bash
+COMPOSE_PROJECT_NAME=sync-prod \
 TLS_CERT_HOST_PATH=/absolute/path/to/fullchain.pem \
 TLS_KEY_HOST_PATH=/absolute/path/to/privkey.pem \
-SECRET=password PORT=8192 \
-HTTPS_PORT=443 \
+SECRET=password ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
@@ -45,11 +48,13 @@ The compose journal service runs the generic `journal-sdk` image directly and mo
 the general Lisp deployment inputs from `records/lisp` plus
 `deploy/compose/general/run.sh`. There is no separate `general` image layer.
 
-Bring down the base compose stack manually:
+Bring down a stack without deleting data:
 
 ```bash
-docker compose -f deploy/compose/general/compose.yaml down -v
+COMPOSE_PROJECT_NAME=sync-dev docker compose -f deploy/compose/general/compose.yaml down
 ```
+
+Only add `-v` when you intentionally want to delete that stack's database and identity-provider volumes.
 
 ## Documentation Map
 

@@ -13,7 +13,7 @@ describe('projectedFragments', () => {
 
   it('builds a stage fragment with url-safe encoding', () => {
     const stageSelection: ExplorerSelection = {
-      path: [['*state*', 'docs', 'hello world.txt']],
+      path: ['*state*', 'docs', 'hello world.txt'],
       type: 'file',
     };
 
@@ -21,7 +21,7 @@ describe('projectedFragments', () => {
       mode: 'stage',
       stageSelection,
       ledgerSelection: null,
-      ledgerRootPath: [42, ['*state*']],
+      ledgerRootPath: [42, '*state*'],
       ledgerHops,
       rootIndex: 42,
     });
@@ -31,7 +31,7 @@ describe('projectedFragments', () => {
 
   it('round-trips a ledger fragment with bridges and history', () => {
     const ledgerSelection: ExplorerSelection = {
-      path: [42, ['*bridge*', 'alice', 'chain'], -1, ['*bridge*', 'bob', 'chain'], -3, ['*state*', 'docs', 'readme.md']],
+      path: [42, '*bridge*', 'alice', -1, '*bridge*', 'bob', -3, '*state*', 'docs', 'readme.md'],
       type: 'file',
     };
 
@@ -39,7 +39,7 @@ describe('projectedFragments', () => {
       mode: 'ledger',
       stageSelection: null,
       ledgerSelection,
-      ledgerRootPath: [42, ['*bridge*', 'alice', 'chain'], -1, ['*bridge*', 'bob', 'chain'], -3, ['*state*']],
+      ledgerRootPath: [42, '*bridge*', 'alice', -1, '*bridge*', 'bob', -3, '*state*'],
       ledgerHops,
       rootIndex: 42,
     });
@@ -62,7 +62,7 @@ describe('projectedFragments', () => {
       mode: 'admin',
       stageSelection: null,
       ledgerSelection: null,
-      ledgerRootPath: [42, ['*state*']],
+      ledgerRootPath: [42, '*state*'],
       ledgerHops,
       rootIndex: 42,
     });

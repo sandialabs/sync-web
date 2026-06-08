@@ -66,7 +66,7 @@ Optional environment variables:
 - `SYNC_SCREENSHOT_DIR` (default `./public/images/screenshots`)
 - `SYNC_SCREENSHOT_SETTLE_MS` (default `1500`)
 - `SYNC_REPO_ROOT` (required for `capture:screenshots:stack`): absolute path to the sync-web repo root
-- `PORT`, `SECRET`, `PERIOD`, `WINDOW` (used by `capture:screenshots:stack`)
+- `HTTP_PORT`, `HTTPS_PORT`, `SECRET`, `PERIOD`, `WINDOW` (used by `capture:screenshots:stack`)
 
 Example:
 
