@@ -41,11 +41,11 @@ fn test_standard() {
     assert("(+ 2 2)", "4");
     assert(
         "(/ 1 0)",
-        "(error 'division-by-zero \"/: division by zero, (/ 1 0)\")",
+        "(error 'division-by-zero \"/: division by zero, (/ 1 0)\" ((data (\"~A: division by zero, (~A ~S ~S)\" / / 1 0))))",
     );
     assert(
         "\"x",
-        "(error 'string-read-error \"end of input encountered while in a string\")",
+        "(error 'string-read-error \"end of input encountered while in a string\" ((data (\"end of input encountered while in a string\"))))",
     );
 }
 
