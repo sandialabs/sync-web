@@ -54,6 +54,6 @@ fn test_failure() {
     );
     assert1(
         "(let ((keys (crypto-generate #u(0)))) (crypto-verify (cdr (crypto-generate #u(1))) (crypto-sign (car keys) #u(1)) #u(1)))",
-        "(error 'crypto-error \"cryptographic library encountered unexpected error\")",
+        "(error 'crypto-error \"cryptographic library encountered unexpected error\" ((data (\"cryptographic library encountered unexpected error\"))))",
     );
 }
