@@ -5,8 +5,8 @@ This directory contains a Locust load testing script for testing the synchronic 
 ## Prerequisites
 
 1. Start the current general compose stack from `sync-web`:
-   - `SECRET=password PORT=8192 tests/api/local-compose.sh up`
-   - or `SECRET=password PORT=8192 docker compose -f deploy/compose/general/compose.yaml up -d`
+   - `COMPOSE_PROJECT_NAME=sync-local SECRET=password HTTP_PORT=8192 tests/api/local-compose.sh up`
+   - or `COMPOSE_PROJECT_NAME=sync-dev SECRET=password HTTP_PORT=8192 HTTPS_PORT=8193 docker compose -f deploy/compose/general/compose.yaml up -d`
 
 2. Create an API token from `/auth/settings` or `POST /api/v1/tokens`.
 3. Set `API_TOKEN` to the plaintext token returned at creation time.
@@ -67,8 +67,8 @@ The load test performs the following actions:
 
 In the terminal, you'll see output like:
 ```
-REQ: {"path":[["*state*","locust","key-123456"]],"value":{"*type/string*":"val-789012"}} | RESP: true
-REQ: {"path":[["*state*","locust","key-234567"]],"value":{"*type/string*":"val-890123"}} | RESP: true
+REQ: {"path":["*state*","locust","key-123456"],"value":"val-789012","expression?":true} | RESP: true
+REQ: {"path":["*state*","locust","key-234567"],"value":"val-890123","expression?":true} | RESP: true
 ```
 
 ## Troubleshooting

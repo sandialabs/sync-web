@@ -1,9 +1,5 @@
-**/bin/
-**/obj/
-.vs/
-TestResults/
-*.user
-*.suo
-*.tmp
-.DS_Store
-Dockerfile
+.git
+bin
+obj
+coverage
+*.test

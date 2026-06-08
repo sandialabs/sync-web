@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import ToolBar from './components/ToolBar';
 import ExplorerTree from './components/ExplorerTree';
 import ExplorerContent from './components/ExplorerContent';
 import LedgerRouteBar from './components/LedgerRouteBar';
 import AdminPanel from './components/AdminPanel';
-import { JournalService } from './services/JournalService';
+import { GatewayChangeEvent, JournalService } from './services/JournalService';
 import { AppState, ExplorerMode, ExplorerSelection, JournalPath, LedgerHop } from './types';
 import {
   LEDGER_LATEST,
@@ -51,7 +51,11 @@ const createInitialAppState = (): AppState => ({
   error: null,
 });
 
-const STAGE_ROOT_PATH: JournalPath = [['*state*']];
+const STAGE_ROOT_PATH: JournalPath = ['*state*'];
+
+const buildUserHomePath = (username: string): JournalPath => (
+  username ? ['*state*', username] : STAGE_ROOT_PATH
+);
 
 const isPathWithin = (candidate: JournalPath, ancestor: JournalPath): boolean => {
   if (ancestor.length > candidate.length) {
@@ -62,36 +66,25 @@ const isPathWithin = (candidate: JournalPath, ancestor: JournalPath): boolean =>
 };
 
 const buildStageChildPath = (parentPath: JournalPath, childName: string): JournalPath => {
-  const last = parentPath[parentPath.length - 1];
-  if (!Array.isArray(last) || last[0] !== '*state*') {
+  if (parentPath[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
-
-  return [
-    ...parentPath.slice(0, -1),
-    ['*state*', ...last.slice(1), childName],
-  ];
+  return [...parentPath, childName];
 };
 
 const buildStageSiblingPath = (path: JournalPath, siblingName: string): JournalPath => {
-  const last = path[path.length - 1];
-  if (!Array.isArray(last) || last[0] !== '*state*') {
+  if (path[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
-
-  return [
-    ...path.slice(0, -1),
-    ['*state*', ...last.slice(1, -1), siblingName],
-  ];
+  return [...path.slice(0, -1), siblingName];
 };
 
 const stagePathToTreeNodeId = (path: JournalPath): string => {
-  const last = path[path.length - 1];
-  if (!Array.isArray(last) || last[0] !== '*state*') {
+  if (path[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
 
-  const suffix = last.slice(1);
+  const suffix = path.slice(1);
   return suffix.length > 0 ? `stage/${suffix.join('/')}` : 'stage';
 };
 
@@ -104,17 +97,9 @@ const replaceStagePathPrefix = (
     return candidate;
   }
 
-  const candidateLast = candidate[candidate.length - 1];
-  const sourceLast = sourcePrefix[sourcePrefix.length - 1];
-  const targetLast = targetPrefix[targetPrefix.length - 1];
-
-  if (!Array.isArray(candidateLast) || !Array.isArray(sourceLast) || !Array.isArray(targetLast)) {
-    return candidate;
-  }
-
   return [
-    ...candidate.slice(0, -1),
-    [...targetLast, ...candidateLast.slice(sourceLast.length)],
+    ...targetPrefix,
+    ...candidate.slice(sourcePrefix.length),
   ];
 };
 
@@ -137,6 +122,7 @@ const App: React.FC = () => {
   const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0);
   const [adminRefreshKey, setAdminRefreshKey] = useState(0);
   const isApplyingHashRef = useRef(false);
+  const eventRefreshTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -148,9 +134,17 @@ const App: React.FC = () => {
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();
-          setSessionName(data?.identity?.traits?.username ?? '');
+          const username = data?.identity?.traits?.username ?? '';
+          setSessionName(username);
           if (JOURNAL_ENDPOINT) {
-            setJournalService(new JournalService(JOURNAL_ENDPOINT));
+            const service = new JournalService(JOURNAL_ENDPOINT);
+            setJournalService(service);
+            if (username) {
+              void service.ensureDirectory(buildUserHomePath(username)).catch(() => {
+                // Home creation is best-effort here; normal Explorer requests surface
+                // actionable authorization/gateway errors if the session is unusable.
+              });
+            }
           } else {
             setAdminStatus('not-admin');
           }
@@ -198,50 +192,96 @@ const App: React.FC = () => {
     }
   }, [adminStatus, mode]);
 
-  const synchronizeLedger = async () => {
+  const synchronizeLedger = useCallback(async (options: { quiet?: boolean; preserveSelection?: boolean } = {}) => {
     if (!journalService) {
       return;
     }
 
-    setLoadingState(true, null);
+    if (!options.quiet) {
+      setLoadingState(true, null);
+    }
     try {
       const size = await journalService.getSize();
       const latestIndex = Math.max(0, size - 1);
       const updatedHops = ledgerHops.map((hop, index) =>
-        index === 0 ? { ...hop, snapshot: String(latestIndex) } : hop,
+        index === 0 && !options.preserveSelection ? { ...hop, snapshot: LEDGER_LATEST } : hop,
       );
       setAppState((prev) => ({
         ...prev,
         rootIndex: latestIndex,
-        isLoading: false,
+        isLoading: options.quiet ? prev.isLoading : false,
         error: null,
       }));
       setLedgerHops(updatedHops);
-      setLedgerSelection({
-        path: buildLedgerStateRootPath(updatedHops, latestIndex),
-        type: 'directory',
-      });
+      if (!options.preserveSelection) {
+        setLedgerSelection({
+          path: buildLedgerStateRootPath(updatedHops, latestIndex),
+          type: 'directory',
+        });
+      }
       setLedgerRefreshKey((prev) => prev + 1);
     } catch (error) {
-      setAppState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: `Synchronization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      }));
+      if (!options.quiet) {
+        setAppState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: `Synchronization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        }));
+      }
     }
-  };
+  }, [journalService, ledgerHops]);
 
   useEffect(() => {
     if (journalService && appState.rootIndex < 0) {
       void synchronizeLedger();
     }
-  }, [journalService, appState.rootIndex]);
+  }, [journalService, appState.rootIndex, synchronizeLedger]);
+
+  useEffect(() => {
+    if (!journalService || sessionStatus !== 'ready') {
+      return;
+    }
+
+    const scheduleRefresh = (event: GatewayChangeEvent) => {
+      if (eventRefreshTimerRef.current !== null) {
+        window.clearTimeout(eventRefreshTimerRef.current);
+      }
+      eventRefreshTimerRef.current = window.setTimeout(() => {
+        eventRefreshTimerRef.current = null;
+        if (mode === 'admin') {
+          setAdminRefreshKey((prev) => prev + 1);
+          return;
+        }
+        if (mode === 'stage') {
+          setStageRefreshKey((prev) => prev + 1);
+          return;
+        }
+        setLedgerRefreshKey((prev) => prev + 1);
+      }, 300);
+    };
+
+    const unsubscribe = journalService.subscribeEvents({
+      onChange: scheduleRefresh,
+      onError: () => {
+        // EventSource reconnects automatically. Keep the UI quiet; normal requests still
+        // surface actionable errors when refreshes fail.
+      },
+    });
+
+    return () => {
+      unsubscribe();
+      if (eventRefreshTimerRef.current !== null) {
+        window.clearTimeout(eventRefreshTimerRef.current);
+        eventRefreshTimerRef.current = null;
+      }
+    };
+  }, [journalService, sessionStatus, mode, synchronizeLedger]);
 
   const ledgerRootPath = useMemo(
     () => buildLedgerStateRootPath(ledgerHops, appState.rootIndex >= 0 ? appState.rootIndex : 0),
     [ledgerHops, appState.rootIndex],
   );
-  const stageRootPath = useMemo(() => STAGE_ROOT_PATH, []);
+  const stageRootPath = useMemo(() => buildUserHomePath(sessionName), [sessionName]);
   useEffect(() => {
     const applyHash = () => {
       const parsed = parseFragmentHash(window.location.hash);
@@ -254,7 +294,7 @@ const App: React.FC = () => {
       setAppState((prev) => ({ ...prev, error: null }));
 
       if (parsed.mode === 'stage') {
-        setStageSelection(parsed.selection ?? { path: STAGE_ROOT_PATH, type: 'directory' });
+        setStageSelection(parsed.selection ?? { path: buildUserHomePath(sessionName), type: 'directory' });
       } else if (parsed.mode === 'ledger') {
         setLedgerHops(parsed.ledgerHops ?? getInitialLedgerHops(appState.rootIndex));
         setLedgerSelection(parsed.selection ?? null);
@@ -269,7 +309,7 @@ const App: React.FC = () => {
     applyHash();
     window.addEventListener('hashchange', applyHash);
     return () => window.removeEventListener('hashchange', applyHash);
-  }, [appState.rootIndex]);
+  }, [appState.rootIndex, sessionName]);
 
   const handleModeChange = (nextMode: ExplorerMode) => {
     if (nextMode === 'admin' && adminStatus !== 'admin') {
@@ -277,7 +317,7 @@ const App: React.FC = () => {
     }
     setMode(nextMode);
     if (nextMode === 'stage') {
-      setStageSelection({ path: STAGE_ROOT_PATH, type: 'directory' });
+      setStageSelection({ path: stageRootPath, type: 'directory' });
     } else if (nextMode === 'ledger') {
       setLedgerView('content');
       void synchronizeLedger();

@@ -33,19 +33,35 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   onSelectPath,
 }) => {
   const [response, setResponse] = useState<JournalResponse | null>(null);
+  const [responseKey, setResponseKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const isEditingRef = useRef(false);
+  const responseKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    isEditingRef.current = isEditing;
+  }, [isEditing]);
+
+  useEffect(() => {
+    responseKeyRef.current = responseKey;
+  }, [responseKey]);
+
+  const selectionKey = useMemo(
+    () => (selection ? JSON.stringify([selection.type, selection.path]) : null),
+    [selection],
+  );
+  const currentResponse = responseKey === selectionKey ? response : null;
 
   const buildChildPath = (parentPath: JournalPath, childName: string): JournalPath => {
-    const last = parentPath[parentPath.length - 1];
-    if (!Array.isArray(last)) {
+    if (!parentPath.includes('*state*')) {
       return parentPath;
     }
 
-    return [...parentPath.slice(0, -1), [last[0], ...last.slice(1), childName]];
+    return [...parentPath, childName];
   };
 
   useEffect(() => {
@@ -65,18 +81,27 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
         if (!active) {
           return;
         }
-        setResponse(nextResponse);
-        const { value } = JournalService.extractSchemeValue(nextResponse.content);
-        setEditValue(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+        if (isEditingRef.current && responseKeyRef.current === selectionKey) {
+          return;
+        }
+        setResponse((prev) =>
+          JSON.stringify(prev) === JSON.stringify(nextResponse) ? prev : nextResponse,
+        );
+        setResponseKey(selectionKey);
+        setEditValue(JournalService.documentContentToText(nextResponse.content));
         setIsEditing(false);
         setActionNotice(null);
       } catch (error) {
         if (active) {
-          setResponse({
+          const errorResponse = {
             content: `Error loading content: ${error instanceof Error ? error.message : 'Unknown error'}`,
             'pinned?': null,
             proof: { error: String(error) },
-          });
+          };
+          setResponse((prev) =>
+            JSON.stringify(prev) === JSON.stringify(errorResponse) ? prev : errorResponse,
+          );
+          setResponseKey(selectionKey);
           setIsEditing(false);
         }
       } finally {
@@ -90,14 +115,14 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
     return () => {
       active = false;
     };
-  }, [journalService, selection, refreshKey]);
+  }, [journalService, selection, selectionKey, mode === 'stage' ? refreshKey : 0]);
 
   const directory = useMemo<DirectoryResult | null>(() => {
-    if (!response) {
+    if (!currentResponse) {
       return null;
     }
-    return JournalService.parseDirectoryResponse(response.content);
-  }, [response]);
+    return JournalService.parseDirectoryResponse(currentResponse.content);
+  }, [currentResponse]);
 
   const isPinnedValue = (value: JournalResponse['pinned?'] | null | undefined): boolean => {
     if (value == null) {
@@ -112,17 +137,15 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
     return true;
   };
 
-  const isPinned = useMemo(() => {
-    return isPinnedValue(response?.['pinned?']);
-  }, [response]);
+  const isPinned = useMemo(() => isPinnedValue(currentResponse?.['pinned?']), [currentResponse]);
 
   const directoryEntries = useMemo(() => {
-    if (!response) {
+    if (!currentResponse) {
       return null;
     }
 
-    return JournalService.parseDirectoryEntries(response.content);
-  }, [response]);
+    return JournalService.parseDirectoryEntries(currentResponse.content);
+  }, [currentResponse]);
 
   const handleSave = async () => {
     if (!journalService || !selection) {
@@ -131,13 +154,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
 
     setIsLoading(true);
     try {
-      let valueToSave: any;
-      try {
-        valueToSave = JSON.parse(editValue);
-      } catch {
-        valueToSave = { '*type/string*': editValue };
-      }
-      await journalService.set(selection.path, valueToSave);
+      await journalService.setText(selection.path, editValue);
       setIsEditing(false);
       const nextResponse = await journalService.get(selection.path);
       setResponse(nextResponse);
@@ -215,10 +232,8 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
     );
   }
 
-  const { value: extractedContent } = JournalService.extractSchemeValue(response?.content);
-  const title = Array.isArray(selection.path[selection.path.length - 1])
-    ? String((selection.path[selection.path.length - 1] as string[]).slice(-1)[0] ?? '')
-    : 'item';
+  const extractedContent = JournalService.documentContentToText(currentResponse?.content);
+  const title = String(selection.path[selection.path.length - 1] ?? 'item');
 
   return (
     <div className="content-viewer">
@@ -290,14 +305,14 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
       </div>
 
       <div className="content-body">
-        {isLoading ? (
+        {isLoading && !currentResponse ? (
           <div className="loading-spinner" />
         ) : mode === 'ledger' && selection.type === 'file' && ledgerView === 'proof' ? (
-          <pre className="content-text">{JSON.stringify(response?.proof, null, 2)}</pre>
+          <pre className="content-text">{JSON.stringify(currentResponse?.proof, null, 2)}</pre>
         ) : directory ? (
           <div className="directory-list">
             {(directoryEntries ?? [])
-              .filter((item) => item.name !== '*directory*')
+              .filter((item) => !JournalService.isReservedStateSegment(item.name))
               .sort((a, b) => {
                 const leftRank = a.type === 'directory' ? 0 : 1;
                 const rightRank = b.type === 'directory' ? 0 : 1;

@@ -25,8 +25,6 @@ SOCIAL_AGENT_VERSION = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip(
 DEFAULT_GENERAL_COMPOSE = str(ROOT_DIR / "deploy" / "compose" / "general" / "compose.yaml")
 
 HTTP_PORT_BASE = 8192
-SMB_PORT_BASE = 1445
-FILE_SYSTEM_HOST_PORT_ZERO = 445
 DEFAULT_NODE_COUNT = 4
 DEFAULT_SECRET = "password"
 DEFAULT_ADMIN_USERNAME = "admin"
@@ -108,13 +106,16 @@ def rewrite_depends_on(depends_on, node_index):
     raise SystemExit("Unsupported compose depends_on format")
 
 
-def rewrite_service_environment(service_name, node_index, environment, secret, period, window, admin_username, admin_password):
+def rewrite_service_environment(service_name, node_index, environment, secret, period, window, admin_username, admin_password, bridge_publish):
     env_map = to_env_map(environment)
 
     if service_name == "journal":
         env_map["SECRET"] = secret
         env_map["PERIOD"] = str(period)
         env_map["WINDOW"] = str(window)
+        env_map["BRIDGE_PUBLISH"] = bridge_publish
+        env_map["INTERFACE"] = f"http://router-{node_index}/api/v1/journal/interface"
+        env_map["JOURNAL_NAME"] = f"journal-{node_index}"
     elif service_name == "gateway":
         env_map["JOURNAL_ENDPOINT"] = f"http://journal-{node_index}/interface"
         env_map["ROOT_ENDPOINT"] = f"http://journal-{node_index}/interface"
@@ -126,13 +127,13 @@ def rewrite_service_environment(service_name, node_index, environment, secret, p
         env_map["ROUTER_GATEWAY_HOST"] = f"gateway-{node_index}"
         env_map["ROUTER_EXPLORER_HOST"] = f"explorer-{node_index}"
         env_map["ROUTER_WORKBENCH_HOST"] = f"workbench-{node_index}"
+        env_map["ROUTER_FILE_SYSTEM_HOST"] = f"file-system-{node_index}:8080"
     elif service_name == "identity-provider":
         env_map["ADMIN_USERNAME"] = admin_username
         env_map["ADMIN_PASSWORD"] = admin_password
+        env_map["ORIGIN"] = f"http://localhost:{HTTP_PORT_BASE + node_index}"
     elif service_name == "file-system":
-        env_map["SYNC_FS_GatewayBaseUrl"] = f"http://gateway-{node_index}/api/v1"
-        env_map["SYNC_FS_GatewayAuthToken"] = secret
-        env_map["SYNC_FS_JournalJsonUrl"] = f"http://journal-{node_index}/interface"
+        env_map["SYNC_FS_GATEWAY_BASE_URL"] = f"http://gateway-{node_index}/api/v1"
 
     return env_map
 
@@ -184,6 +185,7 @@ def rewrite_service_volumes(service_name, node_index, volumes, named_volumes, ba
                 continue
 
             parts[0] = rewrite_journal_bind_source(source, base_compose_dir)
+            parts = [part.replace("Z", "z") if index > 0 else part for index, part in enumerate(parts)]
             rewritten.append(":".join(parts))
         return rewritten
 
@@ -193,9 +195,6 @@ def rewrite_service_volumes(service_name, node_index, volumes, named_volumes, ba
 def rewrite_ports(service_name, node_index):
     if service_name == "router":
         return [f"{HTTP_PORT_BASE + node_index}:80"]
-    if service_name == "file-system":
-        host_port = FILE_SYSTEM_HOST_PORT_ZERO if node_index == 0 else SMB_PORT_BASE + (node_index - 1)
-        return [f"{host_port}:445"]
     return None
 
 
@@ -212,17 +211,27 @@ def logical_node_name(node_index):
 
 
 def generate_peer_config(node_count, connectivity):
-    random.seed(0)
+    rng = random.Random(1)
     node_names = [logical_node_name(index) for index in range(node_count)]
-    edges = {
-        node_name: random.sample(
-            [other_name for other_name in node_names if other_name != node_name],
-            min(connectivity, len(node_names) - 1),
-        )
-        for node_name in node_names
+    publish_modes = {
+        node_name: "push" if index % 2 == 0 else "pull"
+        for index, node_name in enumerate(node_names)
     }
+    edges = {}
+    for node_name in node_names:
+        candidates = [other_name for other_name in node_names if other_name != node_name]
+        rng.shuffle(candidates)
+        selected = []
+        for peer in candidates:
+            if publish_modes[node_name] == "push":
+                selected.append({"node": peer, "mode": "push"})
+            elif publish_modes[peer] == "pull":
+                selected.append({"node": peer, "mode": "pull"})
+            if len(selected) >= connectivity:
+                break
+        edges[node_name] = selected
     nodes = {
-        node_name: {"router_host": f"router-{index}"}
+        node_name: {"router_host": f"router-{index}", "publish": publish_modes[node_name]}
         for index, node_name in enumerate(node_names)
     }
     return {"nodes": nodes, "edges": edges}
@@ -235,7 +244,6 @@ def make_social_agent_service(node_index, period, size, activity, words, clients
         f"ghcr.io/sandialabs/sync-web/social-agent:{SOCIAL_AGENT_VERSION}",
     )
     return {
-        "container_name": service_name,
         "image": image,
         "depends_on": [f"router-{node_index}", f"identity-provider-{node_index}"],
         "networks": ["public"],
@@ -252,21 +260,20 @@ def make_social_agent_service(node_index, period, size, activity, words, clients
             "BENCHMARK_OUTPUT": "/srv/results/benchmark.json",
         },
         "volumes": [
-            "./peers.json:/srv/peers.json:ro",
-            f"./metrics/{service_name}:/var/lib/node_exporter/textfile",
-            f"./results/{service_name}:/srv/results",
+            "./peers.json:/srv/peers.json:ro,z",
+            f"./metrics/{service_name}:/var/lib/node_exporter/textfile:Z",
+            f"./results/{service_name}:/srv/results:Z",
         ],
     }
 
 
 def make_aggregate_results_service():
     return {
-        "container_name": "aggregate-results",
         "image": "python:3.11-alpine",
         "working_dir": "/workspace",
         "command": ["python3", "aggregate_results.py"],
         "volumes": [
-            ".:/workspace",
+            ".:/workspace:z",
         ],
         "ports": [f"{AGGREGATE_RESULTS_PORT}:8090"],
         "restart": "unless-stopped",
@@ -293,7 +300,7 @@ def main():
     base = load_base_compose(base_compose_path)
     base_services = base["services"]
     base_named_volumes = base.get("volumes", {})
-
+    peers = generate_peer_config(node_count, connectivity)
     generated = {
         "services": {},
         "networks": {"public": {}},
@@ -312,7 +319,7 @@ def main():
         for service_name, service in base_services.items():
             generated_name = f"{service_name}-{node_index}"
             generated_service = copy.deepcopy(service)
-            generated_service["container_name"] = generated_name
+            generated_service.pop("container_name", None)
             generated_service.pop("profiles", None)
 
             if "depends_on" in generated_service:
@@ -329,6 +336,7 @@ def main():
                 window,
                 admin_username,
                 admin_password,
+                peers["nodes"][logical_node_name(node_index)]["publish"],
             )
 
             if "image" in generated_service:
@@ -368,7 +376,6 @@ def main():
         for volume_name, volume_config in base_named_volumes.items():
             generated["volumes"][f"{volume_name}-{node_index}"] = copy.deepcopy(volume_config)
 
-    peers = generate_peer_config(node_count, connectivity)
     generated["services"]["aggregate-results"] = make_aggregate_results_service()
 
     SCRIPT_DIR.mkdir(parents=True, exist_ok=True)

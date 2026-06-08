@@ -1,9 +1,10 @@
 import { randomBytes, createHash } from "node:crypto";
-import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { resolveIdentity, resolveSessionIdentity, UnauthorizedError } from "./auth";
 import type { ApiTokenEntry, KratosClient } from "./kratos";
 import type { JournalClient } from "./journal";
 import { JournalSemanticError } from "./journal";
+import { GatewayEventBroker, isGatewayEventPath } from "./events";
 
 export interface GatewayRoutesOptions {
   journal: JournalClient;
@@ -62,6 +63,146 @@ const extractJsonArguments = (body: unknown): unknown => {
   return record;
 };
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+type SchemeNode =
+  | { type: "list"; values: SchemeNode[] }
+  | { type: "symbol"; value: string }
+  | { type: "string"; value: string }
+  | { type: "byte-vector"; value: number[] }
+  | { type: "quoted"; value: SchemeNode };
+
+const jsonToSchemeExpression = (value: unknown): string => {
+  if (value === null || value === undefined) return "()";
+  if (typeof value === "boolean") return value ? "#t" : "#f";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return `(${value.map(jsonToSchemeExpression).join(" ")})`;
+  if (!isPlainRecord(value)) {
+    throw new Error("Unsupported JSON value in Scheme batch expression.");
+  }
+
+  if (Object.keys(value).length === 1) {
+    const stringValue = value["*type/string*"];
+    if (typeof stringValue === "string") return `"${escapeLispString(stringValue)}"`;
+    const quotedValue = value["*type/quoted*"];
+    if (quotedValue !== undefined) return `'${jsonToSchemeExpression(quotedValue)}`;
+    const byteVectorValue = value["*type/byte-vector*"];
+    if (typeof byteVectorValue === "string") {
+      const bytes = byteVectorValue.match(/.{1,2}/g)?.map((byte) => Number.parseInt(byte, 16)) ?? [];
+      return `#u(${bytes.join(" ")})`;
+    }
+    const vectorValue = value["*type/vector*"];
+    if (Array.isArray(vectorValue)) return `#(${vectorValue.map(jsonToSchemeExpression).join(" ")})`;
+    const pairValue = value["*type/pair*"];
+    if (Array.isArray(pairValue) && pairValue.length === 2) {
+      return `(${jsonToSchemeExpression(pairValue[0])} . ${jsonToSchemeExpression(pairValue[1])})`;
+    }
+  }
+
+  return `(${Object.entries(value)
+    .map(([key, entry]) => `(${key} ${jsonToSchemeExpression(entry)})`)
+    .join(" ")})`;
+};
+
+const parseSchemeResult = (text: string): unknown => {
+  let index = 0;
+  const peek = () => text[index];
+  const next = () => text[index++];
+  const skipSpace = () => {
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+  };
+
+  const parseString = (): SchemeNode => {
+    next();
+    let value = "";
+    while (index < text.length) {
+      const char = next();
+      if (char === '"') break;
+      if (char === "\\") {
+        value += next() ?? "";
+      } else {
+        value += char;
+      }
+    }
+    return { type: "string", value };
+  };
+
+  const parseAtom = (): { type: "symbol"; value: string } => {
+    let value = "";
+    while (index < text.length && !/\s|\(|\)|'/.test(peek())) value += next();
+    return { type: "symbol", value };
+  };
+
+  const parseByteVector = (): SchemeNode => {
+    index += 3; // #u(
+    const values: number[] = [];
+    while (index < text.length) {
+      skipSpace();
+      if (peek() === ")") {
+        next();
+        break;
+      }
+      const atom = parseAtom();
+      const byte = Number.parseInt(atom.value, 10);
+      if (!Number.isNaN(byte)) values.push(byte);
+    }
+    return { type: "byte-vector", value: values };
+  };
+
+  const parseNode = (): SchemeNode => {
+    skipSpace();
+    if (text.startsWith("#u(", index)) return parseByteVector();
+    if (peek() === "'") {
+      next();
+      return { type: "quoted", value: parseNode() };
+    }
+    if (peek() === '"') return parseString();
+    if (peek() === "(") {
+      next();
+      const values: SchemeNode[] = [];
+      while (index < text.length) {
+        skipSpace();
+        if (peek() === ")") {
+          next();
+          break;
+        }
+        values.push(parseNode());
+      }
+      return { type: "list", values };
+    }
+    return parseAtom();
+  };
+
+  const nodeToJson = (node: SchemeNode): unknown => {
+    if (node.type === "string") return { "*type/string*": node.value };
+    if (node.type === "byte-vector") {
+      return { "*type/byte-vector*": node.value.map((byte) => byte.toString(16).padStart(2, "0")).join("") };
+    }
+    if (node.type === "quoted") return { "*type/quoted*": nodeToJson(node.value) };
+    if (node.type === "symbol") {
+      if (node.value === "#t") return true;
+      if (node.value === "#f") return false;
+      if (/^-?\d+(\.\d+)?$/.test(node.value)) return Number(node.value);
+      return node.value;
+    }
+    if (node.values.length === 0) return null;
+    const assoc = node.values.every((entry) =>
+      entry.type === "list" && entry.values.length === 2 && entry.values[0].type === "symbol"
+    );
+    if (assoc) {
+      return Object.fromEntries(node.values.map((entry) => {
+        const pair = entry as { type: "list"; values: [SchemeNode, SchemeNode] };
+        return [(pair.values[0] as { type: "symbol"; value: string }).value, nodeToJson(pair.values[1])];
+      }));
+    }
+    return node.values.map(nodeToJson);
+  };
+
+  return nodeToJson(parseNode());
+};
+
 const extractSchemeArguments = (body: unknown): string => {
   if (typeof body === "string") return body;
   if (Buffer.isBuffer(body)) return body.toString("utf8");
@@ -76,8 +217,8 @@ const buildSchemeExpression = (
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    const identity = identityId ?? "*journal*";
-    parts.push(`(authentication ((identity ${identity}) (credentials "${escapeLispString(authSecret)}")))`);
+    const identityPart = identityId ? `(identity ${identityId}) ` : "";
+    parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
   }
   return `(${parts.join(" ")})`;
 };
@@ -128,7 +269,19 @@ const callWithNegotiation = async (input: {
     );
   }
 
-  const args = extractJsonArguments(request.body);
+  const rawArgs = extractJsonArguments(request.body);
+  if (!root && functionName === "batch!") {
+    const expression = buildSchemeExpression(
+      functionName,
+      jsonToSchemeExpression(rawArgs),
+      authSecret,
+      identityId
+    );
+    const result = await journal.callScheme({ expression, functionName });
+    return typeof result === "string" ? parseSchemeResult(result) : result;
+  }
+
+  const args = rawArgs;
   return root
     ? journal.callRootJson({
         functionName,
@@ -143,6 +296,23 @@ const callWithNegotiation = async (input: {
       });
 };
 
+const extractEventPath = (body: unknown): Array<string | number> | undefined => {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return undefined;
+  }
+  const path = (body as Record<string, unknown>).path;
+  return isGatewayEventPath(path) ? path : undefined;
+};
+
+const writeEventStreamHeaders = (reply: FastifyReply): void => {
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+};
+
 const generalAliases = {
   get: "get",
   set: "set!",
@@ -151,6 +321,7 @@ const generalAliases = {
   batch: "batch!",
   info: "info",
   synchronize: "synchronize",
+  "synchronize!": "synchronize!",
   resolve: "resolve",
   trace: "trace",
   bridge: "bridge!",
@@ -170,7 +341,24 @@ const rootAliases = {
   "set-query": "*set-query*",
 } as const;
 
-const publicGeneralFunctions = new Set<string>(["synchronize", "trace"]);
+const publicGeneralFunctions = new Set<string>(["synchronize", "synchronize!", "trace"]);
+const eventedGeneralOperations = new Set<string>([
+  "set",
+  "pin",
+  "unpin",
+  "batch",
+  "bridge",
+  "synchronize!",
+  "set-admins",
+  "set-window",
+  "set-secret",
+]);
+const eventedRootOperations = new Set<string>([
+  "step",
+  "set-secret",
+  "set-step",
+  "set-query",
+]);
 const requestModeDescription =
   "JSON mode: Content-Type application/json with a keyword argument object. Legacy array arguments are also accepted for compatibility. Scheme mode: Content-Type text/plain or application/scheme with a raw Scheme arguments expression (the gateway wraps it into the full journal transport call).";
 
@@ -210,6 +398,11 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls public general function `synchronize`. Used by bridges/services to fetch digest/proof material for anti-entropy synchronization.",
   },
+  "synchronize!": {
+    summary: "Receive pushed synchronization payload",
+    description:
+      "Calls public peer function `synchronize!`. Used by bridge publishers to push signed synchronization payloads to subscribers; journal signature verification and bridge policy checks are authoritative.",
+  },
   resolve: {
     summary: "Resolve committed chain content",
     description:
@@ -223,7 +416,7 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
   bridge: {
     summary: "Register or update a bridge",
     description:
-      "Calls general function `bridge!` with a bridge name and interface URL so the journal can wire its standard info/synchronize/trace handlers.",
+      "Calls general function `bridge!` with a bridge name and local bridge info. The local info includes the peer interface, local policy, role, and remote-name for publisher-initiated pushes.",
   },
   config: {
     summary: "Read full node config",
@@ -312,39 +505,41 @@ const makeBodyContent = (jsonExample?: unknown, schemeExample?: string) => ({
 });
 
 const generalOperationExamples: Record<string, unknown> = {
-  get:          { path: [["*state*", "mykey"]] },
-  set:          { path: [["*state*", "mykey"]], value: "myvalue" },
-  pin:          { path: [-1, ["*state*", "mykey"]] },
-  unpin:        { path: [-1, ["*state*", "mykey"]] },
-  resolve:      { path: [-1, ["*state*", "mykey"]], "pinned?": true, "proof?": false },
-  batch:        { queries: [{ function: "get", arguments: { path: [["*state*", "mykey"]] } }, { function: "config" }] },
+  get:          { path: ["*state*", "mykey"], "expression?": true },
+  set:          { path: ["*state*", "mykey"], value: "myvalue", "expression?": true },
+  pin:          { path: [-1, "*state*", "mykey"] },
+  unpin:        { path: [-1, "*state*", "mykey"] },
+  resolve:      { path: [-1, "*state*", "mykey"], "pinned?": true, "proof?": false, "expression?": true },
+  batch:        { queries: [{ function: "get", arguments: { path: ["*state*", "mykey"] } }, { function: "config" }] },
   info:         {},
-  bridge:       { name: "peer-a", interface: "http://peer-a/interface" },
+  bridge:       { name: "peer-a", "info-local": { interface: "http://peer-a/interface", policy: { publish: "push", subscribe: "pull" }, role: false, "remote-name": "my-journal" } },
   config:       {},
   admins:       {},
   "set-admins": { admins: ["admin", "alice"] },
   "set-window": { value: 128 },
   "set-secret": { secret: "new-secret" },
   synchronize:  { index: 0 },
-  trace:        { index: 0, path: [-1, ["*state*", "mykey"]] },
+  "synchronize!": { name: "peer-a", index: -1, response: [] },
+  trace:        { index: 0, path: [-1, "*state*", "mykey"] },
 };
 
 const generalSchemeExamples: Record<string, string> = {
-  get:          "((path ((*state* mykey))))",
-  set:          "((path ((*state* mykey))) (value myvalue))",
-  pin:          "((path (-1 (*state* mykey))))",
-  unpin:        "((path (-1 (*state* mykey))))",
-  resolve:      "((path (-1 (*state* mykey))) (pinned? #t) (proof? #f))",
-  batch:        "((queries (((function get) (arguments ((path ((*state* mykey))))) ((function config))))))",
+  get:          "((path (*state* mykey)))",
+  set:          "((path (*state* mykey)) (value myvalue))",
+  pin:          "((path (-1 *state* mykey)))",
+  unpin:        "((path (-1 *state* mykey)))",
+  resolve:      "((path (-1 *state* mykey)) (pinned? #t) (proof? #f))",
+  batch:        "((queries (((function get) (arguments ((path (*state* mykey)))) ((function config))))))",
   info:         "()",
-  bridge:       "((name peer-a) (interface \"http://peer-a/interface\"))",
+  bridge:       "((name peer-a) (info-local ((interface \"http://peer-a/interface\") (policy ((publish push) (subscribe pull))) (role #f) (remote-name my-journal))))",
   config:       "()",
   admins:       "()",
   "set-admins": "((admins (admin alice)))",
   "set-window": "((value 128))",
   "set-secret": "((secret new-secret))",
   synchronize:  "((index 0))",
-  trace:        "((index 0) (path (-1 (*state* mykey))))",
+  "synchronize!": "((name peer-a) (index -1) (response ()))",
+  trace:        "((index 0) (path (-1 *state* mykey)))",
 };
 
 const rootOperationExamples: Record<string, unknown> = {
@@ -371,6 +566,12 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   { journal, allowAdminRoutes, journalSecret, kratos }
 ) => {
   const rootRoutePath = "/api/v1/root";
+  const eventBroker = new GatewayEventBroker();
+  const eventKeepalive = setInterval(() => eventBroker.keepalive(), 25_000);
+  eventKeepalive.unref?.();
+  app.addHook("onClose", async () => {
+    clearInterval(eventKeepalive);
+  });
 
   app.get("/", async (_request, reply) =>
     reply.type("text/html").send(`<!doctype html>
@@ -638,12 +839,12 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
   -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: application/json" \\
-  -d '{"path":[["*state*","docs"]]}'</code></pre>
+  -d '{"path":["*state*","docs"]}'</code></pre>
       <p>Scheme body call:</p>
       <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
   -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: text/plain" \\
-  -d '((path ((*state* docs))))'</code></pre>
+  -d '((path (*state* docs)))'</code></pre>
     </div>
     </main>
   </body>
@@ -825,6 +1026,25 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     async () => journal.callJson({ functionName: "info" })
   );
 
+  app.get(
+    "/api/v1/events",
+    {
+      schema: {
+        tags: ["Events"],
+        summary: "Subscribe to gateway-local change events",
+        description:
+          "Authenticated Server-Sent Events stream for lightweight gateway-local change hints. Events are not authoritative history; clients should re-fetch content under normal authorization.",
+      },
+    },
+    async (request, reply) => {
+      await resolveIdentity(request, journalSecret, kratos);
+      writeEventStreamHeaders(reply);
+      const unsubscribe = eventBroker.subscribe(reply.raw);
+      request.raw.on("close", unsubscribe);
+      reply.hijack();
+    }
+  );
+
   app.post(
     "/api/v1/journal/interface",
     {
@@ -872,15 +1092,23 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           body: makeBodyContent(generalOperationExamples[operation], generalSchemeExamples[operation]),
         },
       },
-      async (request) =>
-        callWithNegotiation({
+      async (request) => {
+        const result = await callWithNegotiation({
           request,
           journal,
           functionName,
           requiresAuth,
           journalSecret,
           kratos,
-        })
+        });
+        if (eventedGeneralOperations.has(operation)) {
+          eventBroker.publish({
+            operation: functionName,
+            path: extractEventPath(request.body),
+          });
+        }
+        return result;
+      }
     );
   }
 
@@ -898,8 +1126,8 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             body: makeBodyContent(rootOperationExamples[operation], rootSchemeExamples[operation]),
           },
         },
-        async (request) =>
-          callWithNegotiation({
+        async (request) => {
+          const result = await callWithNegotiation({
             request,
             journal,
             functionName,
@@ -907,7 +1135,12 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             root: true,
             journalSecret,
             kratos,
-          })
+          });
+          if (eventedRootOperations.has(operation)) {
+            eventBroker.publish({ operation: functionName });
+          }
+          return result;
+        }
       );
     }
   }

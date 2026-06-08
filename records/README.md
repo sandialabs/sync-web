@@ -35,8 +35,8 @@ These Scheme modules are intended to be loaded into a running Synchronic Web Jou
 3. **Invoke record/ledger operations**  
    Use the installed query interface to call functions such as:
    ```
-   ((function set!) (arguments ((path ((*state* my data path))) (value 42))) (authentication "interface-pass"))
-   ((function get) (arguments ((path ((*state* my data path))))) (authentication "interface-pass"))
+   ((function set!) (arguments ((path (*state* my data path)) (value 42))) (authentication "interface-pass"))
+   ((function get) (arguments ((path (*state* my data path)))) (authentication "interface-pass"))
    ```
 
 ## Notes

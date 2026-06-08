@@ -11,9 +11,40 @@ ROOT_DIR="$(git -C "$(dirname -- "$0")" rev-parse --show-toplevel)"
 COMPOSE_DIR="$ROOT_DIR/deploy/compose/general"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yaml"
 
-PORT="${PORT:-8192}"
-ORIGIN="${ORIGIN:-http://localhost:$PORT}"
-SMB_PORT="${SMB_PORT:-445}"
+if [ -z "${CONTAINER_RUNTIME+x}" ]; then
+    if command -v docker >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="docker"
+    elif command -v podman >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="podman"
+    else
+        echo "FAIL: neither docker nor podman is available" >&2
+        exit 1
+    fi
+fi
+
+if [ -z "${CONTAINER_COMPOSE+x}" ]; then
+    case "$CONTAINER_RUNTIME" in
+        docker)
+            CONTAINER_COMPOSE="docker compose"
+            ;;
+        podman)
+            if podman compose version >/dev/null 2>&1; then
+                CONTAINER_COMPOSE="podman compose"
+            elif command -v podman-compose >/dev/null 2>&1; then
+                CONTAINER_COMPOSE="podman-compose"
+            else
+                CONTAINER_COMPOSE="podman compose"
+            fi
+            ;;
+        *)
+            CONTAINER_COMPOSE="$CONTAINER_RUNTIME compose"
+            ;;
+    esac
+fi
+
+HTTP_PORT="${HTTP_PORT:-${PORT:-8192}}"
+HTTPS_PORT="${HTTPS_PORT:-8193}"
+ORIGIN="${ORIGIN:-http://localhost:$HTTP_PORT}"
 SECRET="${SECRET:-password}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
 PERIOD="${PERIOD:-2}"
@@ -21,11 +52,19 @@ WINDOW="${WINDOW:-1024}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 CONNECT_TIMEOUT_SECONDS="${CONNECT_TIMEOUT_SECONDS:-2}"
 REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-5}"
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$COMPOSE_DIR")}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-sync-local}"
 LOCAL_COMPOSE_FORCE_HTTP="${LOCAL_COMPOSE_FORCE_HTTP:-1}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-CONTAINER_COMPOSE="${CONTAINER_COMPOSE:-$CONTAINER_RUNTIME compose}"
+
+LOCAL_COMPOSE_SKIP_FILE_SYSTEM="${LOCAL_COMPOSE_SKIP_FILE_SYSTEM:-0}"
+
+if [ "$CONTAINER_RUNTIME" = "docker" ]; then
+    COMPOSE_GLOBAL_ARGS="${COMPOSE_GLOBAL_ARGS:---ansi always}"
+    COMPOSE_UP_ARGS="${COMPOSE_UP_ARGS:---pull never}"
+else
+    COMPOSE_GLOBAL_ARGS="${COMPOSE_GLOBAL_ARGS:-}"
+    COMPOSE_UP_ARGS="${COMPOSE_UP_ARGS:-}"
+fi
 
 cleanup_mode="down"
 
@@ -147,16 +186,23 @@ build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_R
 build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/router" "$ROUTER_LOCAL_TAG" "$ROUTER_REMOTE_TAG"
 build_and_retag "$ROOT_DIR/services/identity-provider" "$IDENTITY_PROVIDER_LOCAL_TAG" "$IDENTITY_PROVIDER_REMOTE_TAG"
-build_and_retag "$ROOT_DIR/services/file-system" "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_REMOTE_TAG"
-echo "Tagging $FILE_SYSTEM_LOCAL_TAG as $FILE_SYSTEM_IMAGE ..."
-$CONTAINER_RUNTIME tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
+if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" != "1" ]; then
+    build_and_retag "$ROOT_DIR/services/file-system" "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_REMOTE_TAG"
+    echo "Tagging $FILE_SYSTEM_LOCAL_TAG as $FILE_SYSTEM_IMAGE ..."
+    $CONTAINER_RUNTIME tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
+fi
 
 if [ "$MODE" = "build" ]; then
     echo "PASS: local images built and tagged."
     exit 0
 fi
 
-export SECRET ADMIN_USERNAME PERIOD WINDOW PORT ORIGIN SMB_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
+export SECRET ADMIN_USERNAME PERIOD WINDOW HTTP_PORT ORIGIN HTTPS_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
+
+compose_up_services=""
+if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" = "1" ]; then
+    compose_up_services="journal explorer workbench identity-provider gateway router"
+fi
 
 confirm_volume_wipe_if_needed
 echo "Starting from scratch: removing compose stack + volumes..."
@@ -186,7 +232,7 @@ wait_for_admin_seed() {
 
     elapsed=0
     while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
-        logs="$(dc logs --no-color identity-provider 2>/dev/null || true)"
+        logs="$(dc logs --no-color identity-provider 2>/dev/null || dc logs identity-provider 2>/dev/null || true)"
         if printf "%s" "$logs" | grep -Fq "Admin identity '$ADMIN_USERNAME' created" \
           || printf "%s" "$logs" | grep -Fq "Admin identity '$ADMIN_USERNAME' already exists"; then
             return 0
@@ -208,35 +254,35 @@ api_post() {
     curl -fsS \
       -H "Content-Type: application/json" \
       -d "$body" \
-      "http://127.0.0.1:$PORT/interface"
+      "http://127.0.0.1:$HTTP_PORT/interface"
 }
 
 gateway_status() {
     method="$1"
     path="$2"
     shift 2
-    curl -sS -o /dev/null -w "%{http_code}" -X "$method" "$@" "http://127.0.0.1:$PORT$path"
+    curl -sS -o /dev/null -w "%{http_code}" -X "$method" "$@" "http://127.0.0.1:$HTTP_PORT$path"
 }
 
 gateway_get() {
     path="$1"
     shift
-    curl -fsS "$@" "http://127.0.0.1:$PORT$path"
+    curl -fsS "$@" "http://127.0.0.1:$HTTP_PORT$path"
 }
 
 if [ "$MODE" = "up" ]; then
-    echo "Starting compose stack on port $PORT in up mode (Ctrl+C to stop)..."
-    dc --ansi always up --pull never
+    echo "Starting compose project '$COMPOSE_PROJECT_NAME' on HTTP $HTTP_PORT / HTTPS $HTTPS_PORT in up mode (Ctrl+C to stop)..."
+    dc $COMPOSE_GLOBAL_ARGS up $COMPOSE_UP_ARGS $compose_up_services
     exit 0
 fi
 
-echo "Starting compose stack on port $PORT in smoke mode..."
-dc --ansi always up -d --pull never
+echo "Starting compose project '$COMPOSE_PROJECT_NAME' on HTTP $HTTP_PORT / HTTPS $HTTPS_PORT in smoke mode..."
+dc $COMPOSE_GLOBAL_ARGS up -d $COMPOSE_UP_ARGS $compose_up_services
 
 echo "Waiting for routes..."
-wait_for_http "http://127.0.0.1:$PORT/explorer/"
-wait_for_http "http://127.0.0.1:$PORT/workbench/"
-wait_for_http "http://127.0.0.1:$PORT/api/v1/docs"
+wait_for_http "http://127.0.0.1:$HTTP_PORT/explorer/"
+wait_for_http "http://127.0.0.1:$HTTP_PORT/workbench/"
+wait_for_http "http://127.0.0.1:$HTTP_PORT/api/v1/docs"
 echo "Waiting for seeded admin identity..."
 wait_for_admin_seed
 
@@ -269,50 +315,98 @@ if [ "$root_unauthorized_status" != "401" ]; then
     exit 1
 fi
 
-if ! command -v smbclient >/dev/null 2>&1; then
-    echo "FAIL: smbclient is required for local-compose smoke validation"
+if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" = "1" ]; then
+    echo "Skipping WebDAV file-system smoke checks."
+    echo "PASS: smoke checks succeeded."
+    exit 0
+fi
+
+echo "Running WebDAV file-system smoke checks..."
+webdav_options_status="$(gateway_status OPTIONS "/webdav/stage/admin/compose-smoke.txt")"
+if [ "$webdav_options_status" != "204" ]; then
+    echo "FAIL: expected WebDAV OPTIONS to return 204, got $webdav_options_status"
     exit 1
 fi
 
-echo "Waiting for SMB file-system service on port $SMB_PORT..."
-elapsed=0
-while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
-    if smbclient //127.0.0.1/sync -N -p "$SMB_PORT" -c 'ls' >/tmp/sync-services-fs-root-ls.log 2>&1; then
-        break
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-if [ "$elapsed" -ge "$TIMEOUT_SECONDS" ]; then
-    echo "FAIL: timed out waiting for SMB file-system service on port $SMB_PORT"
-    cat /tmp/sync-services-fs-root-ls.log 2>/dev/null || true
+webdav_root_status="$(gateway_status PROPFIND "/webdav/")"
+if [ "$webdav_root_status" != "207" ]; then
+    echo "FAIL: expected WebDAV root PROPFIND to return 207, got $webdav_root_status"
     exit 1
 fi
 
-fs_root_listing="$(cat /tmp/sync-services-fs-root-ls.log)"
-for required in stage ledger control; do
-    if ! printf "%s" "$fs_root_listing" | grep -q " $required "; then
-        echo "FAIL: expected SMB root listing to contain '$required'"
-        printf "%s\n" "$fs_root_listing"
-        exit 1
-    fi
-done
+webdav_unauthorized_status="$(gateway_status PROPFIND "/webdav/stage/admin/compose-smoke.txt")"
+if [ "$webdav_unauthorized_status" != "401" ]; then
+    echo "FAIL: expected unauthorized WebDAV stage PROPFIND to return 401, got $webdav_unauthorized_status"
+    exit 1
+fi
 
-fs_tmp_dir="/tmp/sync-services-fs-smoke"
+login_flow_json="$(curl -fsS "http://127.0.0.1:$HTTP_PORT/auth/.ory/self-service/login/api")"
+login_flow="$(printf "%s" "$login_flow_json" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+session_json="$(curl -fsS \
+  -X POST "http://127.0.0.1:$HTTP_PORT/auth/.ory/self-service/login?flow=$login_flow" \
+  -H "Content-Type: application/json" \
+  -d "{\"method\":\"password\",\"identifier\":\"$ADMIN_USERNAME\",\"password\":\"$SECRET\"}")"
+session_token="$(printf "%s" "$session_json" | python -c 'import json,sys; print(json.load(sys.stdin)["session_token"])')"
+api_token_json="$(curl -fsS \
+  -X POST "http://127.0.0.1:$HTTP_PORT/api/v1/tokens" \
+  -H "X-Session-Token: $session_token" \
+  -H "Content-Type: application/json" \
+  -d '{"description":"local-compose WebDAV smoke"}')"
+api_token="$(printf "%s" "$api_token_json" | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+
+fs_tmp_dir="/tmp/sync-services-webdav-smoke"
 fs_local_file="$fs_tmp_dir/local.txt"
 fs_download_file="$fs_tmp_dir/downloaded.txt"
 mkdir -p "$fs_tmp_dir"
-printf "compose filesystem smoke\n" > "$fs_local_file"
+printf "compose WebDAV smoke\n" > "$fs_local_file"
 rm -f "$fs_download_file"
 
-if ! smbclient //127.0.0.1/sync -N -p "$SMB_PORT" -c "cd stage; put $fs_local_file compose-smoke.txt; get compose-smoke.txt $fs_download_file; del compose-smoke.txt" >/tmp/sync-services-fs-stage.log 2>&1; then
-    echo "FAIL: SMB stage smoke failed"
-    cat /tmp/sync-services-fs-stage.log
+webdav_put_status="$(curl -sS -o /dev/null -w "%{http_code}" \
+  -u "$ADMIN_USERNAME:$api_token" \
+  -T "$fs_local_file" \
+  "http://127.0.0.1:$HTTP_PORT/webdav/stage/$ADMIN_USERNAME/compose-smoke.txt")"
+if [ "$webdav_put_status" != "201" ]; then
+    echo "FAIL: expected WebDAV PUT to return 201, got $webdav_put_status"
     exit 1
 fi
 
+webdav_get_status="$(curl -sS -o "$fs_download_file" -w "%{http_code}" \
+  -u "$ADMIN_USERNAME:$api_token" \
+  "http://127.0.0.1:$HTTP_PORT/webdav/stage/$ADMIN_USERNAME/compose-smoke.txt")"
+if [ "$webdav_get_status" != "200" ]; then
+    echo "FAIL: expected WebDAV GET to return 200, got $webdav_get_status"
+    exit 1
+fi
 if ! cmp -s "$fs_local_file" "$fs_download_file"; then
-    echo "FAIL: SMB stage round-trip content mismatch"
+    echo "FAIL: WebDAV round-trip content mismatch"
+    exit 1
+fi
+
+curl -fsS -u "$ADMIN_USERNAME:$api_token" \
+  -X PROPFIND "http://127.0.0.1:$HTTP_PORT/webdav/stage/$ADMIN_USERNAME/" \
+  -o /tmp/sync-services-webdav-propfind.xml
+if ! grep -q "compose-smoke.txt" /tmp/sync-services-webdav-propfind.xml; then
+    echo "FAIL: WebDAV PROPFIND did not list uploaded file"
+    cat /tmp/sync-services-webdav-propfind.xml
+    exit 1
+fi
+
+webdav_move_status="$(curl -sS -o /dev/null -w "%{http_code}" \
+  -u "$ADMIN_USERNAME:$api_token" \
+  -X MOVE \
+  -H "Destination: http://127.0.0.1:$HTTP_PORT/webdav/stage/$ADMIN_USERNAME/compose-smoke-moved.txt" \
+  "http://127.0.0.1:$HTTP_PORT/webdav/stage/$ADMIN_USERNAME/compose-smoke.txt")"
+if [ "$webdav_move_status" != "201" ]; then
+    echo "FAIL: expected WebDAV MOVE to return 201, got $webdav_move_status"
+    exit 1
+fi
+
+webdav_delete_status="$(curl -sS -o /dev/null -w "%{http_code}" \
+  -u "$ADMIN_USERNAME:$api_token" \
+  -X DELETE \
+  "http://127.0.0.1:$HTTP_PORT/webdav/stage/$ADMIN_USERNAME/compose-smoke-moved.txt")"
+if [ "$webdav_delete_status" != "204" ]; then
+    echo "FAIL: expected WebDAV DELETE to return 204, got $webdav_delete_status"
     exit 1
 fi
 

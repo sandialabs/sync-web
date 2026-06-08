@@ -14,6 +14,13 @@ import {
   DirectoryEntryType
 } from '../types';
 
+export interface GatewayChangeEvent {
+  id?: number;
+  operation: string;
+  path?: JournalPath;
+  time?: string;
+}
+
 interface GatewayErrorPayload {
   error?: string;
   message?: string;
@@ -68,6 +75,52 @@ export class JournalService {
       }
     }
     return { value, schemeType: null };
+  }
+
+  static textToByteVector(value: string): { '*type/byte-vector*': string } {
+    const escaped = encodeURIComponent(value);
+    let hex = '';
+    for (let i = 0; i < escaped.length; i += 1) {
+      if (escaped[i] === '%') {
+        hex += escaped.slice(i + 1, i + 3).toLowerCase();
+        i += 2;
+      } else {
+        hex += escaped.charCodeAt(i).toString(16).padStart(2, '0');
+      }
+    }
+    return { '*type/byte-vector*': hex };
+  }
+
+  static byteVectorToText(value: unknown): string | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const encoded = (value as Record<string, unknown>)['*type/byte-vector*'];
+    if (typeof encoded !== 'string') {
+      return null;
+    }
+    if (encoded.length % 2 !== 0 || /[^0-9a-f]/i.test(encoded)) {
+      return null;
+    }
+    const escaped = encoded.match(/.{1,2}/g)?.map((chunk) => `%${chunk}`).join('') ?? '';
+    try {
+      return decodeURIComponent(escaped);
+    } catch {
+      return null;
+    }
+  }
+
+  static documentContentToText(value: unknown): string {
+    const decoded = JournalService.byteVectorToText(value);
+    if (decoded !== null) {
+      return decoded;
+    }
+    const { value: extracted } = JournalService.extractSchemeValue(value);
+    return typeof extracted === 'string' ? extracted : JSON.stringify(extracted, null, 2);
+  }
+
+  static isReservedStateSegment(value: string): boolean {
+    return value.startsWith('*') && value.endsWith('*');
   }
 
   /**
@@ -190,7 +243,10 @@ export class JournalService {
       return '';
     }
     const bridge = value as Record<string, unknown>;
-    const raw = bridge.interface;
+    const local = bridge.local && typeof bridge.local === 'object' && !Array.isArray(bridge.local)
+      ? bridge.local as Record<string, unknown>
+      : bridge;
+    const raw = local.interface;
     const { value: endpoint } = JournalService.extractSchemeValue(raw);
     return typeof endpoint === 'string' ? endpoint : '';
   }
@@ -303,6 +359,24 @@ export class JournalService {
     }
   }
 
+  subscribeEvents(input: {
+    onChange: (event: GatewayChangeEvent) => void;
+    onError?: (event: Event) => void;
+  }): () => void {
+    const source = new EventSource(this.buildGatewayUrl('/events'), { withCredentials: true });
+    source.addEventListener('sync-web-change', (message) => {
+      try {
+        input.onChange(JSON.parse((message as MessageEvent).data) as GatewayChangeEvent);
+      } catch {
+        input.onChange({ operation: 'unknown' });
+      }
+    });
+    if (input.onError) {
+      source.addEventListener('error', input.onError);
+    }
+    return () => source.close();
+  }
+
   /**
    * Get current size of the ledger
    */
@@ -323,7 +397,12 @@ export class JournalService {
       path: '/general/bridge',
       args: {
         name,
-        interface: endpointStr,
+        'info-local': {
+          interface: endpointStr,
+          policy: { publish: 'push', subscribe: 'pull' },
+          role: false,
+          'remote-name': name,
+        },
       },
     });
   }
@@ -332,17 +411,18 @@ export class JournalService {
    * Set data at path to the new value
    */
   async set(path: JournalPath, value: any): Promise<boolean> {
-    const wrappedValue = typeof value === 'string' 
-      ? { '*type/string*': value } 
-      : value;
     return this.request<boolean>({
       method: 'POST',
       path: '/general/set',
       args: {
         path,
-        value: wrappedValue,
+        value,
       },
     });
+  }
+
+  async setText(path: JournalPath, value: string): Promise<boolean> {
+    return this.set(path, JournalService.textToByteVector(value));
   }
 
   /**
@@ -398,50 +478,48 @@ export class JournalService {
     return this.set(path, ['nothing']);
   }
 
-  private requireStatePath(path: JournalPath): string[] {
-    const last = path[path.length - 1];
-    if (!Array.isArray(last) || last[0] !== '*state*') {
+  private requireStatePath(path: JournalPath): JournalPath {
+    if (!path.includes('*state*')) {
       throw new Error('Expected a state path');
     }
-    return last;
+    return path;
   }
 
   private buildStateChildPath(parentPath: JournalPath, childName: string): JournalPath {
-    const block = this.requireStatePath(parentPath);
-    return [
-      ...parentPath.slice(0, -1),
-      ['*state*', ...block.slice(1), childName],
-    ];
+    this.requireStatePath(parentPath);
+    return [...parentPath, childName];
   }
 
   private buildStateSiblingPath(path: JournalPath, siblingName: string): JournalPath {
-    const block = this.requireStatePath(path);
-    return [
-      ...path.slice(0, -1),
-      ['*state*', ...block.slice(1, -1), siblingName],
-    ];
+    this.requireStatePath(path);
+    return [...path.slice(0, -1), siblingName];
   }
 
   private buildDirectoryMarkerPath(path: JournalPath): JournalPath {
-    const block = this.requireStatePath(path);
-    return [
-      ...path.slice(0, -1),
-      ['*state*', ...block.slice(1), '*directory*'],
-    ];
+    this.requireStatePath(path);
+    return [...path, '*directory*'];
   }
 
   async getDirectoryEntries(path: JournalPath): Promise<DirectoryEntry[]> {
-    const response = await this.get(path);
-    return JournalService.parseDirectoryEntries(response.content) ?? [];
+    const response = await this.get(path, { pinned: false, proof: false });
+    const content = response && typeof response === 'object' && !Array.isArray(response) && 'content' in response
+      ? response.content
+      : response;
+    return (JournalService.parseDirectoryEntries(content) ?? [])
+      .filter((entry) => !JournalService.isReservedStateSegment(entry.name));
   }
 
   async createFile(parentPath: JournalPath, fileName: string): Promise<boolean> {
-    return this.set(this.buildStateChildPath(parentPath, fileName), { '*type/string*': '' });
+    return this.set(this.buildStateChildPath(parentPath, fileName), JournalService.textToByteVector(''));
   }
 
   async createDirectory(parentPath: JournalPath, directoryName: string): Promise<boolean> {
     const dirPath = this.buildStateChildPath(parentPath, directoryName);
-    return this.set(this.buildDirectoryMarkerPath(dirPath), true);
+    return this.ensureDirectory(dirPath);
+  }
+
+  async ensureDirectory(path: JournalPath): Promise<boolean> {
+    return this.set(this.buildDirectoryMarkerPath(path), JournalService.textToByteVector(''));
   }
 
   async uploadFile(parentPath: JournalPath, file: File): Promise<boolean> {
@@ -463,7 +541,7 @@ export class JournalService {
     const response = await this.get(path);
     const directoryEntries = JournalService.parseDirectoryEntries(response.content);
     if (directoryEntries) {
-      for (const entry of directoryEntries.filter((item) => item.name !== '*directory*')) {
+      for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStateSegment(item.name))) {
         const childPath = this.buildStateChildPath(path, entry.name);
         await this.deleteStagePath(childPath);
       }
@@ -477,7 +555,7 @@ export class JournalService {
   async download(path: JournalPath): Promise<{ blob: Blob; filename: string }> {
     const response = await this.get(path);
     const stateBlock = this.requireStatePath(path);
-    const fallbackName = stateBlock[stateBlock.length - 1] || 'download';
+    const fallbackName = String(stateBlock[stateBlock.length - 1] || 'download');
 
     if (
       response.content &&
@@ -509,8 +587,8 @@ export class JournalService {
     const directoryEntries = JournalService.parseDirectoryEntries(response.content);
 
     if (directoryEntries) {
-      await this.set(this.buildDirectoryMarkerPath(targetPath), true);
-      for (const entry of directoryEntries.filter((item) => item.name !== '*directory*')) {
+      await this.set(this.buildDirectoryMarkerPath(targetPath), JournalService.textToByteVector(''));
+      for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStateSegment(item.name))) {
         await this.copyStagePath(
           this.buildStateChildPath(sourcePath, entry.name),
           this.buildStateChildPath(targetPath, entry.name),

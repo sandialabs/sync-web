@@ -106,7 +106,12 @@ class SocialAgentRunTests(unittest.TestCase):
                     "bridge",
                     {
                         "name": "journal-1",
-                        "interface": {"*type/string*": "http://router-1/api/v1/journal/interface"},
+                        "info-local": {
+                            "interface": {"*type/string*": "http://router-1/api/v1/journal/interface"},
+                            "policy": {"publish": "push", "subscribe": "pull"},
+                            "role": False,
+                            "remote-name": "journal-0",
+                        },
                     },
                 )
 
@@ -124,8 +129,8 @@ class SocialAgentRunTests(unittest.TestCase):
             run.METRICS = MagicMock()
             run.API_TOKEN = "test-token"
             payload = {
-                "path": [["*state*", "data", "key-1"]],
-                "value": {"*type/string*": "value-1"},
+                "path": ["*state*", "data", "key-1"],
+                "value": {"*type/byte-vector*": "76616c75652d31"},
             }
             nodes = {"journal-0": {"router_host": "router-0"}}
 
@@ -161,7 +166,7 @@ class SocialAgentRunTests(unittest.TestCase):
             nodes = {"journal-0": {"router_host": "router-0"}}
 
             with patch.object(run.requests, "post", return_value=_FakeResponse({"ok": True})) as mock_post:
-                run.call(nodes, "get", {"path": [["*state*", "x"]]})
+                run.call(nodes, "get", {"path": ["*state*", "x"]})
 
             self.assertEqual(mock_post.call_args.args[0], "http://router.local/custom/general/get")
 
@@ -179,7 +184,7 @@ class SocialAgentRunTests(unittest.TestCase):
                 result = run.call(
                     nodes,
                     "get",
-                    {"path": [-1, ["*state*", "data", "key-0"]]},
+                    {"path": [-1, "*state*", "data", "key-0"]},
                 )
 
             self.assertEqual(result, {"*type/string*": "x"})
@@ -190,7 +195,7 @@ class SocialAgentRunTests(unittest.TestCase):
             self.assertEqual(
                 mock_post.call_args.kwargs["json"],
                 {
-                    "path": [-1, ["*state*", "data", "key-0"]],
+                    "path": [-1, "*state*", "data", "key-0"],
                     "pinned?": False,
                     "proof?": False,
                 },
@@ -325,7 +330,7 @@ class SocialAgentRunTests(unittest.TestCase):
                 "journal-0": {"router_host": "router-0"},
                 "journal-1": {"router_host": "router-1"},
             }
-            edges = {"journal-0": ["journal-1"], "journal-1": []}
+            edges = {"journal-0": [{"node": "journal-1", "mode": "push"}], "journal-1": []}
 
             with patch.object(run, "acquire_api_token"):
                 with patch.object(run, "call", side_effect=[True, KeyboardInterrupt()]) as mock_call:
@@ -343,7 +348,12 @@ class SocialAgentRunTests(unittest.TestCase):
                 mock_call.call_args_list[0].args[2],
                 {
                     "name": "journal-1",
-                    "interface": {"*type/string*": "http://router-1/api/v1/journal/interface"},
+                    "info-local": {
+                        "interface": {"*type/string*": "http://router-1/api/v1/journal/interface"},
+                        "policy": {"publish": "push", "subscribe": "none"},
+                        "role": "publisher",
+                        "remote-name": "journal-0",
+                    },
                 },
             )
 
@@ -402,7 +412,7 @@ class SocialAgentRunTests(unittest.TestCase):
                         return True
                     raise requests.HTTPError("boom")
                 if operation == "get":
-                    return {"*type/string*": "one two"}
+                    return {"*type/byte-vector*": "6f6e652074776f"}
                 if operation in {"pin", "unpin"}:
                     raise KeyboardInterrupt()
                 raise AssertionError(f"Unexpected operation {operation}")
@@ -487,7 +497,7 @@ class SocialAgentRunTests(unittest.TestCase):
                         raise KeyboardInterrupt()
                     return True
                 if operation == "get":
-                    return {"*type/string*": "one two"}
+                    return {"*type/byte-vector*": "6f6e652074776f"}
                 if operation in {"pin", "unpin"}:
                     return True
                 raise AssertionError(f"Unexpected operation {operation}")
@@ -511,9 +521,10 @@ class SocialAgentRunTests(unittest.TestCase):
 
             get_call = next(call for call in mock_call.call_args_list if call.args[1] == "get")
             self.assertEqual(
-                get_call.args[2]["path"][-1],
-                ["*state*", "admin", "data", "key-0"],
+                get_call.args[2]["path"],
+                [-1, "*state*", "admin", "data", "key-0"],
             )
+            self.assertNotIn("expression?", get_call.args[2])
             fake_metrics.record_cycle.assert_called()
 
 if __name__ == "__main__":

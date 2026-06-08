@@ -115,7 +115,7 @@ Gateway supports both JSON and Scheme request bodies for `POST` operation endpoi
 Example body:
 
 ```scheme
-((path ((*state* docs article hash))) (pinned? #t) (proof? #t))
+((path (*state* docs article hash)) (pinned? #t) (proof? #t))
 ```
 
 Gateway composes the full Scheme call expression and forwards to the raw journal transport endpoint:
@@ -195,7 +195,7 @@ Admin-oriented general endpoints:
 - `admins` calls `*admins-get*` and returns the interface admin username list.
 - `set-admins` calls `*admins-set*` and replaces that list wholesale.
 - `set-window` calls `*window-set*` and updates the public ledger retention window.
-- `bridge` expects the concrete remote journal proxy endpoint, for example `http://peer.example/api/v1/journal/interface`.
+- `bridge` expects `info-local` with a concrete remote journal proxy endpoint, for example `((interface "http://peer.example/api/v1/journal/interface") (policy ((publish push) (subscribe pull))) (role #f) (remote-name local-journal))`.
 
 ### Root (disabled by default)
 
@@ -222,7 +222,7 @@ Restricted JSON call:
 curl -X POST http://127.0.0.1:8180/api/v1/general/get \
   -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: application/json" \
-  -d '{"path":[["*state*","docs","article","hash"]]}'
+  -d '{"path":["*state*","docs","article","hash"]}'
 ```
 
 Restricted Scheme call:
@@ -231,7 +231,7 @@ Restricted Scheme call:
 curl -X POST http://127.0.0.1:8180/api/v1/general/get \
   -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: text/plain" \
-  -d '((path ((*state* docs article hash))))'
+  -d '((path (*state* docs article hash)))'
 ```
 
 Restricted root step call:
@@ -254,7 +254,7 @@ curl -X POST http://127.0.0.1:8180/api/v1/general/batch \
       {
         "function": "get",
         "arguments": {
-          "path": [["*state*","docs","article","hash"]]
+          "path": ["*state*","docs","article","hash"]
         }
       },
       {
@@ -270,7 +270,7 @@ Restricted batch call in Scheme mode:
 curl -X POST http://127.0.0.1:8180/api/v1/general/batch \
   -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: text/plain" \
-  -d '((queries (((function get) (arguments ((path ((*state* docs article hash)))))
+  -d '((queries (((function get) (arguments ((path (*state* docs article hash))))
                ((function config))))))'
 ```
 

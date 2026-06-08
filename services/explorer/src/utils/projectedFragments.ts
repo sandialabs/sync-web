@@ -1,5 +1,5 @@
 import { ExplorerMode, ExplorerSelection, JournalPath, LedgerHop } from '../types';
-import { buildLedgerStateRootPath } from './ledgerRoute';
+import { LEDGER_LATEST, buildLedgerStateRootPath } from './ledgerRoute';
 
 const encodeSegments = (segments: string[], isDirectory: boolean): string => {
   const encoded = segments.map((segment) => encodeURIComponent(segment)).join('/');
@@ -25,15 +25,14 @@ const decodeHashSegments = (hash: string): { segments: string[]; isDirectory: bo
 
 const buildStagePath = (selection: ExplorerSelection | null): JournalPath => {
   if (!selection) {
-    return [['*state*']];
+    return ['*state*'];
   }
   return selection.path;
 };
 
 const buildStageFragment = (selection: ExplorerSelection | null): string => {
   const path = buildStagePath(selection);
-  const block = path[path.length - 1];
-  const suffix = Array.isArray(block) ? block.slice(1) : [];
+  const suffix = path[0] === '*state*' ? path.slice(1).map(String) : [];
   return encodeSegments(['stage', ...suffix], selection?.type !== 'file');
 };
 
@@ -45,16 +44,18 @@ const getLedgerRootSnapshot = (hop: LedgerHop, rootIndex: number): string => {
   return hop.snapshot;
 };
 
+const lastStateIndex = (path: JournalPath): number => path.lastIndexOf('*state*');
+
 const buildLedgerStateSuffix = (selection: ExplorerSelection | null, ledgerRootPath: JournalPath): string[] => {
   const targetPath = selection?.path ?? ledgerRootPath;
-  const targetBlock = targetPath[targetPath.length - 1];
-  const rootBlock = ledgerRootPath[ledgerRootPath.length - 1];
+  const targetState = lastStateIndex(targetPath);
+  const rootState = lastStateIndex(ledgerRootPath);
 
-  if (!Array.isArray(targetBlock) || !Array.isArray(rootBlock)) {
+  if (targetState < 0 || rootState < 0) {
     return [];
   }
 
-  return targetBlock.slice(rootBlock.length);
+  return targetPath.slice(targetState + 1).map(String);
 };
 
 const buildLedgerFragment = (
@@ -117,7 +118,7 @@ export const buildProjectedPathDisplay = (input: {
 const parseStageFragment = (segments: string[], isDirectory: boolean) => ({
   mode: 'stage' as const,
   selection: {
-    path: [['*state*', ...segments.slice(1)]] as JournalPath,
+    path: ['*state*', ...segments.slice(1)] as JournalPath,
     type: isDirectory || segments.length === 1 ? 'directory' as const : 'file' as const,
   },
 });
@@ -145,10 +146,10 @@ const parseLedgerFragment = (segments: string[], isDirectory: boolean) => {
     const segment = segments[cursor];
     if (segment === 'state') {
       const suffix = segments.slice(cursor + 1);
-      path.push(['*state*', ...suffix]);
+      path.push('*state*', ...suffix);
       return {
         mode: 'ledger' as const,
-        hops,
+        ledgerHops: hops,
         selection: {
           path,
           type: isDirectory || suffix.length === 0 ? 'directory' as const : 'file' as const,
@@ -174,21 +175,20 @@ const parseLedgerFragment = (segments: string[], isDirectory: boolean) => {
       name: bridgeName,
       snapshot,
     });
-    path.push(['*bridge*', bridgeName, 'chain']);
-    path.push(snapshot === 'latest' ? -1 : Number.parseInt(snapshot, 10));
+    path.push('*bridge*', bridgeName, snapshot === 'latest' ? -1 : Number.parseInt(snapshot, 10));
   }
 
   return null;
 };
 
-export const parseFragmentHash = (hash: string): {
-  mode: ExplorerMode;
-  selection?: ExplorerSelection;
-  ledgerHops?: LedgerHop[];
-} | null => {
+export const parseProjectedFragment = (hash: string) => {
   const { segments, isDirectory } = decodeHashSegments(hash);
   if (segments.length === 0) {
     return null;
+  }
+
+  if (segments[0] === 'admin') {
+    return { mode: 'admin' as const };
   }
 
   if (segments[0] === 'stage') {
@@ -196,35 +196,22 @@ export const parseFragmentHash = (hash: string): {
   }
 
   if (segments[0] === 'ledger') {
-    const parsed = parseLedgerFragment(segments, isDirectory);
-    if (!parsed) {
-      return null;
-    }
-
-    return {
-      mode: parsed.mode,
-      selection: parsed.selection,
-      ledgerHops: parsed.hops,
-    };
-  }
-
-  if (segments[0] === 'admin') {
-    return { mode: 'admin' };
+    return parseLedgerFragment(segments, isDirectory);
   }
 
   return null;
 };
 
-export const getInitialLedgerHops = (rootIndex: number): LedgerHop[] => [
-  {
-    key: 'local',
-    kind: 'local',
-    name: 'Self',
-    snapshot: rootIndex >= 0 ? String(rootIndex) : '0',
-  },
-];
+export const defaultLedgerHops = (_rootIndex: number): LedgerHop[] => [{
+  key: 'local',
+  kind: 'local',
+  name: 'Self',
+  snapshot: LEDGER_LATEST,
+}];
 
-export const buildLedgerRootSelection = (hops: LedgerHop[], rootIndex: number): ExplorerSelection => ({
-  path: buildLedgerStateRootPath(hops, rootIndex >= 0 ? rootIndex : 0),
-  type: 'directory',
-});
+export const getInitialLedgerHops = defaultLedgerHops;
+
+export const defaultLedgerRootPath = (rootIndex: number): JournalPath =>
+  buildLedgerStateRootPath(defaultLedgerHops(rootIndex), rootIndex);
+
+export const parseFragmentHash = parseProjectedFragment;

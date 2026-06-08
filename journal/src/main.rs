@@ -6,6 +6,7 @@ use rocket::response::content::{RawHtml, RawText};
 use rocket::serde::json::Json;
 use rocket::{get, post, routes};
 use serde_json::Value;
+use std::io::{self, Read};
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -53,15 +54,23 @@ const INTERFACE_HTML: &str = r#"<!DOCTYPE html>
       return "Error: uh oh, not sure what happened";
   }).then(result => {
       let history = document.getElementById('history');
-      history.innerHTML = `<li style="list-style: '&#8594; '; color: green">
-   <span style="color: gray">
-       ${query.slice(0, 512)}
-       ${query.length > 512 ? " ..." : ""}
-   </span>
-      </li>
-      <li style="list-style: '  '">
-          ${result.replace(/</g, '&lt').replace(/>/g, '&gt')}
-      </li>` + history.innerHTML;
+      let queryItem = document.createElement('li');
+      let queryText = document.createElement('span');
+      let resultItem = document.createElement('li');
+
+      queryItem.style.listStyle = "'→  '";
+      queryItem.style.color = 'green';
+      queryText.style.color = 'gray';
+      queryText.style.whiteSpace = 'pre-wrap';
+      queryText.textContent = query.slice(0, 512) + (query.length > 512 ? ' ...' : '');
+      queryItem.appendChild(queryText);
+
+      resultItem.style.listStyle = "'   '";
+      resultItem.style.whiteSpace = 'pre-wrap';
+      resultItem.textContent = result;
+
+      history.prepend(resultItem);
+      history.prepend(queryItem);
   })
      }
  </script>
@@ -121,7 +130,16 @@ async fn main() {
     }
 
     if &config.evaluate != "" {
-        let result = JOURNAL.evaluate(&config.evaluate);
+        let query = if &config.evaluate == "-" {
+            let mut buffer = String::new();
+            io::stdin()
+                .read_to_string(&mut buffer)
+                .expect("Failed to read query from stdin");
+            buffer
+        } else {
+            config.evaluate.clone()
+        };
+        let result = JOURNAL.evaluate(&query);
         println!("{}", result);
         return;
     }

@@ -119,7 +119,7 @@ The generated `peers.json` uses:
 - `edges`: deterministic FIREWHEEL-style outgoing peer adjacency
 
 Routers expose HTTP ports starting at `8192`.
-File-system services expose SMB on `445` for node `0`, then `1445`, `1446`, and so on.
+File-system WebDAV routes are exposed through each node router under `/webdav/`.
 The aggregate benchmark dashboard is exposed on `8290`.
 Each social agent writes Prometheus textfile metrics into its own host-mounted directory under `metrics/`.
 Each social agent also writes a rolling benchmark snapshot to `results/social-agent-*/benchmark.json` with per-agent request totals, failure totals, latency averages, and current/lifetime requests-per-second estimates.

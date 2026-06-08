@@ -1,18 +1,30 @@
 (lambda (root-src)
-  (let* ((trunc (lambda (x y) (if (< (length x) y) x (append (substring x 0 y) " ..."))))
+  (let* ((render (lambda (x)
+                   (catch #t
+                          (lambda () (object->string x))
+                          (lambda args "<unprintable>"))))
+         (trunc (lambda (x y) (if (< (length x) y) x (append (substring x 0 y) " ..."))))
+         (trace (lambda () (stacktrace 20 120 180 120 #f)))
          (test (lambda (x)
-                 (let ((expected (cadr x))
-                       (result (sync-call (car x) #t))
-                       (condition (cond ((null? (cdr x)) '(lambda (x) #t))
-                                        ((and (pair? (cadr x)) (eq? (caadr x) 'lambda))
-                                         (cadr x))
-                                        (else `(lambda (result) (equal? result ,(cadr x)))))))
-                   (if ((eval condition) result) #t
-                       (error 'assertion-failure
-                              (append "Query [" (trunc (object->string (car x)) 256)
-                                      "] returned [" (trunc (object->string result) 256)
-                                      "] which failed assertion [" (object->string condition)
-                                      "]"))))))
+                 (catch #t
+                        (lambda ()
+                          (let ((expected (cadr x))
+                                (result (sync-call (car x) #t))
+                                (condition (cond ((null? (cdr x)) '(lambda (x) #t))
+                                                 ((and (pair? (cadr x)) (eq? (caadr x) 'lambda))
+                                                  (cadr x))
+                                                 (else `(lambda (result) (equal? result ,(cadr x)))))))
+                            (if ((eval condition) result) #t
+                                (error 'assertion-failure
+                                       (append "Query [" (trunc (render (car x)) 256)
+                                               "] returned [" (trunc (render result) 256)
+                                               "] which failed assertion [" (render condition)
+                                               "]\n[Stacktrace\n" (trace) "]")))))
+                        (lambda args
+                          (error 'assertion-failure
+                                 (append "Query [" (trunc (render (car x)) 256)
+                                         "] errored [" (trunc (render args) 256)
+                                         "]\n[Stacktrace\n" (trace) "]"))))))
          (return (lambda (x) (append "Success (" (object->string (length x)) " checks)"))))
     (return
      (map test

@@ -8,15 +8,15 @@
     ;;   Returns:
     ;;     sync node: instance.
     (if (not (eq? (car class) 'define-class))
-        (error 'make-error "Please load in a class definition"))
+        (error 'class-error "Expected define-class form, got: ~S" class))
 
     (let* ((name (caadr class))
            (methods (let loop ((body (cddr class)) (methods '()))
                       (cond ((null? body) (reverse methods))
                             ((string? (car body)) (loop (cdr body) methods))
                             (else (if (not (eq? (caar body) 'define-method))
-                                      (error 'component-error
-                                             "Only 'define-method expressions are allowed within define-class"))
+                                      (error 'class-error
+                                             "Expected define-method in class ~S, got: ~S" name (car body)))
                                   (loop (cdr body)
                                         (cons `(,(caadar body) (lambda* ,(cdadar body) ,@(cddar body))) methods))))))
            (api (let ((proc (lambda (x) (append " " (symbol->string (car x))))))
@@ -26,7 +26,7 @@
                                 "Description: " (if (string? (caddr class)) (caddr class) "") "\n"
                                 "Functions: " api "\n"
                                 "-------------------------"))
-           (err '(error 'function-error (append "Function not recognized: " (symbol->string arg))))
+           (err '(error 'method-error "Method not recognized: ~S" arg))
            (common `(((*name*) ,name) ((*api*) '(*name* *api* *class* ,@(map car methods))) ((*class*) ,class)))
            (prep (lambda (x) `((,(car x)) (lambda args
                                             (let ((res (apply ,(cadr x) (cons self args)))) res)))))
@@ -83,7 +83,7 @@
                                                    (case (byte-vector-ref output 0)
                                                      ((0) (subvector output 1))
                                                      ((1) (byte-vector->expression (subvector output 1)))
-                                                     (else (error 'encoding-error "Unknown standard output tag")))))))))))))
+                                                     (else (error 'encoding-error "Unknown standard output tag: ~S" (byte-vector-ref output 0))))))))))))))
            (object ((eval outer) (sync-cons (expression->byte-vector outer) (sync-null)))))
       (object)))
 
@@ -113,12 +113,12 @@
                   ((equal? node '(unknown)) '(unknown))
                   ((not (sync-node? node))
                    (if (null? (cdr path)) node
-                       (error 'path-error "Cannot continue deep-get through a non-object value")))
+                       (error 'path-error "Cannot continue deep-get through non-object value at path: ~S" path)))
                   ((sync-stub? node) '(unknown))
                   ((null? (cdr path)) node)
                   ((and (sync-pair? node) (byte-vector? (sync-car node)))
                    ((self 'deep-get) node (cdr path)))
-                  (else (error 'path-error "Cannot continue deep-get through a non-object value")))))))
+                  (else (error 'path-error "Cannot continue deep-get through non-object value at path: ~S" path)))))))
 
   (define-method (deep-set! self object path value)
     ;; Set value at path across nested nodes.
@@ -151,7 +151,7 @@
                  (result ((self 'deep-slice!) child (cdr path)))
                  (digest (sync-digest child)))
             (if (not (equal? (sync-digest result) digest))
-                (error 'digest-error "Slice operation caused digest change"))
+                (error 'integrity-error "Slice changed digest at path: ~S" path))
             ((object 'set!) (car path) result)
             ((object 'slice!) (car path))
             (object)))))
@@ -172,7 +172,7 @@
                 (let* ((result ((self 'deep-prune!) child (cdr path)))
                        (digest (sync-digest child)))
                   (if (not (equal? (sync-digest result) digest))
-                      (error 'digest-error "Prune operation caused digest change"))
+                      (error 'integrity-error "Prune changed digest at path: ~S" path))
                   (if (sync-stub? result)
                       ((object 'prune!) (car path))
                       ((object 'set!) (car path) result))
@@ -189,7 +189,7 @@
     (let ((merge-nodes
            (lambda (object-source object-target)
              (if (not (equal? (sync-digest object-source) (sync-digest object-target)))
-                 (error 'node-error "Cannot merge non-equivalent objects")
+                 (error 'integrity-error "Cannot merge objects with different digests: ~S vs ~S" (sync-digest object-source) (sync-digest object-target))
                  (let recurse ((node-1 object-source) (node-2 object-target))
                    (cond ((sync-null? node-1) node-1)
                          ((byte-vector? node-1) node-1)

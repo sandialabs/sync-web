@@ -3,9 +3,28 @@ set -eu
 
 MODE="${1:-up}"
 if [ "$MODE" != "build" ] && [ "$MODE" != "generate" ] && [ "$MODE" != "up" ] && [ "$MODE" != "down" ]; then
-    echo "Usage: $0 [build|generate|up|down]"
+    echo "Usage: $0 [build|generate|up|down] [-d|--detach] [--no-build]"
     exit 1
 fi
+shift || true
+
+DETACH=0
+SKIP_BUILD=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -d|--detach)
+            DETACH=1
+            ;;
+        --no-build)
+            SKIP_BUILD=1
+            ;;
+        *)
+            echo "Usage: $0 [build|generate|up|down] [-d|--detach] [--no-build]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ROOT_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
@@ -59,7 +78,9 @@ if [ "$MODE" = "down" ]; then
     exit 0
 fi
 
-build_local_stack
+if [ "$SKIP_BUILD" = "0" ]; then
+    build_local_stack
+fi
 
 if [ "$MODE" = "build" ]; then
     echo "PASS: local journal, services, and social-agent images are built."
@@ -75,4 +96,8 @@ fi
 
 cd "$SCRIPT_DIR"
 $CONTAINER_COMPOSE down -v --remove-orphans
-$CONTAINER_COMPOSE up
+if [ "$DETACH" = "1" ]; then
+    $CONTAINER_COMPOSE up -d
+else
+    $CONTAINER_COMPOSE up
+fi

@@ -19,7 +19,7 @@ run_case() {
 
     echo "--- $name ---"
     set +e
-    output=$($sdk -e "$expr" 2>&1)
+    output=$(printf '%s' "$expr" | $sdk -e - 2>&1)
     status=$?
     set -e
     echo "$output"
@@ -36,24 +36,30 @@ run_case() {
     fi
 }
 
+assertions=$( cat "$SCRIPT_DIR/support.scm" )
 root=$( cat "$LISP_DIR/root.scm" )
 standard=$( cat "$LISP_DIR/standard.scm" )
 linear_chain=$( cat "$LISP_DIR/linear-chain.scm" )
 log_chain=$( cat "$LISP_DIR/log-chain.scm" )
 tree=$( cat "$LISP_DIR/tree.scm" )
+document=$( cat "$LISP_DIR/document.scm" )
 ledger=$( cat "$LISP_DIR/ledger.scm" )
 interface=$( cat "$LISP_DIR/interface.scm" )
 
 run_case "Root Test" "($( cat "$SCRIPT_DIR/test-root.scm" ) '$root)"
 
-run_case "Standard Test" "($( cat "$SCRIPT_DIR/test-standard.scm" ) '$standard)"
+run_case "Standard Test" "($( cat "$SCRIPT_DIR/test-standard.scm" ) '$assertions '$standard)"
 
-run_case "Tree Test" "($( cat "$SCRIPT_DIR/test-tree.scm" ) '$standard '$tree)"
+run_case "Tree Test" "($( cat "$SCRIPT_DIR/test-tree.scm" ) '$assertions '$standard '$tree)"
 
-run_case "Linear Chain Test" "($( cat "$SCRIPT_DIR/test-chain.scm" ) '$standard '$linear_chain)"
+run_case "Document Test" "($( cat "$SCRIPT_DIR/test-document.scm" ) '$assertions '$standard '$document)"
 
-run_case "Log Chain Test" "($( cat "$SCRIPT_DIR/test-chain.scm" ) '$standard '$log_chain)"
+run_case "Linear Chain Test" "($( cat "$SCRIPT_DIR/test-chain.scm" ) '$assertions '$standard '$linear_chain)"
 
-run_case "Ledger Test" "($( cat "$SCRIPT_DIR/test-ledger.scm" ) '$standard '$log_chain '$tree '$ledger)"
+run_case "Log Chain Test" "($( cat "$SCRIPT_DIR/test-chain.scm" ) '$assertions '$standard '$log_chain)"
 
-run_case "Interface Test" "($( cat "$SCRIPT_DIR/test-interface.scm" ) '$root '$standard '$log_chain '$tree '$ledger '$interface)"
+run_case "Ledger Test" "($( cat "$SCRIPT_DIR/test-ledger.scm" ) '$assertions '$standard '$log_chain '$tree '$ledger '$document)"
+
+run_case "Interface Test" "($( cat "$SCRIPT_DIR/test-interface.scm" ) '$assertions '$root '$standard '$log_chain '$tree '$ledger '$document '$interface)"
+
+run_case "Bridge Interface Test" "($( cat "$SCRIPT_DIR/test-bridges.scm" ) '$assertions '$root '$standard '$log_chain '$tree '$ledger '$document '$interface)"

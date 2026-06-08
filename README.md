@@ -11,7 +11,7 @@ Full documentation: [sandialabs.github.io/sync-web](https://sandialabs.github.io
 | `journal/` | Rust journal-sdk: HTTP server, S7 Scheme evaluator, RocksDB persistence |
 | `records/` | Scheme record logic: `root`, `standard`, `tree`, `chain`, `ledger`, `interface` |
 | `services/` | Web services: `gateway`, `router`, `explorer`, `workbench`, `file-system` |
-| `deploy/` | Single-node Docker Compose deployment |
+| `deploy/` | Single-node Compose-compatible container deployment |
 | `tests/` | API smoke tests, load tests, multi-node network tests |
 | `docs/` | Documentation site (Astro/Starlight) |
 
@@ -20,11 +20,12 @@ Full documentation: [sandialabs.github.io/sync-web](https://sandialabs.github.io
 The fastest way to run a local stack:
 
 ```sh
-cd deploy/compose/general
-SECRET=yourpassword docker compose up
+COMPOSE_PROJECT_NAME=sync-local SECRET=yourpassword \
+HTTP_PORT=8192 HTTPS_PORT=8193 \
+docker compose -f deploy/compose/general/compose.yaml up
 ```
 
-See `deploy/compose/general/README.md` for full configuration options.
+Use `podman-compose` or `podman compose` instead of `docker compose` if that is your container runtime. See `deploy/compose/general/README.md` for full configuration options and `docs/development-checks.md` for validation commands and tool dependencies.
 
 ## License
 

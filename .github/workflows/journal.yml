@@ -97,13 +97,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install smbclient
-        run: sudo apt-get update && sudo apt-get install -y smbclient
       - name: Run compose smoke test
         run: |
           SECRET=password \
           PORT=8192 \
-          SMB_PORT=1445 \
           tests/api/local-compose.sh smoke
 
   tag-version:

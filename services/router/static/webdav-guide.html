@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect with WebDAV · Synchronic Web Journal</title>
+  <style>
+    :root {
+      --blue: #00add0;
+      --medium-blue: #0076a9;
+      --dark-blue: #002b4c;
+      --bg-primary: #ffffff;
+      --bg-secondary: #f8f8f8;
+      --bg-tertiary: #f0f0f0;
+      --text-primary: #002b4c;
+      --text-secondary: #7d8ea0;
+      --border-color: #e0e0e0;
+      --hover-bg: #e8e8e8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+        Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+
+    a { color: var(--medium-blue); text-decoration: none; }
+    a:hover, a:focus-visible { text-decoration: underline; }
+
+    main {
+      width: min(900px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 44px 0 42px;
+    }
+
+    .back {
+      display: inline-flex;
+      margin-bottom: 28px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .kicker {
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0 14px;
+      color: var(--dark-blue);
+      font-size: clamp(2.2rem, 6vw, 4.2rem);
+      line-height: 1;
+      letter-spacing: -0.045em;
+    }
+
+    .lead {
+      max-width: 720px;
+      margin: 0 0 28px;
+      color: var(--text-secondary);
+      font-size: 1.12rem;
+      line-height: 1.52;
+    }
+
+    .panel {
+      margin-top: 14px;
+      padding: 20px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      letter-spacing: -0.02em;
+    }
+
+    p, li {
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    p { margin: 0 0 12px; }
+    p:last-child { margin-bottom: 0; }
+
+    ul, ol {
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    li + li { margin-top: 8px; }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    code {
+      padding: 2px 5px;
+      border: 1px solid var(--border-color);
+      border-radius: 5px;
+      background: var(--bg-primary);
+      color: var(--dark-blue);
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 10px 0 0;
+      padding: 13px 14px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+      color: var(--dark-blue);
+      line-height: 1.45;
+    }
+
+    .routes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .route {
+      padding: 13px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+    }
+
+    .route strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--text-primary);
+    }
+
+    .note {
+      border-left: 4px solid var(--blue);
+    }
+
+    @media (max-width: 680px) {
+      main { width: min(100% - 24px, 900px); }
+      .routes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="/">← Journal home</a>
+    <div class="kicker">WebDAV adapter</div>
+    <h1>Connect with WebDAV</h1>
+    <p class="lead">The WebDAV endpoint is meant for WebDAV clients and desktop file managers, not direct browser browsing. Use it to mount journal-backed documents as files.</p>
+
+    <section class="panel note">
+      <h2>Authentication</h2>
+      <p>Use an API token as the password for Basic authentication. The username is accepted by most clients but is not the secret; the token/password is what authenticates the request.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Useful mount URLs</h2>
+      <div class="routes">
+        <div class="route">
+          <strong>Mutable staged documents</strong>
+          <code>/webdav/stage/</code>
+        </div>
+        <div class="route">
+          <strong>Committed latest ledger state</strong>
+          <code>/webdav/ledger/state/</code>
+        </div>
+        <div class="route">
+          <strong>Pin/unpin control sink</strong>
+          <code>/webdav/control/pin</code>
+        </div>
+        <div class="route">
+          <strong>Explicit snapshots and bridges</strong>
+          <code>/webdav/ledger/…</code>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Desktop clients</h2>
+      <ul>
+        <li><strong>GNOME Files / Nautilus:</strong> connect to <code>dav://HOST/webdav/stage/</code> or <code>davs://HOST/webdav/stage/</code>.</li>
+        <li><strong>macOS Finder:</strong> use <em>Go → Connect to Server…</em> and enter <code>http://HOST/webdav/stage/</code> or <code>https://HOST/webdav/stage/</code>.</li>
+        <li><strong>Windows:</strong> use <em>Map network drive</em> or <em>Add a network location</em> with the HTTP(S) WebDAV URL.</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Command-line smoke test</h2>
+      <p>Replace <code>HOST</code> and <code>API_TOKEN</code>, then write and read a small file through the staged projection:</p>
+      <pre>printf 'hello journal\n' > /tmp/sync-web-webdav.txt
+curl -u "user:API_TOKEN" -T /tmp/sync-web-webdav.txt \
+  http://HOST/webdav/stage/admin/hello.txt
+curl -u "user:API_TOKEN" \
+  http://HOST/webdav/stage/admin/hello.txt</pre>
+    </section>
+  </main>
+</body>
+</html>

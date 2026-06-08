@@ -11,7 +11,7 @@ export interface AppState {
   error: string | null;
 }
 
-export type JournalPath = Array<number | string[]>;
+export type JournalPath = Array<number | string>;
 export type ExplorerMode = 'stage' | 'ledger' | 'admin';
 
 export interface JournalResponse<T = any> {

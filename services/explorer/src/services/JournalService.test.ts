@@ -110,6 +110,15 @@ describe('JournalService', () => {
   });
 });
 
+describe('reserved state segments', () => {
+  it('treats star-wrapped names as reserved but leaves ordinary names alone', () => {
+    expect(JournalService.isReservedStateSegment('*time*')).toBe(true);
+    expect(JournalService.isReservedStateSegment('*directory*')).toBe(true);
+    expect(JournalService.isReservedStateSegment('alice')).toBe(false);
+    expect(JournalService.isReservedStateSegment('*draft')).toBe(false);
+  });
+});
+
 describe('JournalService API', () => {
   let service: JournalService;
   let mockFetch: jest.Mock;
@@ -136,6 +145,40 @@ describe('JournalService API', () => {
     jest.resetAllMocks();
   });
 
+  describe('subscribeEvents', () => {
+    it('subscribes to gateway event stream and closes on unsubscribe', () => {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      const close = jest.fn();
+      const eventSourceMock = jest.fn().mockImplementation(() => ({
+        addEventListener: jest.fn((type: string, listener: (event: MessageEvent) => void) => {
+          listeners[type] = listener;
+        }),
+        close,
+      }));
+      const originalEventSource = global.EventSource;
+      (global as any).EventSource = eventSourceMock;
+      const onChange = jest.fn();
+
+      try {
+        const unsubscribe = service.subscribeEvents({ onChange });
+        expect(eventSourceMock).toHaveBeenCalledWith(
+          'http://test-endpoint.com/api/v1/events',
+          { withCredentials: true },
+        );
+
+        listeners['sync-web-change']?.({
+          data: JSON.stringify({ operation: 'set!', path: ['*state*', 'alice'], time: 'now' }),
+        } as MessageEvent);
+        expect(onChange).toHaveBeenCalledWith({ operation: 'set!', path: ['*state*', 'alice'], time: 'now' });
+
+        unsubscribe();
+        expect(close).toHaveBeenCalled();
+      } finally {
+        (global as any).EventSource = originalEventSource;
+      }
+    });
+  });
+
   describe('getSize', () => {
     it('should call size endpoint and return result', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('42'));
@@ -158,7 +201,7 @@ describe('JournalService API', () => {
       const rawValue = { '*type/string*': 'test content' };
       mockFetch.mockResolvedValueOnce(mockJsonResponse(rawValue));
 
-      const path = [['*state*', 'test']];
+      const path = ['*state*', 'test'];
       const result = await service.get(path);
 
       expect(result).toEqual({ content: rawValue });
@@ -178,7 +221,7 @@ describe('JournalService API', () => {
       const mockResponse = 'value';
       mockFetch.mockResolvedValueOnce(mockJsonResponse(mockResponse));
 
-      const path = [-1, ['*state*', 'test']];
+      const path = [-1, '*state*', 'test'];
       const result = await service.get(path, { pinned: false, proof: false });
 
       expect(result).toEqual(mockResponse);
@@ -195,12 +238,40 @@ describe('JournalService API', () => {
     });
   });
 
+  describe('getDirectoryEntries', () => {
+    it('uses content-only resolve for indexed directory discovery', async () => {
+      mockFetch.mockResolvedValueOnce(mockJsonResponse(['directory', {
+        file: 'value',
+        folder: 'directory',
+        '*time*': 'value',
+      }, true]));
+
+      const path = [-1, '*bridge*'];
+      const result = await service.getDirectoryEntries(path);
+
+      expect(result).toEqual([
+        { name: 'file', type: 'value' },
+        { name: 'folder', type: 'directory' },
+      ]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/resolve',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ path, 'pinned?': false, 'proof?': false }),
+        })
+      );
+    });
+  });
+
   describe('set', () => {
-    it('should call set endpoint with path and string value', async () => {
+    it('should call set endpoint with value as-is', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
-      const path = [['*state*', 'test']];
-      const result = await service.set(path, 'test value');
+      const path = ['*state*', 'test'];
+      const result = await service.set(path, { '*type/byte-vector*': '0102' });
 
       expect(result).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith(
@@ -210,7 +281,26 @@ describe('JournalService API', () => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ path, value: { '*type/string*': 'test value' } }),
+          body: JSON.stringify({ path, value: { '*type/byte-vector*': '0102' } }),
+        })
+      );
+    });
+
+    it('should encode text values as byte-vectors', async () => {
+      mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
+
+      const path = ['*state*', 'test'];
+      const result = await service.setText(path, 'test value');
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/set',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ path, value: { '*type/byte-vector*': '746573742076616c7565' } }),
         })
       );
     });
@@ -218,7 +308,7 @@ describe('JournalService API', () => {
     it('should call set endpoint with non-string value as-is', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
-      const path = [['*state*', 'test']];
+      const path = ['*state*', 'test'];
       const result = await service.set(path, true);
 
       expect(result).toBe(true);
@@ -239,7 +329,7 @@ describe('JournalService API', () => {
     it('should call pin endpoint with path', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
-      const path = [-1, ['*state*', 'test']];
+      const path = [-1, '*state*', 'test'];
       const result = await service.pin(path);
 
       expect(result).toBe(true);
@@ -260,7 +350,7 @@ describe('JournalService API', () => {
     it('should call unpin endpoint with path', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
-      const path = [-1, ['*state*', 'test']];
+      const path = [-1, '*state*', 'test'];
       const result = await service.unpin(path);
 
       expect(result).toBe(true);
@@ -281,7 +371,7 @@ describe('JournalService API', () => {
     it('should call set with nothing value', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
-      const path = [['*state*', 'test']];
+      const path = ['*state*', 'test'];
       const result = await service.delete(path);
 
       expect(result).toBe(true);
@@ -299,7 +389,7 @@ describe('JournalService API', () => {
   });
 
   describe('addPeer', () => {
-    it('should call bridge with name and endpoint', async () => {
+    it('should call bridge with name and local bridge info', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
       const result = await service.addPeer('peer-name', 'http://peer-endpoint.com');
@@ -314,7 +404,12 @@ describe('JournalService API', () => {
           },
           body: JSON.stringify({
             name: 'peer-name',
-            interface: { '*type/string*': 'http://peer-endpoint.com' },
+            'info-local': {
+              interface: { '*type/string*': 'http://peer-endpoint.com' },
+              policy: { publish: 'push', subscribe: 'pull' },
+              role: false,
+              'remote-name': 'peer-name',
+            },
           }),
         })
       );

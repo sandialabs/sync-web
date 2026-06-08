@@ -13,7 +13,7 @@ It focuses on the currently deployed `general` interface shape.
 
 ## Graphical Interface
 
-The `general` compose network exposes three primary web clients and one filesystem-oriented service: Explorer (`/explorer/`), Workbench (`/workbench/`), Gateway (`/docs` plus `/api/v1/...`), and File System (SMB).
+The `general` compose network exposes three primary web clients and one filesystem-oriented service: Explorer (`/explorer/`), Workbench (`/workbench/`), Gateway (`/docs` plus `/api/v1/...`), and File System (WebDAV at `/webdav/`).
 Together they cover the full operator/developer loop: inspect data, make changes, verify outcomes, mount journal state into ordinary file tools, and convert successful workflows into repeatable API calls.
 
 ### Explorer
@@ -80,7 +80,7 @@ The Gateway is best for service integration because it standardizes journal call
 
 ### File System
 
-The File System service projects journal state into a mounted SMB share.
+The File System service projects journal state through WebDAV.
 Use it when existing tools should interact with Synchronic Web data through ordinary file and directory operations instead of direct API calls.
 
 Typical File System workflow:
@@ -143,16 +143,22 @@ The `/interface` execution endpoint accepts Scheme or JSON runtime calls via con
 | `POST /interface/scheme-to-json` | Converts Scheme expressions into JSON payload representations. |
 | `POST /interface/json-to-scheme` | Converts JSON payloads back into Scheme forms for debugging and validation. |
 
+### Ledger Path Syntax
+
+Public ledger/interface paths use flat token lists. In Scheme, write paths as lists such as `(*state* alice notes)` or `(-1 *state* alice notes)`. In JSON, use the equivalent flat arrays, for example `["*state*", "alice", "notes"]` or `[-1, "*state*", "alice", "notes"]`.
+
+When an indexed/committed operation needs a history index and no explicit index is present, the current head (`-1`) is used. Nested list paths are an internal ledger representation and are not accepted as public API input.
+
 ### Authentication and Authorization
 
 #### Authentication
 
 Restricted operations require an `authentication` field that identifies the caller and carries the interface secret.
 
-Two identities are recognized:
+Two caller identities are recognized:
 
 - **Named user** (e.g. `alice`): a registered user. The gateway injects this automatically when you are logged in via Kratos. When calling the interface directly, you supply it yourself with your username and the interface secret.
-- **Root** (`*journal*`): the journal's own root identity. Used by the gateway itself and admin automation. Has no path restrictions.
+- **Root journal caller**: omit `identity` in the authentication block. This is used by journal automation and has no path restrictions.
 
 When calling through the **gateway** (`/api/v1/...`), you do not construct the authentication block — the gateway handles it from your session or API token. When calling the interface **directly** (`/interface`), you supply it manually:
 
@@ -196,7 +202,7 @@ Reads are more permissive — any authenticated user can read another user's pat
 
 | Tier | Identity | Privileges |
 | --- | --- | --- |
-| Root | `*journal*` | All operations on all paths. |
+| Root | omitted `identity` | All operations on all paths. |
 | Admin | Named user in the admin list | All operations on all paths. |
 | User | Named user not in the admin list | Namespace and visibility rules above apply. |
 
@@ -211,7 +217,7 @@ That keeps client implementations simple and makes troubleshooting easier across
 | --- | --- | --- | --- |
 | `function` | symbol/string | Yes | API function name |
 | `arguments` | object / association list | Usually | Keyword-style fields for ledger calls |
-| `authentication` | alist / object | Restricted calls | `((identity alice) (credentials "secret"))` — bare symbol identity and matching credentials |
+| `authentication` | alist / object | Restricted calls | `((identity alice) (credentials "secret"))` for named users, or `((credentials "secret"))` for the root journal caller |
 
 > **Note:**
 >
@@ -229,7 +235,7 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function get)
- (arguments ((path ((*state* docs article hash)))
+ (arguments ((path (*state* docs article hash))
              (pinned? #t)
              (proof? #t)))
  (authentication ((identity alice) (credentials "password"))))
@@ -242,7 +248,7 @@ You can copy them into Workbench first, then move them into automation once vali
 {
   "function": "get",
   "arguments": {
-    "path": [["*state*", "docs", "article", "hash"]],
+    "path": ["*state*", "docs", "article", "hash"],
     "pinned?": true,
     "proof?": true
   },
@@ -267,8 +273,9 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function set!)
- (arguments ((path ((*state* docs article hash)))
-             (value "0xabc123")))
+ (arguments ((path (*state* docs article hash))
+             (value "0xabc123")
+             (expression? #t)))
  (authentication ((identity alice) (credentials "password"))))
 ```
 
@@ -279,8 +286,9 @@ You can copy them into Workbench first, then move them into automation once vali
 {
   "function": "set!",
   "arguments": {
-    "path": [["*state*", "docs", "article", "hash"]],
-    "value": {"*type/string*": "0xabc123"}
+    "path": ["*state*", "docs", "article", "hash"],
+    "value": "0xabc123",
+    "expression?": true
   },
   "authentication": {
     "identity": "alice",
@@ -299,7 +307,7 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function pin!)
- (arguments ((path (-1 (*state* docs article hash)))))
+ (arguments ((path (-1 *state* docs article hash))))
  (authentication ((identity alice) (credentials "password"))))
 ```
 
@@ -309,7 +317,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ```json
 {
   "function": "pin!",
-  "arguments": {"path": [-1, ["*state*", "docs", "article", "hash"]]},
+  "arguments": {"path": [-1, "*state*", "docs", "article", "hash"]},
   "authentication": {
     "identity": "alice",
     "credentials": {"*type/string*": "password"}
@@ -328,8 +336,11 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function bridge!)
  (arguments ((name journal_b)
-             (interface "http://journal-b.example.org/api/v1/journal/interface")))
- (authentication ((identity *journal*) (credentials "password"))))
+             (info-local ((interface "http://journal-b.example.org/api/v1/journal/interface")
+                          (policy ((publish push) (subscribe pull)))
+                          (role #f)
+                          (remote-name journal_a)))))
+ (authentication ((credentials "password"))))
 ```
 
   </TabItem>
@@ -340,10 +351,14 @@ You can copy them into Workbench first, then move them into automation once vali
   "function": "bridge!",
   "arguments": {
     "name": "journal_b",
-    "interface": {"*type/string*": "http://journal-b.example.org/api/v1/journal/interface"}
+    "info-local": {
+      "interface": {"*type/string*": "http://journal-b.example.org/api/v1/journal/interface"},
+      "policy": {"publish": "push", "subscribe": "pull"},
+      "role": false,
+      "remote-name": "journal_a"
+    }
   },
   "authentication": {
-    "identity": "*journal*",
     "credentials": {"*type/string*": "password"}
   }
 }
