@@ -110,9 +110,6 @@ func parseLedger(parts []string, isDir bool) (ParsedPath, error) {
 }
 
 func parseLedgerSynthetic(parts []string, isDir bool) (ParsedPath, bool, error) {
-	if !isDir {
-		return ParsedPath{}, false, nil
-	}
 	if parts[0] == "bridge" {
 		return parseBridgeSynthetic(parts, nil)
 	}

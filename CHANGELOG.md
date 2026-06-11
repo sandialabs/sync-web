@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1
+
+### Fixed
+
+- **WebDAV compatibility** — Added minimal lock responses for clients that require class-2 WebDAV behavior, including macOS Finder.
+- **WebDAV path handling** — Percent-encode WebDAV names that are not unescaped R7RS identifiers before ledger calls and decode them for directory listings.
+- **Ledger browsing** — Accept synthetic ledger collection probes without trailing slashes for file managers that normalize paths.
+- **WebDAV authentication docs** — Clarified that WebDAV Basic Auth uses a Sync Web API token as the password, not the account password.
+
 ## 1.3.0
 
 ### Added
