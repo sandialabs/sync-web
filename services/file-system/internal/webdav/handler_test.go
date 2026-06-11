@@ -65,6 +65,19 @@ func TestMkcolAndPropfindHideDirectoryMarker(t *testing.T) {
 	}
 }
 
+func TestDirectoryChildrenDecodePercentEscapedSegments(t *testing.T) {
+	children, ok := directoryChildren([]any{"directory", []any{
+		[]any{"New%20folder", "directory"},
+		[]any{"a%25b.txt", "value"},
+	}, true})
+	if !ok {
+		t.Fatal("directory was not decoded")
+	}
+	if len(children) != 2 || children[0].Name != "New folder" || !children[0].Directory || children[1].Name != "a%b.txt" || children[1].Directory {
+		t.Fatalf("unexpected children: %#v", children)
+	}
+}
+
 func TestPropfindHidesReservedStateSegments(t *testing.T) {
 	fake := newFakeGateway(t)
 	fake.values["*state*/*time*"] = "reserved"

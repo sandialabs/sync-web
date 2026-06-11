@@ -30,7 +30,9 @@ The Go service implements the core WebDAV surface against the gateway-backed jou
 - `SYNC_FS_MAX_OBJECT_BYTES` — maximum object size, default `1048576`.
 
 Authentication is delegated to the existing Kratos-backed stack. WebDAV clients should use
-sync-web username plus an existing API token via Basic Auth.
+Basic Auth with a Sync Web API token as the password. The username can be the sync-web
+username (for example, `admin`), but WebDAV does not accept the account password because
+it cannot perform the browser login flow.
 
 ## Development
 
