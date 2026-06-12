@@ -78,7 +78,6 @@ jobs:
           tags: ghcr.io/${{ github.repository }}/journal-sdk:pr-validation
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache,mode=max
       - name: Build and push SHA-tagged journal-sdk validation image
         if: github.event_name == 'push' && github.ref != 'refs/heads/main'
         uses: docker/build-push-action@v6
