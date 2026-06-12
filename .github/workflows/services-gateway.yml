@@ -21,7 +21,7 @@ jobs:
       packages: write
     steps:
       - name: Login to Github registry
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -42,19 +42,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Run unit tests
-        if: steps.filter.outputs.service == 'true'
+        if: steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true'
         run: docker build --target test services/gateway
-      - name: Build Docker image (PR/non-main validation)
-        if: github.ref != 'refs/heads/main' && steps.filter.outputs.service == 'true'
+      - name: Build pull request validation image
+        if: github.event_name == 'pull_request' && steps.filter.outputs.service == 'true'
         uses: docker/build-push-action@v6
         with:
           context: services/gateway
           target: runtime
           platforms: linux/amd64
           push: false
-          tags: ghcr.io/${{ github.repository }}/gateway:latest
-      - name: Build and push multi-arch Docker images
-        if: github.ref == 'refs/heads/main' && steps.filter.outputs.service == 'true'
+          tags: ghcr.io/${{ github.repository }}/gateway:pr-validation
+      - name: Build and push SHA-tagged validation image
+        if: github.event_name == 'push' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
+        uses: docker/build-push-action@v6
+        with:
+          context: services/gateway
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository }}/gateway:sha-${{ github.sha }}
+      - name: Build and push latest image for direct main service changes
+        if: github.ref == 'refs/heads/main' && steps.filter.outputs.service == 'true' && steps.filter.outputs.version != 'true'
         uses: docker/build-push-action@v6
         with:
           context: services/gateway
@@ -62,9 +71,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}/gateway:latest
-      - name: Tag version
+      - name: Promote validated image
         if: github.ref == 'refs/heads/main' && steps.filter.outputs.version == 'true'
-        run: |
-          VERSION="$(cat VERSION)"
-          TAG="ghcr.io/${{ github.repository }}/gateway:$VERSION"
-          docker buildx imagetools create -t "$TAG" "ghcr.io/${{ github.repository }}/gateway:latest"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/promote-image.sh gateway
