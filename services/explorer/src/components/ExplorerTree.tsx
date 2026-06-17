@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DirectoryEntryType, ExplorerSelection, ExplorerMode, JournalPath, TreeNode } from '../types';
+import { DirectoryEntry, DirectoryEntryType, ExplorerSelection, ExplorerMode, JournalPath, TreeNode } from '../types';
 import { JournalService } from '../services/JournalService';
 import { compareSegmentedNames } from '../utils/sortKeys';
 
@@ -24,14 +24,13 @@ const buildStateChildPath = (parentPath: JournalPath, name: string): JournalPath
 const createNode = (
   parentId: string,
   parentPath: JournalPath,
-  entryName: string,
-  entryType: DirectoryEntryType,
+  entry: DirectoryEntry,
 ): TreeNode => ({
-  id: `${parentId}/${entryName}`,
-  label: entryName,
-  type: entryType === 'directory' ? 'directory' : 'file',
-  valueType: entryType,
-  path: buildStateChildPath(parentPath, entryName),
+  id: `${parentId}/${entry.pathSegment ?? entry.name}`,
+  label: entry.name,
+  type: entry.type === 'directory' ? 'directory' : 'file',
+  valueType: entry.type,
+  path: buildStateChildPath(parentPath, entry.pathSegment ?? entry.name),
 });
 
 const compareDirectoryEntries = (
@@ -69,7 +68,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
     return entries
       .filter((entry) => entry.name !== '*directory*')
       .sort(compareDirectoryEntries)
-      .map((entry) => createNode(idPrefix, path, entry.name, entry.type));
+      .map((entry) => createNode(idPrefix, path, entry));
   };
 
   useEffect(() => {

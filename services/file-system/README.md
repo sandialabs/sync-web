@@ -34,6 +34,11 @@ Basic Auth with a Sync Web API token as the password. The username can be the sy
 username (for example, `admin`), but WebDAV does not accept the account password because
 it cannot perform the browser login flow.
 
+Path names are translated at the WebDAV boundary. Names that are not safe unescaped
+R7RS-style identifier symbols are UTF-8 percent-escaped before gateway calls and decoded
+again for WebDAV directory listings. The ledger stores ordinary symbol atoms such as
+`New%20folder`; it does not interpret percent escapes.
+
 ## Development
 
 ```bash
@@ -44,5 +49,5 @@ go run ./cmd/file-system
 Container test target:
 
 ```bash
-docker build --target test services/file-system
+${CONTAINER_RUNTIME:-docker} build --target test services/file-system
 ```

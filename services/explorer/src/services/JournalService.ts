@@ -123,6 +123,53 @@ export class JournalService {
     return value.startsWith('*') && value.endsWith('*');
   }
 
+  static isR7RSIdentifier(value: string): boolean {
+    const initial = /^[A-Za-z!$%&*/:<=>?^_~]$/;
+    const subsequent = /^[A-Za-z!$%&*/:<=>?^_~0-9+\-.@]$/;
+    if (value === '+' || value === '-' || value === '...') {
+      return true;
+    }
+    if (value.startsWith('->')) {
+      return Array.from(value.slice(2)).every((char) => subsequent.test(char));
+    }
+    if (!value || !initial.test(value[0])) {
+      return false;
+    }
+    return Array.from(value.slice(1)).every((char) => subsequent.test(char));
+  }
+
+  static encodePathSegment(value: string): string {
+    if (!value) {
+      return value;
+    }
+    if (JournalService.isR7RSIdentifier(value)) {
+      return value.replace(/%/g, '%25');
+    }
+    let out = '';
+    const initial = /^[A-Za-z!$&*/:<=>?^_~]$/;
+    const subsequent = /^[A-Za-z!$&*/:<=>?^_~0-9+\-.@]$/;
+    Array.from(value).forEach((char, index) => {
+      if ((index === 0 ? initial : subsequent).test(char)) {
+        out += char;
+      } else if (char.charCodeAt(0) < 128) {
+        out += `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
+      } else {
+        out += encodeURIComponent(char).replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
+      }
+    });
+    return out;
+  }
+
+  static decodePathSegment(value: string): string {
+    return value.replace(/(?:%[0-9a-fA-F]{2})+/g, (escape) => {
+      try {
+        return decodeURIComponent(escape);
+      } catch {
+        return escape;
+      }
+    });
+  }
+
   /**
    * Parse a directory response into a normalized structure
    * Returns null if the content is not a directory
@@ -180,33 +227,50 @@ export class JournalService {
       return 'unknown';
     };
 
+    const normalizeSegment = (value: unknown): { name: string; pathSegment: string } | null => {
+      const { value: extracted } = JournalService.extractSchemeValue(value);
+      if (typeof extracted !== 'string') {
+        return null;
+      }
+      return {
+        name: JournalService.decodePathSegment(extracted),
+        pathSegment: extracted,
+      };
+    };
+
+    const normalizeArrayEntry = (item: unknown): DirectoryEntry | null => {
+      if (Array.isArray(item) && item.length >= 2) {
+        const segment = normalizeSegment(item[0]);
+        return segment ? {
+          name: segment.name,
+          pathSegment: segment.pathSegment,
+          type: normalizeType(item[1]),
+        } : null;
+      }
+      const segment = normalizeSegment(item);
+      return segment ? {
+        name: segment.name,
+        pathSegment: segment.pathSegment,
+        type: 'unknown' as const,
+      } : null;
+    };
+
     if (content[0] === 'directory') {
       if (content[1] && typeof content[1] === 'object' && !Array.isArray(content[1])) {
         return Object.entries(content[1]).map(([name, type]) => ({
-          name,
+          name: JournalService.decodePathSegment(name),
+          pathSegment: name,
           type: normalizeType(type),
         }));
       }
       if (Array.isArray(content[1])) {
-        return content[1].map((item: unknown) => {
-          const { value } = JournalService.extractSchemeValue(item);
-          return {
-            name: typeof value === 'string' ? value : String(value),
-            type: 'unknown' as const,
-          };
-        });
+        return content[1].map(normalizeArrayEntry).filter((entry): entry is DirectoryEntry => entry !== null);
       }
       return null;
     }
 
     if (Array.isArray(content[0])) {
-      return content[0].map((item: unknown) => {
-        const { value } = JournalService.extractSchemeValue(item);
-        return {
-          name: typeof value === 'string' ? value : String(value),
-          type: 'unknown' as const,
-        };
-      });
+      return content[0].map(normalizeArrayEntry).filter((entry): entry is DirectoryEntry => entry !== null);
     }
 
     return null;
@@ -487,12 +551,17 @@ export class JournalService {
 
   private buildStateChildPath(parentPath: JournalPath, childName: string): JournalPath {
     this.requireStatePath(parentPath);
-    return [...parentPath, childName];
+    return [...parentPath, JournalService.encodePathSegment(childName)];
+  }
+
+  private buildStateChildPathFromEntry(parentPath: JournalPath, entry: DirectoryEntry): JournalPath {
+    this.requireStatePath(parentPath);
+    return [...parentPath, entry.pathSegment ?? JournalService.encodePathSegment(entry.name)];
   }
 
   private buildStateSiblingPath(path: JournalPath, siblingName: string): JournalPath {
     this.requireStatePath(path);
-    return [...path.slice(0, -1), siblingName];
+    return [...path.slice(0, -1), JournalService.encodePathSegment(siblingName)];
   }
 
   private buildDirectoryMarkerPath(path: JournalPath): JournalPath {
@@ -542,8 +611,7 @@ export class JournalService {
     const directoryEntries = JournalService.parseDirectoryEntries(response.content);
     if (directoryEntries) {
       for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStateSegment(item.name))) {
-        const childPath = this.buildStateChildPath(path, entry.name);
-        await this.deleteStagePath(childPath);
+        await this.deleteStagePath(this.buildStateChildPathFromEntry(path, entry));
       }
       await this.delete(this.buildDirectoryMarkerPath(path));
       return true;
@@ -555,7 +623,7 @@ export class JournalService {
   async download(path: JournalPath): Promise<{ blob: Blob; filename: string }> {
     const response = await this.get(path);
     const stateBlock = this.requireStatePath(path);
-    const fallbackName = String(stateBlock[stateBlock.length - 1] || 'download');
+    const fallbackName = JournalService.decodePathSegment(String(stateBlock[stateBlock.length - 1] || 'download'));
 
     if (
       response.content &&
@@ -590,8 +658,8 @@ export class JournalService {
       await this.set(this.buildDirectoryMarkerPath(targetPath), JournalService.textToByteVector(''));
       for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStateSegment(item.name))) {
         await this.copyStagePath(
-          this.buildStateChildPath(sourcePath, entry.name),
-          this.buildStateChildPath(targetPath, entry.name),
+          this.buildStateChildPathFromEntry(sourcePath, entry),
+          this.buildStateChildPathFromEntry(targetPath, entry),
         );
       }
       return;

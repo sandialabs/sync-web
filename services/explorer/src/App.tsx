@@ -69,14 +69,14 @@ const buildStageChildPath = (parentPath: JournalPath, childName: string): Journa
   if (parentPath[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
-  return [...parentPath, childName];
+  return [...parentPath, JournalService.encodePathSegment(childName)];
 };
 
 const buildStageSiblingPath = (path: JournalPath, siblingName: string): JournalPath => {
   if (path[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
-  return [...path.slice(0, -1), siblingName];
+  return [...path.slice(0, -1), JournalService.encodePathSegment(siblingName)];
 };
 
 const stagePathToTreeNodeId = (path: JournalPath): string => {

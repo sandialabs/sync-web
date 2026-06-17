@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["services/router/**", "VERSION"]
+    paths: ["services/router/**", "VERSION", ".github/workflows/services-router.yml"]
   pull_request:
     branches: ["main"]
-    paths: ["services/router/**"]
+    paths: ["services/router/**", ".github/workflows/services-router.yml"]
 
 concurrency:
   group: "services-router-${{ github.ref }}"
@@ -50,7 +50,7 @@ jobs:
           push: false
           tags: ghcr.io/${{ github.repository }}/router:pr-validation
       - name: Build and push SHA-tagged validation image
-        if: github.event_name == 'push' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
         uses: docker/build-push-action@v6
         with:
           context: services/router

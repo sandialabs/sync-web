@@ -84,14 +84,44 @@ describe('JournalService', () => {
     });
   });
 
+  describe('path segment codec', () => {
+    it('encodes non-R7RS path names with percent escapes', () => {
+      expect(JournalService.encodePathSegment('sync-node?')).toBe('sync-node?');
+      expect(JournalService.encodePathSegment('*')).toBe('*');
+      expect(JournalService.encodePathSegment('New folder')).toBe('New%20folder');
+      expect(JournalService.encodePathSegment('a%b')).toBe('a%25b');
+      expect(JournalService.encodePathSegment('a%20b')).toBe('a%2520b');
+      expect(JournalService.encodePathSegment('é')).toBe('%C3%A9');
+      expect(JournalService.encodePathSegment('123')).toBe('%3123');
+    });
+
+    it('decodes percent-escaped path names for display', () => {
+      expect(JournalService.decodePathSegment('sync-node?')).toBe('sync-node?');
+      expect(JournalService.decodePathSegment('New%20folder')).toBe('New folder');
+      expect(JournalService.decodePathSegment('a%25b')).toBe('a%b');
+      expect(JournalService.decodePathSegment('%C3%A9')).toBe('é');
+      expect(JournalService.decodePathSegment('bad%escape')).toBe('bad%escape');
+    });
+  });
+
   describe('parseDirectoryEntries', () => {
     it('should parse entry types from object-map directory payload', () => {
       const input = ['directory', { folder: 'directory', doc: 'value', mystery: 'unknown' }, true];
       const result = JournalService.parseDirectoryEntries(input);
       expect(result).toEqual([
-        { name: 'folder', type: 'directory' },
-        { name: 'doc', type: 'value' },
-        { name: 'mystery', type: 'unknown' },
+        { name: 'folder', pathSegment: 'folder', type: 'directory' },
+        { name: 'doc', pathSegment: 'doc', type: 'value' },
+        { name: 'mystery', pathSegment: 'mystery', type: 'unknown' },
+      ]);
+    });
+
+    it('should parse pair-list directory payload with entry types', () => {
+      const input = ['directory', [['folder', 'directory'], ['doc%20name.txt', 'value'], ['mystery', 'unknown']], true];
+      const result = JournalService.parseDirectoryEntries(input);
+      expect(result).toEqual([
+        { name: 'folder', pathSegment: 'folder', type: 'directory' },
+        { name: 'doc name.txt', pathSegment: 'doc%20name.txt', type: 'value' },
+        { name: 'mystery', pathSegment: 'mystery', type: 'unknown' },
       ]);
     });
 
@@ -99,8 +129,16 @@ describe('JournalService', () => {
       const input = ['directory', [{ '*type/string*': 'a' }, 'b'], true];
       const result = JournalService.parseDirectoryEntries(input);
       expect(result).toEqual([
-        { name: 'a', type: 'unknown' },
-        { name: 'b', type: 'unknown' },
+        { name: 'a', pathSegment: 'a', type: 'unknown' },
+        { name: 'b', pathSegment: 'b', type: 'unknown' },
+      ]);
+    });
+
+    it('skips unsupported constructed-symbol directory names', () => {
+      const input = ['directory', [[['symbol', { '*type/string*': 'bad name' }], 'directory'], ['good%20name', 'value']], true];
+      const result = JournalService.parseDirectoryEntries(input);
+      expect(result).toEqual([
+        { name: 'good name', pathSegment: 'good%20name', type: 'value' },
       ]);
     });
 
@@ -250,8 +288,8 @@ describe('JournalService API', () => {
       const result = await service.getDirectoryEntries(path);
 
       expect(result).toEqual([
-        { name: 'file', type: 'value' },
-        { name: 'folder', type: 'directory' },
+        { name: 'file', pathSegment: 'file', type: 'value' },
+        { name: 'folder', pathSegment: 'folder', type: 'directory' },
       ]);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://test-endpoint.com/api/v1/general/resolve',

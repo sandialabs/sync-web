@@ -233,7 +233,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   }
 
   const extractedContent = JournalService.documentContentToText(currentResponse?.content);
-  const title = String(selection.path[selection.path.length - 1] ?? 'item');
+  const title = JournalService.decodePathSegment(String(selection.path[selection.path.length - 1] ?? 'item'));
 
   return (
     <div className="content-viewer">

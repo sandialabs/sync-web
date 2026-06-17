@@ -32,6 +32,13 @@ This repo has several independent validation layers. Run the checks relevant to 
   - Requires: Go
   - Command: `go test ./...`
 
+## CI release posture
+
+- Pull request and branch validation builds produce `sha-<commit>` container images for changed services.
+- Version-bump merges to `main` should promote the validated SHA images to `latest` and the version from `VERSION`; they should not rebuild expensive multi-arch images on `main`.
+- Direct non-version changes on `main` are a fallback path and may still rebuild images. Prefer PR branches for release changes.
+- Journal image builds use `cargo-chef` and registry BuildKit cache. Source-only Rust changes can reuse dependency layers; dependency graph changes in `journal/Cargo.toml` or lockfile inputs invalidate the dependency recipe and require a real rebuild per architecture.
+
 ## Integrated local stack
 
 - Single-node compose smoke
