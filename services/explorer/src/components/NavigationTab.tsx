@@ -147,11 +147,11 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
           const nodeType: TreeNode['type'] =
             entry.type === 'directory' ? 'directory' : 'file';
           return {
-            id: `${node.id}-${entry.name}`,
+            id: `${node.id}-${entry.pathSegment ?? entry.name}`,
             label: entry.name,
             type: nodeType,
             valueType: entry.type,
-            path: buildChildPath(node.path, entry.name),
+            path: buildChildPath(node.path, entry.pathSegment ?? entry.name),
             isLocal: node.isLocal,
           };
         });
@@ -193,7 +193,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
       return;
     }
 
-    const filePath: JournalPath = [...node.path, fileName];
+    const filePath: JournalPath = [...node.path, JournalService.encodePathSegment(fileName)];
 
     try {
       await journalService.set(filePath, JournalService.textToByteVector(''));
@@ -214,7 +214,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
     }
 
     // Create a dummy file inside the new directory to mark it as a directory
-    const dirMarkerPath: JournalPath = [...node.path, dirName, '*directory*'];
+    const dirMarkerPath: JournalPath = [...node.path, JournalService.encodePathSegment(dirName), '*directory*'];
 
     try {
       await journalService.set(dirMarkerPath, JournalService.textToByteVector(''));

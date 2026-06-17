@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["services/identity-provider/**", "VERSION"]
+    paths: ["services/identity-provider/**", "VERSION", ".github/workflows/services-identity-provider.yml"]
   pull_request:
     branches: ["main"]
-    paths: ["services/identity-provider/**"]
+    paths: ["services/identity-provider/**", ".github/workflows/services-identity-provider.yml"]
 
 concurrency:
   group: "services-identity-provider-${{ github.ref }}"
@@ -50,7 +50,7 @@ jobs:
           push: false
           tags: ghcr.io/${{ github.repository }}/identity-provider:pr-validation
       - name: Build and push SHA-tagged validation image
-        if: github.event_name == 'push' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
         uses: docker/build-push-action@v6
         with:
           context: services/identity-provider

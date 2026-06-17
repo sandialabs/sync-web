@@ -15,6 +15,7 @@ jest.mock('../services/JournalService', () => ({
       return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     }),
     isReservedStateSegment: jest.fn((value: string) => value.startsWith('*') && value.endsWith('*')),
+    decodePathSegment: jest.fn((value: string) => value.replace(/%20/g, ' ')),
   },
 }));
 

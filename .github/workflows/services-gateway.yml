@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["services/gateway/**", "VERSION"]
+    paths: ["services/gateway/**", "VERSION", ".github/workflows/services-gateway.yml"]
   pull_request:
     branches: ["main"]
-    paths: ["services/gateway/**"]
+    paths: ["services/gateway/**", ".github/workflows/services-gateway.yml"]
 
 concurrency:
   group: "services-gateway-${{ github.ref }}"
@@ -42,7 +42,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Run unit tests
-        if: steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true'
+        if: (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true') && !(github.ref == 'refs/heads/main' && steps.filter.outputs.version == 'true')
         run: docker build --target test services/gateway
       - name: Build pull request validation image
         if: github.event_name == 'pull_request' && steps.filter.outputs.service == 'true'
@@ -54,7 +54,7 @@ jobs:
           push: false
           tags: ghcr.io/${{ github.repository }}/gateway:pr-validation
       - name: Build and push SHA-tagged validation image
-        if: github.event_name == 'push' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main' && (steps.filter.outputs.service == 'true' || steps.filter.outputs.version == 'true')
         uses: docker/build-push-action@v6
         with:
           context: services/gateway

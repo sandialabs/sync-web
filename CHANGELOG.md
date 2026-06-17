@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.2
+
+### Fixed
+
+- **Explorer path handling** — Parse ledger directory entries as `[name, type]` pairs, preserve encoded path segments for API calls, and display decoded names for files and directories with spaces or other escaped characters.
+- **Release promotion** — Avoid expensive main-branch validation rebuilds for versioned releases by promoting branch-validated SHA images.
+- **WebDAV docs** — Clarified API-token authentication, service-side path escaping, and Windows client limitations.
+
 ## 1.3.1
 
 ### Fixed

@@ -4,17 +4,33 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["records/**", "journal/**", "deploy/compose/general/**"]
+    paths: ["records/**", "journal/**", "deploy/compose/general/**", ".github/workflows/records.yml"]
   pull_request:
     branches: ["main"]
-    paths: ["records/**", "journal/**", "deploy/compose/general/**"]
+    paths: ["records/**", "journal/**", "deploy/compose/general/**", ".github/workflows/records.yml"]
 
 concurrency:
   group: "records-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core:
+              - 'records/**'
+              - 'journal/**'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
