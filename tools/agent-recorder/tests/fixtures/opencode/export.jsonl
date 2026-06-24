@@ -1,0 +1,5 @@
+{"type":"session","id":"opencode-toy","providerID":"opencode","modelID":"big-pickle"}
+{"type":"message","id":"m1","role":"user","content":"List files"}
+{"type":"part","id":"p1","partType":"tool","callID":"call_1","tool":"bash","input":{"command":"ls"}}
+{"type":"part","id":"p2","partType":"tool","callID":"call_1","tool":"bash","output":"README.md"}
+{"type":"part","id":"p3","partType":"text","text":"README.md exists."}

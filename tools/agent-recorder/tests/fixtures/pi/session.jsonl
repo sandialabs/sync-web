@@ -1,0 +1,8 @@
+{"type":"session","sessionId":"pi-toy","provider":"openai","model":"gpt-test","cwd":"/tmp/pi-fixture"}
+{"type":"message","id":"u1","message":{"role":"user","timestamp":"2026-01-01T00:00:00Z","content":[{"type":"text","text":"Say hello"}]}}
+{"type":"message","id":"a1","message":{"role":"assistant","provider":"openai","model":"gpt-test","timestamp":"2026-01-01T00:00:01Z","content":[{"type":"text","text":"Hello!"}]}}
+{"type":"message","id":"u2","message":{"role":"user","timestamp":"2026-01-01T00:00:02Z","content":[{"type":"text","text":"Check the file"}]}}
+{"type":"message","id":"a2","message":{"role":"assistant","provider":"openai","model":"gpt-test","timestamp":"2026-01-01T00:00:03Z","content":[{"type":"toolCall","id":"call_1","name":"read","arguments":{"path":"README.md"}}]}}
+{"type":"message","id":"t1","message":{"role":"toolResult","timestamp":"2026-01-01T00:00:04Z","toolCallId":"call_1","toolName":"read","content":[{"type":"text","text":"README contents"}]}}
+{"type":"compaction","id":"c1","parentId":"t1","firstKeptEntryId":"u2","timestamp":"2026-01-01T00:00:04Z","summary":"Earlier greeting and file check were summarized.","tokensBefore":1234,"fromHook":false}
+{"type":"message","id":"a3","message":{"role":"assistant","provider":"openai","model":"gpt-test","timestamp":"2026-01-01T00:00:05Z","content":[{"type":"text","text":"The file has a README."}]}}

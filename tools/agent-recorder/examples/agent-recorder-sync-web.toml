@@ -1,0 +1,16 @@
+[run]
+agent = "pi"
+in = "tests/fixtures/generated-pi"
+recorder = "sync-web"
+out = "https://example.test"
+
+# Gateway mode writes through /api/v1/general/{set,get} with Bearer auth.
+sync-web-mode = "gateway"
+sync-web-api-key-env = "AGENT_RECORDER_SYNC_WEB_API_KEY"
+sync-web-path = "*state*/agent-recorder"
+sync-web-start-index = 0
+
+# For a single-purpose journal, use direct-journal mode instead:
+# out = "http://127.0.0.1:8192/interface"
+# sync-web-mode = "direct-journal"
+# sync-web-journal-secret-env = "AGENT_RECORDER_SYNC_WEB_JOURNAL_SECRET"

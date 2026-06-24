@@ -1,0 +1,107 @@
+{
+  "@context": {
+    "ar": "https://sync-web.dev/ns/agent-recorder#",
+    "prov": "http://www.w3.org/ns/prov#",
+    "schema": "https://schema.org/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+
+    "agent-record": "ar:AgentRecord",
+    "message": "ar:Message",
+    "diagnostic": "ar:Diagnostic",
+    "tool-call": "ar:ToolCall",
+    "tool-result": "ar:ToolResult",
+    "source": "ar:source",
+    "integrity-metadata": "ar:IntegrityMetadata",
+    "graph-edge": "ar:GraphEdge",
+
+    "id": "@id",
+    "type": "@type",
+
+    "node": {
+      "@id": "ar:node",
+      "@type": "@id"
+    },
+    "role": {
+      "@id": "ar:role",
+      "@type": "@id"
+    },
+    "content": "ar:content",
+    "cwd": "ar:cwd",
+    "provider": "ar:provider",
+    "model": "ar:model",
+    "severity": "ar:severity",
+    "timestamp": {
+      "@id": "ar:timestamp",
+      "@type": "xsd:dateTime"
+    },
+    "agent-adapter": "ar:agentAdapter",
+    "path": "ar:path",
+    "locator": "ar:locator",
+    "tool-calls": {
+      "@id": "ar:toolCall",
+      "@container": "@list"
+    },
+    "tool-results": {
+      "@id": "ar:toolResult",
+      "@container": "@list"
+    },
+    "name": "ar:name",
+    "arguments": "ar:arguments",
+    "is-error": "ar:isError",
+    "metadata": "ar:metadata",
+    "integrity": "ar:integrity",
+    "algorithm": "ar:integrityAlgorithm",
+    "key-id": "ar:keyId",
+    "index": {
+      "@id": "ar:index",
+      "@type": "xsd:nonNegativeInteger"
+    },
+    "payload-hash": "ar:payloadHash",
+    "authenticator": "ar:authenticator",
+    "edges": {
+      "@id": "ar:edge",
+      "@container": "@list",
+      "@context": {
+        "type": {
+          "@id": "ar:edgeType",
+          "@type": "@id"
+        },
+        "target": {
+          "@id": "ar:target",
+          "@type": "@id"
+        },
+        "metadata": "ar:metadata",
+        "follows-message": "ar:FollowsMessageEdge",
+        "parent-message": "ar:ParentMessageEdge",
+        "summarizes": "ar:SummarizesEdge",
+        "inferred-from": "ar:InferredFromEdge"
+      }
+    },
+
+    "follows-message": {
+      "@id": "ar:followsMessage",
+      "@type": "@id"
+    },
+    "parent-message": {
+      "@id": "ar:parentMessage",
+      "@type": "@id"
+    },
+    "summarizes": {
+      "@id": "ar:summarizes",
+      "@type": "@id"
+    },
+    "inferred-from": {
+      "@id": "ar:inferredFrom",
+      "@type": "@id"
+    },
+
+    "system": "ar:SystemRole",
+    "developer": "ar:DeveloperRole",
+    "user": "ar:UserRole",
+    "assistant": "ar:AssistantRole",
+    "model": "ar:ModelRole",
+    "tool": "ar:ToolRole",
+    "runtime": "ar:RuntimeRole",
+    "unknown": "ar:UnknownRole"
+  }
+}

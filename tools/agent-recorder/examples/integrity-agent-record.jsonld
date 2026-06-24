@@ -1,0 +1,33 @@
+{
+  "@context": "../schema/agent-recorder.context.jsonld",
+  "type": "agent-record",
+  "node": {
+    "type": "message",
+    "id": "msg_example_integrity_0000000000000000000000000000000000000000000000000000000000000000",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "role": "assistant",
+    "content": "This is a synthetic agent-recorder record with real integrity metadata.",
+    "cwd": "/tmp/agent-recorder-example",
+    "provider": "example-provider",
+    "model": "example-model",
+    "source": {
+      "agent-adapter": "example",
+      "path": "examples/synthetic-session.jsonl",
+      "locator": "line:1"
+    }
+  },
+  "edges": [
+    {
+      "type": "follows-message",
+      "target": "msg_example_previous"
+    }
+  ],
+  "integrity": {
+    "type": "integrity-metadata",
+    "algorithm": "agent-recorder-integrity-v1",
+    "key-id": "O_xzihoPi4LbYy4SWSRF_HBFoMqkLWI50LEhIRy9aRM",
+    "index": 0,
+    "payload-hash": "01m2Ix54z_bxltw1_6khwwQsccXey7Q7m_zO4WgKljo",
+    "authenticator": "a35Bibv6gRPIR9KEmYiPnHEQ7QJprvYv6HBISmqU-uU"
+  }
+}

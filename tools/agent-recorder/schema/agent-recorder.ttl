@@ -1,0 +1,232 @@
+@prefix ar: <https://sync-web.dev/ns/agent-recorder#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix schema: <https://schema.org/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+ar: a rdfs:Class ;
+  rdfs:label "Agent Recorder ontology" ;
+  rdfs:comment "Small RDF vocabulary for normalized AI-agent message graph records." .
+
+ar:AgentRecord a rdfs:Class ;
+  rdfs:label "Agent record" ;
+  rdfs:comment "Thin transport/log record containing one graph node and that node's outgoing graph edges." .
+
+ar:Message a rdfs:Class ;
+  rdfs:subClassOf prov:Entity ;
+  rdfs:label "Message" ;
+  rdfs:comment "Observed role-bearing AI-agent transcript item or event normalized as a graph node." .
+
+ar:Diagnostic a rdfs:Class ;
+  rdfs:subClassOf prov:Entity ;
+  rdfs:label "Diagnostic" ;
+  rdfs:comment "Recorder- or adapter-generated diagnostic graph node." .
+
+ar:ToolCall a rdfs:Class ;
+  rdfs:label "Tool call annotation" ;
+  rdfs:comment "Model-visible requested/proposed tool use embedded as a message annotation." .
+
+ar:ToolResult a rdfs:Class ;
+  rdfs:label "Tool result annotation" ;
+  rdfs:comment "Model-visible tool observation/result embedded as a message annotation." .
+
+ar:Source a rdfs:Class ;
+  rdfs:subClassOf prov:Entity ;
+  rdfs:label "Source artifact location" ;
+  rdfs:comment "Location of the source artifact region from which a normalized node was parsed." .
+
+ar:IntegrityMetadata a rdfs:Class ;
+  rdfs:label "Integrity metadata" ;
+  rdfs:comment "Public per-record integrity metadata used to verify the normalized record payload with agent-recorder-integrity-v1." .
+
+ar:GraphEdge a rdfs:Class ;
+  rdfs:label "Graph edge" ;
+  rdfs:comment "Transport edge object from a normalized record's edges array. It carries an edge type and target node id." .
+
+ar:EdgeKind a rdfs:Class ;
+  rdfs:label "Edge kind" .
+
+ar:FollowsMessageEdge a ar:EdgeKind ; rdfs:label "follows-message edge" .
+ar:ParentMessageEdge a ar:EdgeKind ; rdfs:label "parent-message edge" .
+ar:SummarizesEdge a ar:EdgeKind ; rdfs:label "summarizes edge" .
+ar:InferredFromEdge a ar:EdgeKind ; rdfs:label "inferred-from edge" .
+
+ar:Role a rdfs:Class ;
+  rdfs:label "Message role" .
+
+ar:SystemRole a ar:Role ; rdfs:label "system" .
+ar:DeveloperRole a ar:Role ; rdfs:label "developer" .
+ar:UserRole a ar:Role ; rdfs:label "user" .
+ar:AssistantRole a ar:Role ; rdfs:label "assistant" .
+ar:ModelRole a ar:Role ; rdfs:label "model" .
+ar:ToolRole a ar:Role ; rdfs:label "tool" .
+ar:RuntimeRole a ar:Role ; rdfs:label "runtime" .
+ar:UnknownRole a ar:Role ; rdfs:label "unknown" .
+
+ar:node a rdf:Property ;
+  rdfs:domain ar:AgentRecord ;
+  rdfs:range prov:Entity ;
+  rdfs:label "node" .
+
+ar:role a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range ar:Role ;
+  rdfs:label "role" .
+
+ar:content a rdf:Property ;
+  rdfs:domain prov:Entity ;
+  rdfs:range xsd:string ;
+  rdfs:label "content" .
+
+ar:cwd a rdf:Property ;
+  rdfs:domain prov:Entity ;
+  rdfs:range xsd:string ;
+  rdfs:label "current working directory" ;
+  rdfs:comment "Best available current working directory for interpreting the message and relative tool paths." .
+
+ar:provider a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range xsd:string ;
+  rdfs:label "provider" .
+
+ar:model a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range xsd:string ;
+  rdfs:label "model" .
+
+ar:severity a rdf:Property ;
+  rdfs:domain ar:Diagnostic ;
+  rdfs:range xsd:string ;
+  rdfs:label "severity" .
+
+ar:timestamp a rdf:Property ;
+  rdfs:domain prov:Entity ;
+  rdfs:range xsd:dateTime ;
+  rdfs:label "timestamp" ;
+  rdfs:comment "Best available agent/source time when the message/event was completed or recorded into the transcript, normalized to RFC3339 when possible." .
+
+ar:source a rdf:Property ;
+  rdfs:domain prov:Entity ;
+  rdfs:range ar:Source ;
+  rdfs:label "source" .
+
+ar:agentAdapter a rdf:Property ;
+  rdfs:domain ar:Source ;
+  rdfs:range xsd:string ;
+  rdfs:label "agent adapter" .
+
+ar:path a rdf:Property ;
+  rdfs:domain ar:Source ;
+  rdfs:range xsd:string ;
+  rdfs:label "path" .
+
+ar:locator a rdf:Property ;
+  rdfs:domain ar:Source ;
+  rdfs:range xsd:string ;
+  rdfs:label "locator" .
+
+ar:toolCall a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range ar:ToolCall ;
+  rdfs:label "tool call" .
+
+ar:toolResult a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range ar:ToolResult ;
+  rdfs:label "tool result" .
+
+ar:name a rdf:Property ;
+  rdfs:range xsd:string ;
+  rdfs:label "name" .
+
+ar:arguments a rdf:Property ;
+  rdfs:domain ar:ToolCall ;
+  rdfs:label "arguments" ;
+  rdfs:comment "JSON value for tool arguments. Keep as JSON literal/object in JSON-LD; later RDF projections may canonicalize this." .
+
+ar:isError a rdf:Property ;
+  rdfs:domain ar:ToolResult ;
+  rdfs:range xsd:boolean ;
+  rdfs:label "is error" .
+
+ar:metadata a rdf:Property ;
+  rdfs:label "metadata" ;
+  rdfs:comment "Source- or adapter-specific JSON metadata kept outside the stable ontology core." .
+
+ar:integrity a rdf:Property ;
+  rdfs:domain ar:AgentRecord ;
+  rdfs:range ar:IntegrityMetadata ;
+  rdfs:label "integrity" ;
+  rdfs:comment "Public integrity metadata for the record. The integrity block itself is not included in the payload hash or authenticator input." .
+
+ar:integrityAlgorithm a rdf:Property ;
+  rdfs:domain ar:IntegrityMetadata ;
+  rdfs:range xsd:string ;
+  rdfs:label "integrity algorithm" .
+
+ar:keyId a rdf:Property ;
+  rdfs:domain ar:IntegrityMetadata ;
+  rdfs:range xsd:string ;
+  rdfs:label "key id" .
+
+ar:index a rdf:Property ;
+  rdfs:domain ar:IntegrityMetadata ;
+  rdfs:range xsd:nonNegativeInteger ;
+  rdfs:label "record index" .
+
+ar:payloadHash a rdf:Property ;
+  rdfs:domain ar:IntegrityMetadata ;
+  rdfs:range xsd:string ;
+  rdfs:label "payload hash" ;
+  rdfs:comment "Base64url SHA-256 digest of canonical JSON for the whole normalized record with the integrity block removed." .
+
+ar:authenticator a rdf:Property ;
+  rdfs:domain ar:IntegrityMetadata ;
+  rdfs:range xsd:string ;
+  rdfs:label "authenticator" ;
+  rdfs:comment "Base64url HMAC over the integrity algorithm domain, absolute record index, and payload hash." .
+
+ar:edge a rdf:Property ;
+  rdfs:domain ar:AgentRecord ;
+  rdfs:range ar:GraphEdge ;
+  rdfs:label "edge" ;
+  rdfs:comment "Outgoing graph edge object in the raw agent-record transport shape." .
+
+ar:edgeType a rdf:Property ;
+  rdfs:domain ar:GraphEdge ;
+  rdfs:range ar:EdgeKind ;
+  rdfs:label "edge type" .
+
+ar:target a rdf:Property ;
+  rdfs:domain ar:GraphEdge ;
+  rdfs:range prov:Entity ;
+  rdfs:label "target" ;
+  rdfs:comment "Target normalized node id for a transport edge." .
+
+ar:followsMessage a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range ar:Message ;
+  rdfs:subPropertyOf prov:wasDerivedFrom ;
+  rdfs:label "follows message" ;
+  rdfs:comment "Current message follows the target previous message in the observed source stream." .
+
+ar:parentMessage a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range ar:Message ;
+  rdfs:label "parent message" ;
+  rdfs:comment "Explicit source parent relation when available." .
+
+ar:summarizes a rdf:Property ;
+  rdfs:domain ar:Message ;
+  rdfs:range ar:Message ;
+  rdfs:subPropertyOf prov:wasDerivedFrom ;
+  rdfs:label "summarizes" ;
+  rdfs:comment "Summary/compaction message summarizes the target message." .
+
+ar:inferredFrom a rdf:Property ;
+  rdfs:domain prov:Entity ;
+  rdfs:range prov:Entity ;
+  rdfs:subPropertyOf prov:wasDerivedFrom ;
+  rdfs:label "inferred from" ;
+  rdfs:comment "Reserved for later heuristic or derived relations." .
