@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.1
+
+### Added
+
+- **Windows ARM64 binaries** — Add Windows ARM64 builds for `ledger`, `journal-sdk`, and `agent-recorder` release artifacts.
+
+### Changed
+
+- **Journal SDK patch version** — Bump `journal-sdk` to `1.3.1` because the journal crate dependency configuration changed.
+- **Journal dependency build scope** — Disable unused default `pqcrypto` algorithm features so Windows ARM64 builds avoid compiling unused PQClean C implementations.
+
 ## 1.4.0
 
 ### Added

@@ -39,6 +39,9 @@ jobs:
           - target: windows-x86_64
             os: windows-latest
             agent_recorder_bin: target/release/agent-recorder.exe
+          - target: windows-aarch64
+            os: windows-11-arm
+            agent_recorder_bin: target/release/agent-recorder.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write

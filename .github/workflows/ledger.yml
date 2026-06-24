@@ -63,6 +63,10 @@ jobs:
             os: windows-latest
             journal_bin: target/release/journal-sdk.exe
             ledger_bin: target/release/ledger.exe
+          - target: windows-aarch64
+            os: windows-11-arm
+            journal_bin: target/release/journal-sdk.exe
+            ledger_bin: target/release/ledger.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -87,8 +91,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install llvm -y
-          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if ("${{ matrix.target }}" -eq "windows-aarch64") {
+            "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\ARM64\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            choco install llvm -y
+            "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
       - name: Use clang on Unix runners
         if: runner.os != 'Windows'

@@ -115,6 +115,8 @@ journal-sdk-macos-aarch64
 ledger-macos-aarch64
 journal-sdk-windows-x86_64.exe
 ledger-windows-x86_64.exe
+journal-sdk-windows-aarch64.exe
+ledger-windows-aarch64.exe
 ```
 
 For branch pushes, these are uploaded as workflow artifacts for testing. For `ledger-v*` tag builds, a final publish job waits for all binary builds, downloads the artifacts, generates `SHA256SUMS`, and uploads the files as release assets.
@@ -123,6 +125,7 @@ Implementation notes:
 
 - Linux/musl artifacts are built in Alpine and checked inside Alpine with `libgcc`/`libstdc++` present.
 - Windows builds use an `OUT_DIR` build-time patch of vendored s7 rather than modifying `journal/external/s7` directly.
+- Windows ARM64 builds use the Visual Studio ARM64 `libclang.dll` because the Chocolatey LLVM package installs x86_64 `libclang.dll` on ARM runners.
 - `journal-sdk` must not depend on top-level platform `VERSION`; only `ledger` reports the platform version.
 
 ## Secret and signing posture
