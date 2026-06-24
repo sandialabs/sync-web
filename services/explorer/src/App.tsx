@@ -730,7 +730,7 @@ const App: React.FC = () => {
         <div className="left-pane pane">
           <ExplorerTree
             mode={mode}
-            rootPath={mode === 'stage' ? stageRootPath : ledgerRootPath}
+            rootPath={mode === 'stage' ? STAGE_ROOT_PATH : ledgerRootPath}
             selected={mode === 'stage' ? stageSelection : ledgerSelection}
             expandedNodes={mode === 'stage' ? stageExpandedNodes : ledgerExpandedNodes}
             journalService={journalService}

@@ -53,7 +53,7 @@ COPY --from=cacher /srv/target target
 
 COPY . .
 
-RUN cargo build --release && \
+RUN cargo build --release --bin journal-sdk && \
     cp /srv/target/release/journal-sdk /tmp/journal-sdk
 
 # --- Test ---

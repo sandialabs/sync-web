@@ -284,7 +284,14 @@
     (assert (journal-query journal-1 query) 8))
 
   (let ((query '((function config) (arguments ((path (public window)))))))
+    (assert (journal-query journal-1 query)
+            (lambda (x) (and (list? x) (eq? (car x) 'error))))
     (assert (interface-query journal-1 interface-1 query) 2))
+
+  (let ((query '((function config) (arguments ((path (private secret-key)))))))
+    (assert (journal-query journal-1 query)
+            (lambda (x) (and (list? x) (eq? (car x) 'error))))
+    (assert (interface-query journal-1 interface-1 query) '()))
 
   (let ((query '((function get) (arguments ((expression? #t) (path (*state* hello)))))))
     (assert (interface-query journal-1 interface-1 query) "world"))

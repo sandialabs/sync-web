@@ -62,12 +62,12 @@
                   (chain-class ((root 'get) '(root class chain)))
                   (ledger-class ((root 'get) '(root class ledger)))
                   (document-class ((root 'get) '(root class document)))
-                 (keys (crypto-generate (expression->byte-vector ,(config-ref 'interface-secret)))))
+                 (keys (crypto-generate (expression->byte-vector ,(config-ref 'root-secret)))))
              (if ,(config-ref 'clear?)
                  (let* ((config-expr (list (list 'public (list (list 'window ,(config-ref 'window))
                                                                (list 'public-key (car keys))
                                                                (list 'bridge-policy ',(config-ref 'bridge-policy))))
-                                           (list 'private (list (list 'secret-key (cdr keys))))))
+                                           (list 'private '())))
                         (ledger ((standard 'init) ledger-class std-node config-expr tree-class chain-class document-class)))
                    ((root 'set!) '(root object ledger) ledger))
                  (let* ((ledger-old (sync-eval ((root 'get) '(root object ledger)) #f))
@@ -79,7 +79,6 @@
                    ((ledger 'update-config!) '(public window) ,(config-ref 'window))
                    ((ledger 'update-config!) '(public public-key) (car keys))
                    ((ledger 'update-config!) '(public bridge-policy) ',(config-ref 'bridge-policy))
-                   ((ledger 'update-config!) '(private secret-key) (cdr keys))
                    ((ledger 'update-code!) 'standard (recode standard-class))
                    ((ledger 'update-code!) 'tree (recode tree-class))
                    ((ledger 'update-code!) 'chain (recode chain-class))
@@ -152,17 +151,17 @@
 
          ;; --- remote bridge helpers ---
 
-         (define (~fetch-remote-head path index)
+         (define* (~fetch-remote-head path index (meta? #f))
            (let* ((request ((ledger 'bridge-head) path index))
                   (interface (cadr (assoc 'interface request)))
                   (remote-index (cadr (assoc 'index request)))
                   (remote-path (cadr (assoc 'path request)))
-                  (query `((function trace) (arguments ((index ,remote-index) (path ,remote-path)))))
+                  (query `((function trace) (arguments ((index ,remote-index) (path ,remote-path) (meta? ,meta?)))))
                   (response (sync-remote interface query)))
              ((standard 'deserialize) response)))
 
-         (define* (~fetch-merged-head path (index -1))
-           (let ((head (~fetch-remote-head path index)))
+         (define* (~fetch-merged-head path (index -1) (meta? #f))
+           (let ((head (~fetch-remote-head path index meta?)))
              ((ledger 'merge-head) path head index)))
 
          ;; --- handlers ---
@@ -196,6 +195,14 @@
            (if (not (and (integer? value) (> value 0)))
                (error 'argument-error "Window must be a positive integer: ~S" value))
            ((ledger 'update-config!) '(public window) value))
+
+         (define* (config (path '()))
+           ;; Return ledger configuration through the admin-only envelope.
+           ;;   Args:
+           ;;     path (list): optional config path.
+           ;;   Returns:
+           ;;     any: config expression or subexpression.
+           ((ledger 'config) path))
 
          (define* (get (path (error 'argument-error "Missing required argument: ~S" 'path)) meta? expression?)
            ;; Get staged document value, optionally with metadata and expression decoding.
@@ -245,9 +252,9 @@
                (let ((attempt ((ledger 'resolve) path #f #f #f meta? expression?)))
                  (cond ((not (equal? attempt '(unknown))) ((ledger 'resolve) path pinned? proof? #f meta? expression?))
                        ((not (~bridge-path? path)) attempt)
-                       (else ((ledger 'resolve) path pinned? proof? (~fetch-merged-head path) meta? expression?))))))
+                       (else ((ledger 'resolve) path pinned? proof? (~fetch-merged-head path -1 meta?) meta? expression?))))))
 
-         (define* (trace (index (error 'argument-error "Missing required argument: ~S" 'index)) (path (error 'argument-error "Missing required argument: ~S" 'path)) head)
+         (define* (trace (index (error 'argument-error "Missing required argument: ~S" 'index)) (path (error 'argument-error "Missing required argument: ~S" 'path)) head meta?)
            ;; Return a proof trace for a path, fetching remote bridge state when needed.
            ;;   Args:
            ;;     index (integer): trace index.
@@ -255,16 +262,16 @@
            ;;     head (sync node): optional pre-fetched chain head.
            ;;   Returns:
            ;;     sync node: traced proof.
-           (if head ((ledger 'trace) index path head)
+           (if head ((ledger 'trace) index path head meta?)
                (let ((attempt ((ledger 'resolve) (cond ((null? path) `(,index))
                                                        ((not (integer? (car path)))
                                                         (if (>= index 0) (cons index path) path))
                                                        ((>= (car path) 0) path)
                                                        ((>= index 0) (cons (+ (+ index 1) (car path)) (cdr path)))
                                                        (else (cons (+ index (car path) 1) (cdr path)))))))
-                 (cond ((not (equal? attempt '(unknown))) ((ledger 'trace) index path))
+                 (cond ((not (equal? attempt '(unknown))) ((ledger 'trace) index path #f meta?))
                        ((not (~bridge-path? path)) (error 'path-error "Cannot trace unknown path: ~S" path))
-                       (else ((ledger 'trace) index path (~fetch-merged-head path index)))))))
+                       (else ((ledger 'trace) index path (~fetch-merged-head path index meta?) meta?))))))
 
          (define* (pin! (path (error 'argument-error "Missing required argument: ~S" 'path)) response)
            ;; Pin content locally, fetching and reserializing remote bridge content when needed.
@@ -314,8 +321,9 @@
                       ((trace) (apply trace keyword-args))
                       ((pin!) (~authenticate+authorize) (apply pin! keyword-args))
                       ((bridge!) (~authenticate+authorize) (apply bridge! keyword-args))
+                      ((config) (~authenticate+authorize) (apply config keyword-args))
                       ((set-batch! unpin!) (~authenticate+authorize) (~method))
-                      ((size synchronize synchronize! info config) (~method))
+                      ((size synchronize synchronize! info) (~method))
                       (else (error 'api-error "Interface does not implement API endpoint: ~S" (cadr func))))))
            ((root 'set!) '(root object ledger) (ledger))
            ret))))
@@ -364,7 +372,9 @@
            ;;     mutate? (boolean): #t to perform the final local step.
            ;;   Returns:
            ;;     integer: resulting ledger size.
-           (if mutate? (begin ((ledger 'step!) (system-time-unix)) ((ledger 'size)))
+           (if mutate? (let ((keys (crypto-generate (expression->byte-vector secret))))
+                         ((ledger 'step!) (system-time-unix) (car keys) (cdr keys))
+                         ((ledger 'size)))
                (begin
                  (let loop ((names (map car ((ledger 'config) '(private bridge)))))
                    (if (not (null? names))
