@@ -1,0 +1,40 @@
+networks:
+  ledger-net:
+    name: ${COMPOSE_PROJECT_NAME:-ledger}-net
+
+services:
+  journal:
+    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.4.0}
+    container_name: ${COMPOSE_PROJECT_NAME:-ledger}-journal
+    working_dir: /srv
+    entrypoint: ["/bin/sh", "/srv/run.sh"]
+    networks:
+      - ledger-net
+    environment:
+      SECRET: ${SECRET:-}
+      PERIOD: ${PERIOD:-2}
+      WINDOW: ${WINDOW:-1024}
+      RUST_LOG: ${RUST_LOG:-INFO}
+      JOURNAL_UPDATE: ${JOURNAL_UPDATE:-}
+      INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
+      INTERFACE: ${INTERFACE:-}
+      JOURNAL_NAME: ${JOURNAL_NAME:-}
+      BRIDGE_PUBLISH: ${BRIDGE_PUBLISH:-push}
+      BRIDGE_SUBSCRIBE: ${BRIDGE_SUBSCRIBE:-pull}
+      LISP_DIR: /srv/lisp
+    volumes:
+      - database:/srv/database
+      - ../../../records/lisp:/srv/lisp:ro,Z
+      - ./run.sh:/srv/run.sh:ro,Z
+    ports:
+      - "${JOURNAL_PORT:-8192}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  database:
+    name: ${COMPOSE_PROJECT_NAME:-ledger}-database

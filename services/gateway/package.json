@@ -1,6 +1,6 @@
 {
   "name": "synchronic-gateway",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Web-facing API gateway for the Synchronic Web general API.",
   "scripts": {

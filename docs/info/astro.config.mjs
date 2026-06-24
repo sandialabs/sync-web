@@ -38,6 +38,7 @@ export default defineConfig({
         src: logo,
       },
       customCss: ["./src/styles/custom.css"],
+      disable404Route: true,
       sidebar: [
         {
           label: "Documentation",

@@ -88,6 +88,7 @@
                            '((function set!)
                              (arguments ((path (*state* publisher doc))
                                          (value "from-a")
+                                         (meta ((source bridge-test)))
                                          (expression? #t)))))
           #t)
   (assert (admin-step journal-a "pass-a") 1)
@@ -101,10 +102,6 @@
               (and (equal? (cadr (assoc 'ok? ack)) #t)
                    (equal? (cadr (assoc 'mode ack)) 'push)))))
 
-  (assert (interface-query journal-b interface-b
-                           '((function config)
-                             (arguments ((path (private bridge journal-a last-index))))))
-          (lambda (index) (and (integer? index) (>= index 0))))
 
   (assert (interface-query journal-b interface-b
                            '((function get)
@@ -122,6 +119,14 @@
                                          (pinned? #f)
                                          (proof? #f)))))
           "from-a")
+
+  (assert (cadr (assoc 'meta (interface-query journal-b interface-b
+                                           '((function resolve)
+                                             (arguments ((path (-1 *bridge* journal-a *state* publisher doc))
+                                                         (meta? #t)
+                                                         (pinned? #f)
+                                                         (proof? #f)))))))
+          '((source bridge-test)))
 
   ;; A stale pushed payload is rejected with a non-fatal bridge sync error.
   (let ((payload (journal-query journal-a '((function synchronize) (arguments ((index -1)))))))

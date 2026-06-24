@@ -268,7 +268,7 @@
                   ((tree 'get) '(*crypto* signature))
                   ((chain 'digest) ,index))))))))
 
-  (define-method (trace self index path head)
+  (define-method (trace self index path head (meta? #f))
     ;; Trace a remote path against a serialized chain at index.
     ;;   Args:
     ;;     index (integer): index to access.
@@ -281,7 +281,7 @@
            (node ((standard 'deep-get) head path))
            (trace-path (if (and (eq? ((self '~object-type) node) 'document)
                                 (not ((self '~bridge-chain-value-path?) path)))
-                           (append path '(value)) path)))
+                           (append path (list ((self '~document-field) meta?))) path)))
       ((standard 'serialize) head
        `(lambda (node)
           (letrec ((deep-get (lambda (node path)
@@ -405,10 +405,12 @@
                               (stage-set! `(*bridge* ,name chain) `(*bridge* ,name chain) stored-chain)
                               ((self '~field!) 'stage (stage)))))))))))
 
-  (define-method (step! self unix-time)
+  (define-method (step! self unix-time public-key secret-key)
     ;; Commit staged changes to permanent chain and update temp window.
     ;;   Args:
     ;;     unix-time (integer): step time as unix epoch seconds.
+    ;;     public-key (byte-vector): public verification key derived for this step.
+    ;;     secret-key (byte-vector): private signing key derived for this step.
     ;;   Returns:
     ;;     integer: new chain size.
     (let* ((window ((self '~config-get) '(public window)))
@@ -433,7 +435,8 @@
             ((stage 'set!) '(*state* *time*) utc-time)
             ((perm 'push!) (stage))
             ((stage 'set!) '(*transition*) '(nothing))
-            (set! perm (sync-eval ((self '~signature-sign!) (perm)) #f))
+            ((self '~config-set!) '(public public-key) public-key)
+            (set! perm (sync-eval ((self '~signature-sign!) (perm) public-key secret-key) #f))
             ((temp 'push!) ((perm 'get) -1))
             (let ((time-node ((standard 'deep-slice!) (temp) '(-1 (*state* *time*)))))
               (if (and window (> ((temp 'size)) window)) ((temp 'prune!) (- (+ window 1))))
@@ -708,15 +711,15 @@
       (let ((chain (if (and window (<= target (- current window))) perm (sync-eval ((self '~field!) 'temp) #f))))
         ((chain 'previous) index))))
 
-  (define-method (~signature-sign! self chain)
-    ;; Embed public key and signature into chain head using config keys.
+  (define-method (~signature-sign! self chain public-key secret-key)
+    ;; Embed public key and signature into chain head using ephemeral step keys.
     ;;   Args:
     ;;     chain (sync node): chain node to sign.
+    ;;     public-key (byte-vector): public verification key.
+    ;;     secret-key (byte-vector): private signing key for this step only.
     ;;   Returns:
     ;;     sync node: signed chain node.
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (public-key ((self '~config-get) '(public public-key)))
-           (secret-key ((self '~config-get) '(private secret-key))))
+    (let* ((standard (sync-eval ((self '~field!) 'standard) #f)))
       (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* public-key)) #u()))
       (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* signature)) #u()))
       ((standard 'deep-call!) chain '(-1)

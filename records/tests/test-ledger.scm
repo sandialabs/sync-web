@@ -11,11 +11,12 @@
   (define ledger-cls ledger-src)
   (define document-cls document-src)
 
+  (define test-keys (crypto-generate (expression->byte-vector 'ledger-test)))
+
   (define (make-ledger name)
-    (let* ((keys (crypto-generate (expression->byte-vector name)))
-           (config-expr `((public ((window 4)
-                                   (public-key ,(car keys))))
-                          (private ((secret-key ,(cdr keys)))))))
+    (let ((config-expr `((public ((window 4)
+                                  (public-key ,(car test-keys))))
+                         (private ()))))
       (assert ((standard 'init) ledger-cls (standard) config-expr tree-cls chain-cls document-cls)
               sync-node?)))
 
@@ -30,7 +31,7 @@
 
   (define (step-all! ledger)
     (let loop ((names (map car ((ledger 'config) '(private bridge))))
-               (result (list ((ledger 'step!) (system-time-unix)))))
+               (result (list ((ledger 'step!) (system-time-unix) (car test-keys) (cdr test-keys)))))
       (if (null? names) (reverse result)
           (let* ((name (car names))
                  (peer (eval name))
@@ -394,7 +395,6 @@
           (lambda (res) (cadr (assoc 'pinned? res))))
 
   (assert ((ledger-1 'update-config!) '(public public-key) #u(0)) #t)
-  (assert ((ledger-1 'update-config!) '(private secret-key) #u(1)) #t)
   (assert ((ledger-1 'update-config!) '(public window) 2) #t)
   (assert ((ledger-1 'update-code!) 'tree '(lambda (obj) obj)) #t)
   (assert ((ledger-1 'update-code!) 'chain '(lambda (obj) obj)) #t)
