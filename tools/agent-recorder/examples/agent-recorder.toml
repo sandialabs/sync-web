@@ -1,0 +1,5 @@
+[run]
+agent = "pi"
+in = "tests/fixtures/pi"
+recorder = "jsonl"
+out = "records.jsonl"

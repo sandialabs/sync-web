@@ -117,7 +117,7 @@ journal-sdk-windows-x86_64.exe
 ledger-windows-x86_64.exe
 ```
 
-For branch pushes, these are uploaded as workflow artifacts for testing. For `v*` tag builds, a final publish job waits for all binary builds, downloads the artifacts, generates `SHA256SUMS`, and uploads the files as release assets.
+For branch pushes, these are uploaded as workflow artifacts for testing. For `ledger-v*` tag builds, a final publish job waits for all binary builds, downloads the artifacts, generates `SHA256SUMS`, and uploads the files as release assets.
 
 Implementation notes:
 

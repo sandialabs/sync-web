@@ -46,6 +46,7 @@ export default defineConfig({
             { slug: "index", label: "Overview" },
             { slug: "usage", label: "Usage" },
             { slug: "operation", label: "Operation" },
+            { slug: "tools", label: "Tools" },
             { slug: "development", label: "Development" },
             { slug: "research", label: "Research" },
             { slug: "glossary", label: "Glossary" },

@@ -1,0 +1,5 @@
+{"type":"session_meta","session_id":"codex-toy","provider":"openai","model":"gpt-test"}
+{"type":"event_msg","role":"user","content":"Run the tests"}
+{"type":"response_item","item":{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"command\":\"cargo test\"}"}}
+{"type":"response_item","item":{"type":"function_call_output","call_id":"call_1","output":"tests passed"}}
+{"type":"response_item","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Tests passed."}]}}
