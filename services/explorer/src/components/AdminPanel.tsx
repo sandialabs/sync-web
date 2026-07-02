@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { JournalService } from '../services/JournalService';
-import { AdminConfig } from '../types';
+import { AdminBridge, AdminConfig, BridgeDirection, BridgePolicyChoice } from '../types';
 import './AdminPanel.css';
 
 interface AdminPanelProps {
@@ -12,16 +12,59 @@ interface AdminPanelProps {
 const emptyConfig: AdminConfig = {
   admins: [],
   bridges: [],
+  subscribers: [],
+  localName: null,
   windowSize: null,
 };
 
 const normalizeName = (value: string) => value.trim();
+const validRemoteEndpoint = (value: string) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+const policyChoices: BridgePolicyChoice[] = ['push', 'pull', 'none'];
+const policyLabel = (choice: BridgePolicyChoice) => choice[0].toUpperCase() + choice.slice(1);
+
+const policyAllowed = (bridge: AdminBridge, choice: BridgePolicyChoice): boolean => {
+  if (choice === 'none') {
+    return true;
+  }
+  if (bridge.direction === 'incoming') {
+    const remotePublish = bridge.remotePolicy.publish;
+    if (remotePublish === 'none') return false;
+    if (remotePublish === 'push') return choice === 'push' || choice === 'pull';
+    if (remotePublish === 'pull') return choice === 'pull';
+    return false;
+  }
+  const remoteSubscribe = bridge.remotePolicy.subscribe;
+  if (remoteSubscribe === 'none') return false;
+  if (choice === 'push') return remoteSubscribe === 'push' || remoteSubscribe === 'pull';
+  if (choice === 'pull') return remoteSubscribe === 'pull';
+  return false;
+};
+
+const selectedPolicy = (bridge: AdminBridge): BridgePolicyChoice => (
+  bridge.direction === 'incoming' ? bridge.localPolicy.subscribe : bridge.localPolicy.publish
+);
+
+const withSelectedPolicy = (bridge: AdminBridge, choice: BridgePolicyChoice) => {
+  if (bridge.direction === 'incoming') {
+    return { ...bridge.localPolicy, subscribe: choice };
+  }
+  return { ...bridge.localPolicy, publish: choice };
+};
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, refreshKey }) => {
   const [config, setConfig] = useState<AdminConfig>(emptyConfig);
   const [adminName, setAdminName] = useState('');
   const [bridgeName, setBridgeName] = useState('');
   const [bridgeEndpoint, setBridgeEndpoint] = useState('');
+  const [bridgeDirection, setBridgeDirection] = useState<BridgeDirection>('incoming');
+  const [bridgeRemoteName, setBridgeRemoteName] = useState('');
   const [windowInput, setWindowInput] = useState('');
   const windowInputDirtyRef = useRef(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -47,6 +90,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
       const nextWindowInput = nextConfig.windowSize === null ? '' : String(nextConfig.windowSize);
       if (!windowInputDirtyRef.current) {
         setWindowInput((prev) => (prev === nextWindowInput ? prev : nextWindowInput));
+      }
+      if (nextConfig.localName) {
+        setBridgeRemoteName((prev) => prev || nextConfig.localName || '');
       }
       setHasLoaded(true);
     } catch (loadError) {
@@ -113,6 +159,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     if (!name || !endpoint) {
       return;
     }
+    if (!validRemoteEndpoint(endpoint)) {
+      setError('Remote endpoint must be an http:// or https:// URL.');
+      return;
+    }
     if (/\s/.test(name)) {
       setError('Bridge names cannot contain whitespace.');
       return;
@@ -122,11 +172,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     setError(null);
     setStatus(null);
     try {
-      await journalService.addBridge(name, endpoint);
+      await journalService.saveBridge({
+        name,
+        endpoint,
+        direction: bridgeDirection,
+        policy: { publish: 'push', subscribe: 'pull' },
+        remoteName: normalizeName(bridgeRemoteName) || config.localName || name,
+      });
       await loadConfig();
       setBridgeName('');
       setBridgeEndpoint('');
-      setStatus(`Saved bridge ${name}.`);
+      setBridgeRemoteName('');
+      setStatus(`Saved ${bridgeDirection} bridge ${name}.`);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save bridge');
     } finally {
@@ -167,6 +224,143 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     }
   };
 
+  const saveBridgeUpdate = async (bridge: AdminBridge, input: { endpoint?: string; choice?: BridgePolicyChoice }) => {
+    const nextEndpoint = input.endpoint ?? bridge.endpoint;
+    const nextPolicy = input.choice ? withSelectedPolicy(bridge, input.choice) : bridge.localPolicy;
+    await journalService.saveBridge({
+      name: bridge.name,
+      endpoint: nextEndpoint,
+      direction: bridge.direction,
+      policy: nextPolicy,
+      remoteName: bridge.remoteName || bridge.name,
+    });
+  };
+
+  const handleEditBridgeEndpoint = async (bridge: AdminBridge) => {
+    const endpoint = window.prompt(`Endpoint for ${bridge.name}`, bridge.endpoint);
+    if (endpoint === null) {
+      return;
+    }
+    const trimmed = endpoint.trim();
+    if (!trimmed) {
+      setError('Bridge endpoint cannot be empty.');
+      return;
+    }
+    if (!validRemoteEndpoint(trimmed)) {
+      setError('Remote endpoint must be an http:// or https:// URL.');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await saveBridgeUpdate(bridge, { endpoint: trimmed });
+      await loadConfig();
+      setStatus(`Updated ${bridge.name} endpoint.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not update bridge endpoint');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSetBridgePolicy = async (bridge: AdminBridge, choice: BridgePolicyChoice) => {
+    if (!policyAllowed(bridge, choice) || selectedPolicy(bridge) === choice) {
+      return;
+    }
+    if (choice === 'none' && !window.confirm(`Set ${bridge.name} to none? This will sever synchronization but keep the entry in config.`)) {
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await saveBridgeUpdate(bridge, { choice });
+      await loadConfig();
+      setStatus(`Updated ${bridge.name} policy to ${choice}.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not update bridge policy');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteBridge = async (bridge: AdminBridge) => {
+    if (!window.confirm(`Delete ${bridge.name}? This removes the config entry rather than keeping it disabled.`)) {
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await journalService.deleteBridge(bridge.name, bridge.direction);
+      await loadConfig();
+      setStatus(`Deleted ${bridge.name}.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not delete bridge');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const renderBridgeList = (title: string, bridges: AdminBridge[], empty: string) => (
+    <section className="admin-subsection">
+      <div className="admin-subsection-label">{title}</div>
+      <div className="admin-list bridge-list">
+        {bridges.length === 0 ? (
+          <div className="admin-empty">{empty}</div>
+        ) : (
+          bridges.map((bridge) => (
+            <div className="admin-row bridge-row" key={`${bridge.direction}-${bridge.name}`}>
+              <span className="bridge-name">{bridge.name}</span>
+              <span className="bridge-endpoint">{bridge.endpoint || 'Endpoint unavailable'}</span>
+              <span className="bridge-policy-toggle" role="radiogroup" aria-label={`${bridge.name} policy`}>
+                {policyChoices.map((choice) => {
+                  const active = selectedPolicy(bridge) === choice;
+                  const allowed = policyAllowed(bridge, choice);
+                  return (
+                    <button
+                      key={choice}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      className={`segmented-option ${active ? 'active' : ''}`}
+                      disabled={isSaving || !allowed}
+                      onClick={() => void handleSetBridgePolicy(bridge, choice)}
+                      title={!allowed ? 'Remote policy does not allow this option' : undefined}
+                    >
+                      {policyLabel(choice)}
+                    </button>
+                  );
+                })}
+              </span>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={`Edit ${bridge.name} endpoint`}
+                title="Edit endpoint"
+                disabled={isSaving}
+                onClick={() => void handleEditBridgeEndpoint(bridge)}
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                className="icon-button danger"
+                aria-label={`Delete ${bridge.name}`}
+                title="Delete bridge"
+                disabled={isSaving}
+                onClick={() => void handleDeleteBridge(bridge)}
+              >
+                🗑
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+
   const handleCopyLocalEndpoint = async () => {
     setError(null);
     setStatus(null);
@@ -202,24 +396,29 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
           <div className="local-endpoint-label">Local endpoint</div>
           <div className="local-endpoint-row">
             <code>{bridgeEndpointForSharing}</code>
-            <button className="button button-secondary" onClick={handleCopyLocalEndpoint}>
-              Copy
+            <button className="icon-button" onClick={handleCopyLocalEndpoint} aria-label="Copy local endpoint" title="Copy local endpoint">
+              ⧉
             </button>
           </div>
         </div>
-        <div className="admin-list bridge-list">
-          {config.bridges.length === 0 ? (
-            <div className="admin-empty">No bridges configured.</div>
-          ) : (
-            config.bridges.map((bridge) => (
-              <div className="admin-row bridge-row" key={bridge.name}>
-                <span className="bridge-name">{bridge.name}</span>
-                <span className="bridge-endpoint">{bridge.endpoint || 'Endpoint unavailable'}</span>
-              </div>
-            ))
-          )}
-        </div>
+        {renderBridgeList('Subscribe to', config.bridges, 'No subscribed bridges configured.')}
+        {renderBridgeList('Publish to', config.subscribers, 'No publishing targets configured.')}
         <form className="admin-form bridge-form" onSubmit={handleSaveBridge}>
+          <select
+            className="input"
+            value={bridgeDirection}
+            onChange={(event) => {
+              const direction = event.target.value as BridgeDirection;
+              setBridgeDirection(direction);
+              if (direction === 'outgoing' && config.localName) {
+                setBridgeRemoteName((prev) => prev || config.localName || '');
+              }
+            }}
+            disabled={isSaving}
+          >
+            <option value="incoming">Subscribe to</option>
+            <option value="outgoing">Publish to</option>
+          </select>
           <input
             className="input"
             value={bridgeName}
@@ -231,7 +430,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
             className="input"
             value={bridgeEndpoint}
             onChange={(event) => setBridgeEndpoint(event.target.value)}
-            placeholder="http://peer-router/api/v1/journal/interface"
+            placeholder="Remote endpoint"
+            disabled={isSaving}
+          />
+          <input
+            className="input"
+            value={bridgeRemoteName}
+            onChange={(event) => setBridgeRemoteName(event.target.value)}
+            placeholder="Remote name"
             disabled={isSaving}
           />
           <button
@@ -239,7 +445,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
             type="submit"
             disabled={isSaving || !bridgeName.trim() || !bridgeEndpoint.trim()}
           >
-            Save Bridge
+            Create bridge
           </button>
         </form>
       </section>

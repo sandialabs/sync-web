@@ -25,14 +25,25 @@ export interface PeerInfo {
   endpoint: string;
 }
 
+export type BridgeDirection = 'incoming' | 'outgoing';
+export type BridgePolicyChoice = 'push' | 'pull' | 'none';
+
 export interface AdminBridge {
   name: string;
   endpoint: string;
+  direction: BridgeDirection;
+  localPolicy: { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice };
+  remotePolicy: { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice };
+  mode: BridgePolicyChoice;
+  disabled: boolean;
+  remoteName?: string;
 }
 
 export interface AdminConfig {
   admins: string[];
   bridges: AdminBridge[];
+  subscribers: AdminBridge[];
+  localName: string | null;
   windowSize: number | null;
 }
 

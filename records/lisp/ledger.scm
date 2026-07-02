@@ -56,30 +56,27 @@
            (local-policy (cadr (assoc 'policy info-local))))
       (if (eq? (cadr (assoc 'role info-local)) 'publisher)
           (let ((mode ((self '~bridge-mode) local-policy remote-policy)))
-            (if (eq? mode 'none)
-                (begin ((self '~config-set!) `(private subscriber ,name) '()) #f)
-                (begin
-                  ((self '~config-set!) `(private subscriber ,name) info-remote)
-                  ((self '~config-set!) `(private subscriber ,name local) info-local)
-                  ((self '~config-set!) `(private subscriber ,name interface) (cadr (assoc 'interface info-local)))
-                  ((self '~config-set!) `(private subscriber ,name public-key) public-key)
-                  ((self '~config-set!) `(private subscriber ,name remote-name) (cadr (assoc 'remote-name info-local)))
-                  ((self '~config-set!) `(private subscriber ,name policy local) local-policy)
-                  ((self '~config-set!) `(private subscriber ,name policy remote) remote-policy)
-                  ((self '~config-set!) `(private subscriber ,name policy mode) mode)
-                  #t)))
+            (begin
+              ((self '~config-set!) `(private subscriber ,name) info-remote)
+              ((self '~config-set!) `(private subscriber ,name disabled?) (eq? mode 'none))
+              ((self '~config-set!) `(private subscriber ,name interface) (cadr (assoc 'interface info-local)))
+              ((self '~config-set!) `(private subscriber ,name public-key) public-key)
+              ((self '~config-set!) `(private subscriber ,name remote-name) (cadr (assoc 'remote-name info-local)))
+              ((self '~config-set!) `(private subscriber ,name policy local) local-policy)
+              ((self '~config-set!) `(private subscriber ,name policy remote) remote-policy)
+              ((self '~config-set!) `(private subscriber ,name policy mode) mode)
+              (not (eq? mode 'none))))
           (let ((mode ((self '~bridge-mode) remote-policy local-policy)))
-            (if (eq? mode 'none)
-                (begin ((self '~delete-bridge!) name) #f)
-                (begin
-                  ((self '~config-set!) `(private bridge ,name) info-remote)
-                  ((self '~config-set!) `(private bridge ,name local) info-local)
-                  ((self '~config-set!) `(private bridge ,name interface) (cadr (assoc 'interface info-local)))
-                  ((self '~config-set!) `(private bridge ,name public-key) public-key)
-                  ((self '~config-set!) `(private bridge ,name policy local) local-policy)
-                  ((self '~config-set!) `(private bridge ,name policy remote) remote-policy)
-                  ((self '~config-set!) `(private bridge ,name policy mode) mode)
-                  #t))))))
+            (begin
+              ((self '~config-set!) `(private bridge ,name) info-remote)
+              ((self '~config-set!) `(private bridge ,name disabled?) (eq? mode 'none))
+              ((self '~config-set!) `(private bridge ,name interface) (cadr (assoc 'interface info-local)))
+              ((self '~config-set!) `(private bridge ,name public-key) public-key)
+              ((self '~config-set!) `(private bridge ,name policy local) local-policy)
+              ((self '~config-set!) `(private bridge ,name policy remote) remote-policy)
+              ((self '~config-set!) `(private bridge ,name policy mode) mode)
+              (if (eq? mode 'none) ((self '~stage-delete-bridge!) name))
+              (not (eq? mode 'none)))))))
 
   (define-method (get self path meta? expression?)
     ;; Get value at a stage path.
@@ -667,10 +664,18 @@
                    (else (error 'bridge-mode-error "Invalid subscribe policy: ~S" subscribe))))
             (else (error 'bridge-mode-error "Invalid publish policy: ~S" publish)))))
 
-  (define-method (~delete-bridge! self name)
-    ;; Remove current bridge config and staged bridge exposure while preserving history.
+  (define-method (delete-bridge! self name)
+    ;; Remove current incoming bridge config and staged exposure while preserving history.
+    ((self '~config-set!) `(private bridge ,name) '())
+    ((self '~stage-delete-bridge!) name))
+
+  (define-method (delete-subscriber! self name)
+    ;; Remove current outgoing subscriber config.
+    ((self '~config-set!) `(private subscriber ,name) '()))
+
+  (define-method (~stage-delete-bridge! self name)
+    ;; Remove staged bridge exposure while preserving history.
     (let ((stage (sync-eval ((self '~field!) 'stage) #f)))
-      ((self '~config-set!) `(private bridge ,name) '())
       ((stage 'set!) `(*bridge* ,name) '(nothing))
       ((self '~field!) 'stage (stage))))
 

@@ -66,7 +66,8 @@
              (if ,(config-ref 'clear?)
                  (let* ((config-expr (list (list 'public (list (list 'window ,(config-ref 'window))
                                                                (list 'public-key (car keys))
-                                                               (list 'bridge-policy ',(config-ref 'bridge-policy))))
+                                                               (list 'bridge-policy ',(config-ref 'bridge-policy))
+                                                               (list 'name ,(config-ref 'name))))
                                            (list 'private '())))
                         (ledger ((standard 'init) ledger-class std-node config-expr tree-class chain-class document-class)))
                    ((root 'set!) '(root object ledger) ledger))
@@ -79,6 +80,7 @@
                    ((ledger 'update-config!) '(public window) ,(config-ref 'window))
                    ((ledger 'update-config!) '(public public-key) (car keys))
                    ((ledger 'update-config!) '(public bridge-policy) ',(config-ref 'bridge-policy))
+                   ((ledger 'update-config!) '(public name) ,(config-ref 'name))
                    ((ledger 'update-code!) 'standard (recode standard-class))
                    ((ledger 'update-code!) 'tree (recode tree-class))
                    ((ledger 'update-code!) 'chain (recode chain-class))
@@ -304,6 +306,14 @@
                       (args `((name ,name) (info-local ,info-local) (info-remote ,info-remote))))
                  (~self-call 'bridge! args #t))))
 
+         (define* (delete-bridge! (name (error 'argument-error "Missing required argument: ~S" 'name)))
+           ;; Delete an incoming bridge config entry.
+           ((ledger 'delete-bridge!) name))
+
+         (define* (delete-subscriber! (name (error 'argument-error "Missing required argument: ~S" 'name)))
+           ;; Delete an outgoing subscriber config entry.
+           ((ledger 'delete-subscriber!) name))
+
          (define (~method)
            (let ((result (apply (ledger (cadr func)) keyword-args)))
              result))
@@ -321,6 +331,8 @@
                       ((trace) (apply trace keyword-args))
                       ((pin!) (~authenticate+authorize) (apply pin! keyword-args))
                       ((bridge!) (~authenticate+authorize) (apply bridge! keyword-args))
+                      ((delete-bridge!) (~authenticate+authorize) (apply delete-bridge! keyword-args))
+                      ((delete-subscriber!) (~authenticate+authorize) (apply delete-subscriber! keyword-args))
                       ((config) (~authenticate+authorize) (apply config keyword-args))
                       ((set-batch! unpin!) (~authenticate+authorize) (~method))
                       ((size synchronize synchronize! info) (~method))
@@ -379,7 +391,8 @@
                  (let loop ((names (map car ((ledger 'config) '(private bridge)))))
                    (if (not (null? names))
                        (begin
-                         (~self-call #f `(bridge-synchronize! ,(car names) pull))
+                         (if (not (eq? ((ledger 'config) `(private bridge ,(car names) policy mode)) 'none))
+                             (~self-call #f `(bridge-synchronize! ,(car names) pull)))
                          (loop (cdr names)))))
                  (let ((size (~self-call #t '(ledger-step #t))))
                    (if ((root 'get) '(interface push-enabled?))
