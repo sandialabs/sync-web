@@ -481,16 +481,132 @@ describe('JournalService API', () => {
   });
 
   describe('admin operations', () => {
+    it('should save incoming bridge config', async () => {
+      mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
+
+      const result = await service.saveBridge({
+        name: 'peer-name',
+        endpoint: 'https://peer.example/api/v1/journal/interface',
+        direction: 'incoming',
+        policy: { publish: 'push', subscribe: 'none' },
+        remoteName: 'local-journal',
+      });
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/bridge',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: 'peer-name',
+            'info-local': {
+              interface: { '*type/string*': 'https://peer.example/api/v1/journal/interface' },
+              policy: { publish: 'push', subscribe: 'none' },
+              role: false,
+              'remote-name': 'local-journal',
+            },
+          }),
+        })
+      );
+    });
+
+    it('should save outgoing subscriber config', async () => {
+      mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
+
+      const result = await service.saveBridge({
+        name: 'peer-name',
+        endpoint: 'https://peer.example/api/v1/journal/interface',
+        direction: 'outgoing',
+        policy: { publish: 'pull', subscribe: 'pull' },
+        remoteName: 'local-journal',
+      });
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/bridge',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: 'peer-name',
+            'info-local': {
+              interface: { '*type/string*': 'https://peer.example/api/v1/journal/interface' },
+              policy: { publish: 'pull', subscribe: 'pull' },
+              role: 'publisher',
+              'remote-name': 'local-journal',
+            },
+          }),
+        })
+      );
+    });
+
+    it('should delete incoming and outgoing bridge config through separate endpoints', async () => {
+      mockFetch
+        .mockResolvedValueOnce(mockTextResponse('true'))
+        .mockResolvedValueOnce(mockTextResponse('true'));
+
+      await expect(service.deleteBridge('peer-in', 'incoming')).resolves.toBe(true);
+      await expect(service.deleteBridge('peer-out', 'outgoing')).resolves.toBe(true);
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        'http://test-endpoint.com/api/v1/general/delete-bridge',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'peer-in' }),
+        })
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        'http://test-endpoint.com/api/v1/general/delete-subscriber',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'peer-out' }),
+        })
+      );
+    });
+
     it('should read admin config from admin and config endpoints', async () => {
       mockFetch
         .mockResolvedValueOnce(mockJsonResponse(['alice', 'admin']))
         .mockResolvedValueOnce(
           mockJsonResponse({
-            public: { window: 12 },
+            public: { window: 12, name: { '*type/string*': 'journal-0' } },
             private: {
               bridge: {
                 peer2: { interface: { '*type/string*': 'http://peer2/api/v1/journal/interface' } },
-                peer1: { interface: { '*type/string*': 'http://peer1/api/v1/journal/interface' } },
+                peer1: {
+                  interface: { '*type/string*': 'http://peer1/api/v1/journal/interface' },
+                  local: { interface: { '*type/string*': 'http://stale-peer1/api/v1/journal/interface' } },
+                  policy: {
+                    local: { publish: 'push', subscribe: 'pull' },
+                    remote: { publish: 'push', subscribe: 'pull' },
+                    mode: 'push',
+                  },
+                },
+              },
+              subscriber: {
+                peer3: {
+                  interface: { '*type/string*': 'http://peer3/api/v1/journal/interface' },
+                  'remote-name': 'remote-peer3',
+                  'disabled?': true,
+                  policy: {
+                    local: { publish: 'none', subscribe: 'pull' },
+                    remote: { publish: 'push', subscribe: 'pull' },
+                    mode: 'none',
+                  },
+                },
               },
             },
           })
@@ -501,9 +617,40 @@ describe('JournalService API', () => {
       expect(result).toEqual({
         admins: ['admin', 'alice'],
         bridges: [
-          { name: 'peer1', endpoint: 'http://peer1/api/v1/journal/interface' },
-          { name: 'peer2', endpoint: 'http://peer2/api/v1/journal/interface' },
+          {
+            name: 'peer1',
+            endpoint: 'http://peer1/api/v1/journal/interface',
+            direction: 'incoming',
+            localPolicy: { publish: 'push', subscribe: 'pull' },
+            remotePolicy: { publish: 'push', subscribe: 'pull' },
+            mode: 'push',
+            disabled: false,
+            remoteName: undefined,
+          },
+          {
+            name: 'peer2',
+            endpoint: 'http://peer2/api/v1/journal/interface',
+            direction: 'incoming',
+            localPolicy: { publish: 'push', subscribe: 'pull' },
+            remotePolicy: { publish: 'push', subscribe: 'pull' },
+            mode: 'none',
+            disabled: false,
+            remoteName: undefined,
+          },
         ],
+        subscribers: [
+          {
+            name: 'peer3',
+            endpoint: 'http://peer3/api/v1/journal/interface',
+            direction: 'outgoing',
+            localPolicy: { publish: 'none', subscribe: 'pull' },
+            remotePolicy: { publish: 'push', subscribe: 'pull' },
+            mode: 'none',
+            disabled: true,
+            remoteName: 'remote-peer3',
+          },
+        ],
+        localName: 'journal-0',
         windowSize: 12,
       });
       expect(mockFetch).toHaveBeenNthCalledWith(

@@ -72,8 +72,16 @@ generate_network() {
     python3 generate.py
 }
 
+kill_project_containers() {
+    ids="$($CONTAINER_RUNTIME ps -aq --filter "name=${COMPOSE_PROJECT_NAME}" 2>/dev/null || true)"
+    if [ -n "$ids" ]; then
+        $CONTAINER_RUNTIME kill $ids >/dev/null 2>&1 || true
+    fi
+}
+
 if [ "$MODE" = "down" ]; then
     cd "$SCRIPT_DIR"
+    kill_project_containers
     $CONTAINER_COMPOSE down -v --remove-orphans
     exit 0
 fi
@@ -95,6 +103,7 @@ if [ "$MODE" = "generate" ]; then
 fi
 
 cd "$SCRIPT_DIR"
+kill_project_containers
 $CONTAINER_COMPOSE down -v --remove-orphans
 if [ "$DETACH" = "1" ]; then
     $CONTAINER_COMPOSE up -d

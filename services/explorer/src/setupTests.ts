@@ -18,6 +18,7 @@ console.error = (...args) => {
     typeof args[0] === 'string' &&
     (
       args[0].includes('ReactDOMTestUtils.act is deprecated') ||
+      args[0].includes('`ReactDOMTestUtils.act` is deprecated') ||
       args[0].includes('not wrapped in act')
     )
   ) {

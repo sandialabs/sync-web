@@ -11,7 +11,9 @@ import {
   SchemeString,
   DirectoryResult,
   DirectoryEntry,
-  DirectoryEntryType
+  DirectoryEntryType,
+  BridgeDirection,
+  BridgePolicyChoice,
 } from '../types';
 
 export interface GatewayChangeEvent {
@@ -302,43 +304,101 @@ export class JournalService {
     return bridgeBlock ? Object.keys(bridgeBlock).sort() : [];
   }
 
-  private static extractBridgeEndpoint(value: unknown): string {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return '';
-    }
-    const bridge = value as Record<string, unknown>;
-    const local = bridge.local && typeof bridge.local === 'object' && !Array.isArray(bridge.local)
-      ? bridge.local as Record<string, unknown>
-      : bridge;
-    const raw = local.interface;
-    const { value: endpoint } = JournalService.extractSchemeValue(raw);
-    return typeof endpoint === 'string' ? endpoint : '';
+  private static asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
   }
 
-  private static extractAdminBridges(config: unknown): AdminBridge[] {
-    const bridgeBlock = JournalService.getBridgeBlock(config);
-    if (!bridgeBlock) {
+  private static extractPolicyChoice(value: unknown, fallback: BridgePolicyChoice): BridgePolicyChoice {
+    const { value: extracted } = JournalService.extractSchemeValue(value);
+    return extracted === 'push' || extracted === 'pull' || extracted === 'none' ? extracted : fallback;
+  }
+
+  private static extractPolicy(value: unknown): { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice } {
+    const policy = JournalService.asRecord(value);
+    return {
+      publish: JournalService.extractPolicyChoice(policy?.publish, 'push'),
+      subscribe: JournalService.extractPolicyChoice(policy?.subscribe, 'pull'),
+    };
+  }
+
+  private static extractNestedPolicy(value: unknown, key: 'local' | 'remote'): { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice } {
+    const bridge = JournalService.asRecord(value);
+    const policy = JournalService.asRecord(bridge?.policy);
+    return JournalService.extractPolicy(policy?.[key]);
+  }
+
+  private static extractBridgeEndpoint(value: unknown): string {
+    const bridge = JournalService.asRecord(value);
+    if (!bridge) {
+      return '';
+    }
+    const { value: endpoint } = JournalService.extractSchemeValue(bridge.interface);
+    if (typeof endpoint === 'string') {
+      return endpoint;
+    }
+
+    const local = JournalService.asRecord(bridge.local);
+    const { value: legacyEndpoint } = JournalService.extractSchemeValue(local?.interface);
+    return typeof legacyEndpoint === 'string' ? legacyEndpoint : '';
+  }
+
+  private static extractRemoteName(input: unknown): string | undefined {
+    const bridge = JournalService.asRecord(input);
+    const { value } = JournalService.extractSchemeValue(bridge?.['remote-name']);
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  private static extractDisabled(input: unknown): boolean {
+    const bridge = JournalService.asRecord(input);
+    const mode = JournalService.asRecord(bridge?.policy)?.mode;
+    const { value: extractedMode } = JournalService.extractSchemeValue(mode);
+    return bridge?.['disabled?'] === true || extractedMode === 'none';
+  }
+
+  private static extractAdminBridgeEntries(config: unknown, direction: BridgeDirection): AdminBridge[] {
+    const block = direction === 'incoming'
+      ? JournalService.getBridgeBlock(config)
+      : JournalService.asRecord(JournalService.asRecord(config)?.private)?.subscriber as Record<string, unknown> | null;
+    if (!block) {
       return [];
     }
 
-    return Object.entries(bridgeBlock)
+    return Object.entries(block)
       .map(([name, value]) => ({
         name,
         endpoint: JournalService.extractBridgeEndpoint(value),
+        direction,
+        localPolicy: JournalService.extractNestedPolicy(value, 'local'),
+        remotePolicy: JournalService.extractNestedPolicy(value, 'remote'),
+        mode: JournalService.extractPolicyChoice(JournalService.asRecord(JournalService.asRecord(value)?.policy)?.mode, 'none'),
+        disabled: JournalService.extractDisabled(value),
+        remoteName: JournalService.extractRemoteName(value),
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
+  private static extractAdminBridges(config: unknown): AdminBridge[] {
+    return JournalService.extractAdminBridgeEntries(config, 'incoming');
+  }
+
+  private static extractAdminSubscribers(config: unknown): AdminBridge[] {
+    return JournalService.extractAdminBridgeEntries(config, 'outgoing');
+  }
+
+  private static getPublicBlock(config: unknown): Record<string, unknown> | null {
+    const rootObject = JournalService.asRecord(config);
+    return JournalService.asRecord(rootObject?.public);
+  }
+
+  private static extractLocalName(config: unknown): string | null {
+    const { value } = JournalService.extractSchemeValue(JournalService.getPublicBlock(config)?.name);
+    return typeof value === 'string' ? value : null;
+  }
+
   private static extractWindowSize(config: unknown): number | null {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return null;
-    }
-    const rootObject = config as Record<string, unknown>;
-    const publicBlock = rootObject.public;
-    if (!publicBlock || typeof publicBlock !== 'object' || Array.isArray(publicBlock)) {
-      return null;
-    }
-    const value = (publicBlock as Record<string, unknown>).window;
+    const value = JournalService.getPublicBlock(config)?.window;
     return typeof value === 'number' ? value : null;
   }
 
@@ -454,20 +514,44 @@ export class JournalService {
   /**
    * Add a new bridge
    */
-  async addBridge(name: string, endpoint: string): Promise<boolean> {
-    const endpointStr: SchemeString = { '*type/string*': endpoint };
+  async saveBridge(input: {
+    name: string;
+    endpoint: string;
+    direction: BridgeDirection;
+    policy: { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice };
+    remoteName?: string;
+  }): Promise<boolean> {
+    const endpointStr: SchemeString = { '*type/string*': input.endpoint };
     return this.request<boolean>({
       method: 'POST',
       path: '/general/bridge',
       args: {
-        name,
+        name: input.name,
         'info-local': {
           interface: endpointStr,
-          policy: { publish: 'push', subscribe: 'pull' },
-          role: false,
-          'remote-name': name,
+          policy: input.policy,
+          role: input.direction === 'outgoing' ? 'publisher' : false,
+          'remote-name': input.remoteName || input.name,
         },
       },
+    });
+  }
+
+  async addBridge(name: string, endpoint: string): Promise<boolean> {
+    return this.saveBridge({
+      name,
+      endpoint,
+      direction: 'incoming',
+      policy: { publish: 'push', subscribe: 'pull' },
+      remoteName: name,
+    });
+  }
+
+  async deleteBridge(name: string, direction: BridgeDirection): Promise<boolean> {
+    return this.request<boolean>({
+      method: 'POST',
+      path: direction === 'incoming' ? '/general/delete-bridge' : '/general/delete-subscriber',
+      args: { name },
     });
   }
 
@@ -732,6 +816,8 @@ export class JournalService {
     return {
       admins,
       bridges: JournalService.extractAdminBridges(config),
+      subscribers: JournalService.extractAdminSubscribers(config),
+      localName: JournalService.extractLocalName(config),
       windowSize: JournalService.extractWindowSize(config),
     };
   }

@@ -82,6 +82,10 @@
 
   (assert (interface-query journal-b interface-b '((function config) (arguments ((path (private bridge journal-a policy mode))))))
           'push)
+  (assert (interface-query journal-b interface-b '((function config) (arguments ((path (private bridge journal-a interface))))))
+          interface-a)
+  (assert (interface-query journal-b interface-b '((function config) (arguments ((path (private bridge journal-a local))))))
+          '())
 
   ;; Publisher creates a signed block. Subscriber receives the normal sync payload by push.
   (assert (interface-query journal-a interface-a
@@ -168,8 +172,17 @@
                                            (info-remote ,info-a)))))
             #f)
     (assert (interface-query journal-c interface-c
-                             '((function config) (arguments ((path (private bridge journal-a))))))
-            '()))
+                             '((function config) (arguments ((path (private bridge journal-a policy mode))))))
+            'none)
+    (assert (interface-query journal-c interface-c
+                             '((function config) (arguments ((path (private bridge journal-a disabled?))))))
+            #t)
+    (assert (interface-query journal-c interface-c
+                             '((function get) (arguments ((path (*bridge* journal-a))))))
+            '(nothing))
+    (assert (interface-query journal-c interface-c
+                             '((function delete-bridge!) (arguments ((name journal-a)))))
+            #t))
 
   ;; Publisher-initiated public push: A proposes that C call it `journal-a` and C
   ;; accepts the optimistic first pushed payload without pre-existing bridge config.

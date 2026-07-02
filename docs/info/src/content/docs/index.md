@@ -14,8 +14,8 @@ Each section builds on the previous one:
 
 1. [Usage](usage): how users interact with journals and services.
 2. [Operation](operation): how operators deploy, run, and maintain the system.
-3. [Tools](tools): standalone tools that support development, operation, and analysis.
-4. [Development](development): how developers extend runtime behavior and class logic.
+3. [Development](development): how developers extend runtime behavior and class logic.
+4. [Tools](tools): standalone tools that support development, operation, and analysis.
 5. [Research](research): research directions motivated by the current architecture.
 
 If you are new to the stack, read this page, then move through the sections in order.
