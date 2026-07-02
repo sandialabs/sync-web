@@ -44,6 +44,15 @@ VARIABLES
     
 
 
+\* StateConstraint: bounds the two unbounded Nat counters so TLC terminates.
+StateConstraint == \* safety invariant uses (8,6). liveness uses (12,10)
+    /\ timeCounter <= 8
+    /\ stepIndex <= 6
+    /\ windowPosition <= MaxIndex
+
+Symmetry == Permutations(Paths)
+
+
 Times == Nat 
 IndexSet == 0..MaxIndex
 BridgeNames == {"bridge1", "bridge2"}
@@ -417,32 +426,6 @@ Fairness ==
     /\ sfbridgeSynchronize
 
 
-
-
-
-
-
-\* ─── Model-checking utilities ────────────────────────────────────────────────
-\*
-\* StateConstraint: bounds the two unbounded Nat counters so TLC terminates.
-\* Activate with CONSTRAINT StateConstraint in the config.
-\* Tune the limits to trade depth of exploration for speed.
-\*   timeCounter <= 8, stepIndex <= 6  →  a few seconds (fast.cfg)
-\*   timeCounter <= 12, stepIndex <= 10 →  minutes (liveness.cfg)
-StateConstraint ==
-    /\ timeCounter <= 8
-    /\ stepIndex <= 6
-    /\ windowPosition <= MaxIndex
-
-\* Symmetry: Paths play identical structural roles, so any permutation of Paths
-\* yields an equivalent state.  TLC exploits this to merge equivalent states,
-\* reducing the Paths dimension by |Paths|! (2! = 2x for two paths).
-\* Activate with SYMMETRY Symmetry in the config.
-\* NOTE: Values cannot be made symmetric because EmptyValue == "" is a
-\* distinguished constant; permuting Values would swap the sentinel.
-Symmetry == Permutations(Paths)
-
-\* ─── Specification ────────────────────────────────────────────────────────────
 
 Spec ==
     Init /\ [][Next]_vars /\ Fairness
