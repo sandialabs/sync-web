@@ -101,4 +101,5 @@ export type DirectoryEntryType = 'directory' | 'value' | 'unknown';
 export interface DirectoryEntry {
   name: string;
   type: DirectoryEntryType;
+  pathSegment?: string;
 }

@@ -1,0 +1,210 @@
+name: Ledger Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags: ["ledger-v*"]
+    paths:
+      - "journal/**"
+      - "records/**"
+      - "deploy/bin/ledger/**"
+      - "VERSION"
+      - "scripts/sync-platform-package-versions.js"
+      - ".github/workflows/ledger.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "journal/**"
+      - "records/**"
+      - "deploy/bin/ledger/**"
+      - "VERSION"
+      - "scripts/sync-platform-package-versions.js"
+      - ".github/workflows/ledger.yml"
+
+concurrency:
+  group: "ledger-binaries-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check platform package versions
+        run: node scripts/sync-platform-package-versions.js
+
+  build:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            os: ubuntu-latest
+            journal_bin: target/release/journal-sdk
+            ledger_bin: target/release/ledger
+          - target: linux-aarch64
+            os: ubuntu-24.04-arm
+            journal_bin: target/release/journal-sdk
+            ledger_bin: target/release/ledger
+          - target: macos-x86_64
+            os: macos-15-intel
+            journal_bin: target/release/journal-sdk
+            ledger_bin: target/release/ledger
+          - target: macos-aarch64
+            os: macos-14
+            journal_bin: target/release/journal-sdk
+            ledger_bin: target/release/ledger
+          - target: windows-x86_64
+            os: windows-latest
+            journal_bin: target/release/journal-sdk.exe
+            ledger_bin: target/release/ledger.exe
+          - target: windows-aarch64
+            os: windows-11-arm
+            journal_bin: target/release/journal-sdk.exe
+            ledger_bin: target/release/ledger.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: journal
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install -y llvm-dev libclang-dev clang cmake
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ("${{ matrix.target }}" -eq "windows-aarch64") {
+            "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\ARM64\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            choco install llvm -y
+            "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+      - name: Use clang on Unix runners
+        if: runner.os != 'Windows'
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      - name: Use C11 mode on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "CFLAGS=/std:c11" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build journal-sdk and ledger
+        working-directory: journal
+        run: cargo build --release --bin journal-sdk --bin ledger
+
+      - name: Check versions
+        working-directory: journal
+        shell: bash
+        run: |
+          "${{ matrix.ledger_bin }}" --version
+          "${{ matrix.journal_bin }}" --version
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "journal/${{ matrix.journal_bin }}" "dist/journal-sdk-${{ matrix.target }}.exe"
+            cp "journal/${{ matrix.ledger_bin }}" "dist/ledger-${{ matrix.target }}.exe"
+          else
+            cp "journal/${{ matrix.journal_bin }}" "dist/journal-sdk-${{ matrix.target }}"
+            cp "journal/${{ matrix.ledger_bin }}" "dist/ledger-${{ matrix.target }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledger-binaries-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  build-musl:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64-musl
+            os: ubuntu-latest
+            platform: linux/amd64
+          - target: linux-aarch64-musl
+            os: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Alpine/musl journal-sdk and ledger
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -v "$PWD:/src" \
+            -w /src/journal \
+            alpine:3.23.3 \
+            sh -lc 'apk update && apk add --no-cache build-base cargo clang clang-dev linux-headers openssl-dev && CC=clang CXX=clang++ cargo build --release --bin journal-sdk --bin ledger'
+
+      - name: Check versions
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -v "$PWD:/src" \
+            -w /src/journal \
+            alpine:3.23.3 \
+            sh -lc 'apk add --no-cache libgcc libstdc++ && target/release/ledger --version && target/release/journal-sdk --version'
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp journal/target/release/journal-sdk "dist/journal-sdk-${{ matrix.target }}"
+          cp journal/target/release/ledger "dist/ledger-${{ matrix.target }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledger-binaries-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/ledger-v')
+    needs: [build, build-musl]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ledger-binaries-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release-artifacts
+        run: sha256sum * > SHA256SUMS
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*

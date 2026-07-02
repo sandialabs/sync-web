@@ -14,8 +14,9 @@ Each section builds on the previous one:
 
 1. [Usage](usage): how users interact with journals and services.
 2. [Operation](operation): how operators deploy, run, and maintain the system.
-3. [Development](development): how developers extend runtime behavior and class logic.
-4. [Research](research): research directions motivated by the current architecture.
+3. [Tools](tools): standalone tools that support development, operation, and analysis.
+4. [Development](development): how developers extend runtime behavior and class logic.
+5. [Research](research): research directions motivated by the current architecture.
 
 If you are new to the stack, read this page, then move through the sections in order.
 If you already operate or build on the stack, you can jump directly to the section aligned with your role.
@@ -55,6 +56,7 @@ All components live in [sandialabs/sync-web](https://github.com/sandialabs/sync-
 | `services/` | Web services (`gateway`, `explorer`, `workbench`, `file-system`, `router`) |
 | `deploy/` | Compose-compatible deployment for a single-node stack |
 | `tests/` | Smoke, load, and multi-node network tests |
+| `tools/` | Standalone support tools such as `agent-recorder` |
 | `docs/` | This documentation site |
 
 The project is open source under the MIT license with Sandia National Laboratories authorship and stewardship.

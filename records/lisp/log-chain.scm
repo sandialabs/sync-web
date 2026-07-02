@@ -193,11 +193,13 @@
     ;;     depth (integer): max depth to keep.
     ;;   Returns:
     ;;     sync node: truncated proof tree.
-    (let loop ((node (self '(1 1))) (d 0)) 
-      (if (sync-null? node) node
-          (let ((data (sync-car node)) (rest (sync-cdr node)))
-            (if (<= d depth) (sync-cons data (loop rest (+ d 1)))
-                (sync-cons (sync-cut data) (loop rest (- d 1))))))))
+    (let ((chain (let loop ((node (self '(1 1))) (d 0))
+                   (if (sync-null? node) node
+                       (let ((data (sync-car node)) (rest (sync-cdr node)))
+                         (if (<= d depth) (sync-cons data (loop rest (+ d 1)))
+                             (sync-cons (sync-cut data) (loop rest (- d 1)))))))))
+      (set! (self '(1 1)) chain)
+      chain))
 
   (define-method (~previous self index)
     ;; Helper method to calculate previous state.

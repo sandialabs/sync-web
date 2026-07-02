@@ -65,7 +65,7 @@ podman-compose -f deploy/compose/general/compose.yaml up -d
 - `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
-- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.3.0`): image used by the `file-system` service
+- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.4.1`): image used by the `file-system` service
 - `SYNC_FS_MAX_OBJECT_BYTES` (default `1048576`): maximum WebDAV object size
 
 Gateway note:

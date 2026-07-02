@@ -125,6 +125,8 @@ Key semantics:
 - `/ledger/...` is readable but content-immutable.
 - omitting an explicit `<index>` anywhere in a ledger path defaults to the current head (`-1`).
 - once you enter any `state/` subtree, remaining path segments are ordinary file and directory names.
+- WebDAV Basic Auth uses a Sync Web API token as the password, not the account password.
+- file names that are unsafe as unescaped Scheme symbols are percent-escaped at the service boundary and decoded again for listings.
 - `/control/pin` is a synthetic UTF-8 file for pin and unpin directives against discovered `/ledger/...` paths.
 
 ## Programmatic API

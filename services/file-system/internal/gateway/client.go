@@ -64,7 +64,7 @@ func JSONPath(path []paths.Segment) []any {
 		if segment.IsInt {
 			out = append(out, segment.Int)
 		} else {
-			out = append(out, segment.String)
+			out = append(out, paths.EncodeSchemePathSegment(segment.String))
 		}
 	}
 	return out

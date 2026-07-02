@@ -69,14 +69,14 @@ const buildStageChildPath = (parentPath: JournalPath, childName: string): Journa
   if (parentPath[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
-  return [...parentPath, childName];
+  return [...parentPath, JournalService.encodePathSegment(childName)];
 };
 
 const buildStageSiblingPath = (path: JournalPath, siblingName: string): JournalPath => {
   if (path[0] !== '*state*') {
     throw new Error('Expected a stage state path');
   }
-  return [...path.slice(0, -1), siblingName];
+  return [...path.slice(0, -1), JournalService.encodePathSegment(siblingName)];
 };
 
 const stagePathToTreeNodeId = (path: JournalPath): string => {
@@ -730,7 +730,7 @@ const App: React.FC = () => {
         <div className="left-pane pane">
           <ExplorerTree
             mode={mode}
-            rootPath={mode === 'stage' ? stageRootPath : ledgerRootPath}
+            rootPath={mode === 'stage' ? STAGE_ROOT_PATH : ledgerRootPath}
             selected={mode === 'stage' ? stageSelection : ledgerSelection}
             expandedNodes={mode === 'stage' ? stageExpandedNodes : ledgerExpandedNodes}
             journalService={journalService}

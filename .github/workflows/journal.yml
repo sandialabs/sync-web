@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: ["**"]
-    paths: ["journal/**", "records/**", "deploy/**", "VERSION"]
+    paths: ["journal/**", "records/**", "deploy/**", "VERSION", ".github/workflows/journal.yml"]
   pull_request:
     branches: ["main"]
-    paths: ["journal/**", "records/**", "deploy/**"]
+    paths: ["journal/**", "records/**", "deploy/**", ".github/workflows/journal.yml"]
 
 concurrency:
   group: "journal-compose-${{ github.ref }}"
@@ -32,7 +32,7 @@ jobs:
 
   test-journal:
     needs: changes
-    if: needs.changes.outputs.journal == 'true'
+    if: (needs.changes.outputs.journal == 'true' || needs.changes.outputs.version == 'true') && !(github.ref == 'refs/heads/main' && needs.changes.outputs.version == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
 
   build-journal-sdk:
     needs: [changes, test-journal]
-    if: needs.changes.outputs.journal == 'true' && needs.test-journal.result == 'success'
+    if: (needs.changes.outputs.journal == 'true' || needs.changes.outputs.version == 'true') && needs.test-journal.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,6 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Login to Github registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -66,20 +67,31 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      - name: Build journal-sdk (PR/non-main validation)
-        if: github.ref != 'refs/heads/main'
+      - name: Build journal-sdk pull request validation image
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: journal
           target: runtime
           platforms: linux/amd64
           push: false
-          tags: ghcr.io/${{ github.repository }}/journal-sdk:latest
+          tags: ghcr.io/${{ github.repository }}/journal-sdk:pr-validation
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache
+      - name: Build and push SHA-tagged journal-sdk validation image
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: journal
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository }}/journal-sdk:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache,mode=max
-      - name: Build and push journal-sdk (main)
-        if: github.ref == 'refs/heads/main'
+      - name: Build and push journal-sdk for direct main journal changes
+        if: github.ref == 'refs/heads/main' && needs.changes.outputs.version != 'true'
         uses: docker/build-push-action@v6
         with:
           context: journal
@@ -93,7 +105,7 @@ jobs:
 
   compose-smoke:
     needs: [changes, test-journal, build-journal-sdk]
-    if: always() && !cancelled() && !failure()
+    if: always() && github.ref != 'refs/heads/main' && !cancelled() && !failure()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +124,7 @@ jobs:
       packages: write
     steps:
       - name: Login to Github registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -119,8 +132,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Tag version
-        run: |
-          VERSION="$(cat VERSION)"
-          TAG="ghcr.io/${{ github.repository }}/journal-sdk:$VERSION"
-          docker buildx imagetools create -t "$TAG" "ghcr.io/${{ github.repository }}/journal-sdk:latest"
+      - name: Promote validated image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/promote-image.sh journal-sdk

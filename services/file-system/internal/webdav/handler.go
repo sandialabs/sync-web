@@ -51,8 +51,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCopy(w, r, parsed)
 	case "MOVE":
 		h.handleMove(w, r, parsed)
-	case "LOCK", "UNLOCK":
-		http.Error(w, "WebDAV locking is not implemented", http.StatusNotImplemented)
+	case "LOCK":
+		h.handleLock(w, r)
+	case "UNLOCK":
+		h.handleUnlock(w)
 	default:
 		http.Error(w, "method not implemented", http.StatusNotImplemented)
 	}
@@ -426,8 +428,31 @@ func readLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
 	return body, nil
 }
 
+func (h Handler) handleLock(w http.ResponseWriter, r *http.Request) {
+	token := fmt.Sprintf("opaquelocktoken:sync-web-%d", time.Now().UnixNano())
+	w.Header().Set("Content-Type", `application/xml; charset="utf-8"`)
+	w.Header().Set("Lock-Token", "<"+token+">")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
+<prop xmlns="DAV:">
+  <lockdiscovery>
+    <activelock>
+      <locktype><write/></locktype>
+      <lockscope><exclusive/></lockscope>
+      <depth>%s</depth>
+      <timeout>Second-3600</timeout>
+      <locktoken><href>%s</href></locktoken>
+    </activelock>
+  </lockdiscovery>
+</prop>`, r.Header.Get("Depth"), token)
+}
+
+func (h Handler) handleUnlock(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func WriteOptions(w http.ResponseWriter) {
-	w.Header().Set("DAV", "1")
+	w.Header().Set("DAV", "1, 2")
 	w.Header().Set("Allow", strings.Join([]string{"OPTIONS", "PROPFIND", "GET", "HEAD", "PUT", "DELETE", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK"}, ", "))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -478,10 +503,10 @@ func directoryChildren(value any) ([]child, bool) {
 func symbolName(value any) (string, bool) {
 	switch typed := value.(type) {
 	case string:
-		return typed, true
+		return paths.DecodeSchemePathSegment(typed), true
 	case map[string]any:
 		if symbol, ok := typed["*type/quoted*"].(string); ok {
-			return symbol, true
+			return paths.DecodeSchemePathSegment(symbol), true
 		}
 	}
 	return "", false

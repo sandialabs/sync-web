@@ -34,10 +34,37 @@ pub struct Config {
         help = "Number of seconds between each step inquiry"
     )]
     pub period: f64,
+
+    #[arg(long, default_value_t = String::from(""), hide = true)]
+    pub secret: String,
+
+    #[arg(long, default_value_t = false, hide = true)]
+    pub update_records: bool,
+
+    #[arg(long, default_value_t = String::from(""), hide = true)]
+    pub window: String,
+
+    #[arg(long, default_value_t = String::from(""), hide = true)]
+    pub interface: String,
+
+    #[arg(long, default_value_t = String::from(""), hide = true)]
+    pub name: String,
+
+    #[arg(long, default_value_t = String::from("push"), hide = true)]
+    pub bridge_publish: String,
+
+    #[arg(long, default_value_t = String::from("pull"), hide = true)]
+    pub bridge_subscribe: String,
 }
 
 impl Config {
     pub fn new() -> Self {
-        Config::parse()
+        let mut config = Config::parse();
+        if config.database.is_empty() {
+            if let Ok(database) = std::env::var("SYNC_WEB_DATABASE") {
+                config.database = database;
+            }
+        }
+        config
     }
 }

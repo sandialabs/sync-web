@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"019eebb2-18db-73f4-9909-5f8021175b05","timestamp":"2026-06-21T19:39:38.075Z","cwd":"/tmp/agent-recorder-suite/runs/pi-hello/repo"}
+{"type":"model_change","id":"381f41ff","parentId":null,"timestamp":"2026-06-21T19:39:38.079Z","provider":"openai-codex","modelId":"gpt-5.5"}
+{"type":"message","id":"653d00a5","parentId":"437461a2","timestamp":"2026-06-21T19:39:38.086Z","message":{"role":"user","content":[{"type":"text","text":"Reply exactly: hello world"}],"timestamp":1782070778085}}
+{"type":"message","id":"2ae2300d","parentId":"653d00a5","timestamp":"2026-06-21T19:39:39.211Z","message":{"role":"assistant","content":[{"type":"text","text":"hello world"}],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-5.5","stopReason":"stop","timestamp":1782070778088,"responseId":"resp_064719f64d35b09c016a383dfa4e6481999300a06a5a630022"}}

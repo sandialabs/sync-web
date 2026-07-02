@@ -1,0 +1,151 @@
+name: Agent Recorder Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags: ["agent-recorder-v*"]
+    paths:
+      - "tools/agent-recorder/**"
+      - ".github/workflows/agent-recorder.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "tools/agent-recorder/**"
+      - ".github/workflows/agent-recorder.yml"
+
+concurrency:
+  group: "agent-recorder-binaries-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            os: ubuntu-latest
+            agent_recorder_bin: target/release/agent-recorder
+          - target: linux-aarch64
+            os: ubuntu-24.04-arm
+            agent_recorder_bin: target/release/agent-recorder
+          - target: macos-x86_64
+            os: macos-15-intel
+            agent_recorder_bin: target/release/agent-recorder
+          - target: macos-aarch64
+            os: macos-14
+            agent_recorder_bin: target/release/agent-recorder
+          - target: windows-x86_64
+            os: windows-latest
+            agent_recorder_bin: target/release/agent-recorder.exe
+          - target: windows-aarch64
+            os: windows-11-arm
+            agent_recorder_bin: target/release/agent-recorder.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/agent-recorder
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install -y pkg-config libssl-dev
+
+      - name: Build agent-recorder
+        working-directory: tools/agent-recorder
+        run: cargo build --release --bin agent-recorder
+
+      - name: Check version
+        working-directory: tools/agent-recorder
+        shell: bash
+        run: |
+          "${{ matrix.agent_recorder_bin }}" --version
+
+      - name: Package binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "tools/agent-recorder/${{ matrix.agent_recorder_bin }}" "dist/agent-recorder-${{ matrix.target }}.exe"
+          else
+            cp "tools/agent-recorder/${{ matrix.agent_recorder_bin }}" "dist/agent-recorder-${{ matrix.target }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-recorder-binaries-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  build-musl:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64-musl
+            os: ubuntu-latest
+            platform: linux/amd64
+          - target: linux-aarch64-musl
+            os: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Alpine/musl agent-recorder
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -v "$PWD:/src" \
+            -w /src/tools/agent-recorder \
+            alpine:3.23.3 \
+            sh -lc 'apk update && apk add --no-cache build-base cargo openssl-dev sqlite-dev pkgconf && cargo build --release --bin agent-recorder'
+
+      - name: Check version
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -v "$PWD:/src" \
+            -w /src/tools/agent-recorder \
+            alpine:3.23.3 \
+            sh -lc 'apk add --no-cache libgcc libstdc++ openssl sqlite-libs && target/release/agent-recorder --version'
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp tools/agent-recorder/target/release/agent-recorder "dist/agent-recorder-${{ matrix.target }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-recorder-binaries-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/agent-recorder-v')
+    needs: [build, build-musl]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agent-recorder-binaries-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release-artifacts
+        run: sha256sum * > SHA256SUMS
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*

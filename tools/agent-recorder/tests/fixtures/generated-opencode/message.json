@@ -1,0 +1,1410 @@
+[
+  {
+    "id": "msg_eebbe058a001a3Gk72MG70n7sd",
+    "session_id": "ses_11441fbddffeWAoCj80ikVr1Tf",
+    "time_created": 1782071559562,
+    "time_updated": 1782071570876,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071559562
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": []
+      }
+    }
+  },
+  {
+    "id": "msg_eebbe05970016snNkDOwy3Imvq",
+    "session_id": "ses_11441fbddffeWAoCj80ikVr1Tf",
+    "time_created": 1782071559575,
+    "time_updated": 1782071566827,
+    "data": {
+      "parentID": "msg_eebbe058a001a3Gk72MG70n7sd",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-long_output/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-long_output/repo"
+      },
+      "tokens": {
+        "total": 6401,
+        "input": 609,
+        "output": 138,
+        "reasoning": 22,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071559575,
+        "completed": 1782071566827
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbe21ec001qqPxjRObat1N8Z",
+    "session_id": "ses_11441fbddffeWAoCj80ikVr1Tf",
+    "time_created": 1782071566828,
+    "time_updated": 1782071570765,
+    "data": {
+      "parentID": "msg_eebbe058a001a3Gk72MG70n7sd",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-long_output/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-long_output/repo"
+      },
+      "tokens": {
+        "total": 6781,
+        "input": 494,
+        "output": 143,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071566828,
+        "completed": 1782071570765
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbdb53a001aOgI0Ax8x10toB",
+    "session_id": "ses_114424c23ffefYjGHsWTa090oN",
+    "time_created": 1782071539002,
+    "time_updated": 1782071558688,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071539002
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": []
+      }
+    }
+  },
+  {
+    "id": "msg_eebbdb549001ZBXTFpcrIddIjm",
+    "session_id": "ses_114424c23ffefYjGHsWTa090oN",
+    "time_created": 1782071539017,
+    "time_updated": 1782071558576,
+    "data": {
+      "parentID": "msg_eebbdb53a001aOgI0Ax8x10toB",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-no_op/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-no_op/repo"
+      },
+      "tokens": {
+        "total": 6282,
+        "input": 2654,
+        "output": 31,
+        "reasoning": 13,
+        "cache": {
+          "write": 0,
+          "read": 3584
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071539017,
+        "completed": 1782071558575
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071483978,
+    "time_updated": 1782071534398,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071483978
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": [
+          {
+            "file": "src/text_stats.py",
+            "patch": "Index: src/text_stats.py\n===================================================================\n--- src/text_stats.py\t\n+++ src/text_stats.py\t\n@@ -1,10 +1,9 @@\n import re\n \n \n def word_count(text):\n-    # Intentional weakness: punctuation-attached words are counted oddly by some tests.\n-    return len(text.split())\n+    return len(re.findall(r\"\\b\\w+\\b\", text))\n \n \n def unique_words(text):\n-    return sorted(set(text.lower().split()))\n+    return sorted(set(re.findall(r\"\\b\\w+\\b\", text.lower())))\n",
+            "additions": 2,
+            "deletions": 3,
+            "status": "modified"
+          },
+          {
+            "file": "tests/test_text_stats.py",
+            "patch": "Index: tests/test_text_stats.py\n===================================================================\n--- tests/test_text_stats.py\t\n+++ tests/test_text_stats.py\t\n@@ -1,9 +1,14 @@\n from src.text_stats import word_count, unique_words\n \n \n def test_word_count_basic():\n     assert word_count(\"red blue blue\") == 3\n \n \n def test_unique_words_basic():\n     assert unique_words(\"red blue blue\") == [\"blue\", \"red\"]\n+\n+\n+def test_punctuation_does_not_change_words():\n+    assert word_count(\"Red, blue! red.\") == 3\n+    assert unique_words(\"Red, blue! red.\") == [\"blue\", \"red\"]\n",
+            "additions": 5,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "msg_eebbcde58001NH3SrRDvVMlHty",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071483992,
+    "time_updated": 1782071488164,
+    "data": {
+      "parentID": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo"
+      },
+      "tokens": {
+        "total": 6389,
+        "input": 613,
+        "output": 144,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071483992,
+        "completed": 1782071488164
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbceea5001Wn4Pm0KWW6gc2a",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071488165,
+    "time_updated": 1782071497901,
+    "data": {
+      "parentID": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo"
+      },
+      "tokens": {
+        "total": 7035,
+        "input": 509,
+        "output": 315,
+        "reasoning": 67,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071488165,
+        "completed": 1782071497900
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbd14ae001rpst6lPv2Veo7s",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071497902,
+    "time_updated": 1782071501639,
+    "data": {
+      "parentID": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo"
+      },
+      "tokens": {
+        "total": 7164,
+        "input": 1433,
+        "output": 99,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071497902,
+        "completed": 1782071501638
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbd2348001McGjZzyUARwzyb",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071501640,
+    "time_updated": 1782071506687,
+    "data": {
+      "parentID": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo"
+      },
+      "tokens": {
+        "total": 7295,
+        "input": 532,
+        "output": 95,
+        "reasoning": 12,
+        "cache": {
+          "write": 0,
+          "read": 6656
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071501640,
+        "completed": 1782071506686
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbd3700001g2yRsEDA2rDnjK",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071506688,
+    "time_updated": 1782071534376,
+    "data": {
+      "parentID": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo"
+      },
+      "tokens": {
+        "total": 7415,
+        "input": 659,
+        "output": 67,
+        "reasoning": 33,
+        "cache": {
+          "write": 0,
+          "read": 6656
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071506688,
+        "completed": 1782071534376
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbda329001k34EBJDsq4TH31",
+    "session_id": "ses_114432317ffesy7SjsxuLLHhYw",
+    "time_created": 1782071534378,
+    "time_updated": 1782071538016,
+    "data": {
+      "parentID": "msg_eebbcde4a001eKQ3bwteL5bR4d",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-text_stats/repo"
+      },
+      "tokens": {
+        "total": 7778,
+        "input": 527,
+        "output": 83,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 7168
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071534378,
+        "completed": 1782071538015
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbc9ee5001zcKkZbtoN93IKs",
+    "session_id": "ses_11443627bffeChXsHAM4GOPfOf",
+    "time_created": 1782071467749,
+    "time_updated": 1782071481067,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071467749
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": [
+          {
+            "file": "broken_config.json",
+            "patch": "Index: broken_config.json\n===================================================================\n--- broken_config.json\t\n+++ broken_config.json\t\n@@ -1,6 +1,6 @@\n {\n   \"project\": \"acorn\",\n   \"retry_count\": 3,\n-  \"features\": [\"calculator\", \"text-stats\",],\n+  \"features\": [\"calculator\", \"text-stats\"],\n   \"enabled\": true\n }\n",
+            "additions": 1,
+            "deletions": 1,
+            "status": "modified"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "msg_eebbc9ef2001L7g4acXG35j23x",
+    "session_id": "ses_11443627bffeChXsHAM4GOPfOf",
+    "time_created": 1782071467762,
+    "time_updated": 1782071472418,
+    "data": {
+      "parentID": "msg_eebbc9ee5001zcKkZbtoN93IKs",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo"
+      },
+      "tokens": {
+        "total": 6347,
+        "input": 612,
+        "output": 89,
+        "reasoning": 14,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071467762,
+        "completed": 1782071472417
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbcb123001s0lwZd4WLZxFBJ",
+    "session_id": "ses_11443627bffeChXsHAM4GOPfOf",
+    "time_created": 1782071472419,
+    "time_updated": 1782071478361,
+    "data": {
+      "parentID": "msg_eebbc9ee5001zcKkZbtoN93IKs",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo"
+      },
+      "tokens": {
+        "total": 6607,
+        "input": 314,
+        "output": 132,
+        "reasoning": 17,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071472419,
+        "completed": 1782071478360
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbcc85a001MGNACA300Wvp4S",
+    "session_id": "ses_11443627bffeChXsHAM4GOPfOf",
+    "time_created": 1782071478362,
+    "time_updated": 1782071481038,
+    "data": {
+      "parentID": "msg_eebbc9ee5001zcKkZbtoN93IKs",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo"
+      },
+      "tokens": {
+        "total": 6691,
+        "input": 485,
+        "output": 62,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071478362,
+        "completed": 1782071481038
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbcd2d0001fGKyhg0fMWBDY7",
+    "session_id": "ses_11443627bffeChXsHAM4GOPfOf",
+    "time_created": 1782071481040,
+    "time_updated": 1782071482984,
+    "data": {
+      "parentID": "msg_eebbc9ee5001zcKkZbtoN93IKs",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-json_repair/repo"
+      },
+      "tokens": {
+        "total": 6777,
+        "input": 599,
+        "output": 34,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071481040,
+        "completed": 1782071482984
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbba358001vqr8gJfD2rHOSa",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071403352,
+    "time_updated": 1782071463322,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071403352
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": [
+          {
+            "file": "src/calculator.py",
+            "patch": "Index: src/calculator.py\n===================================================================\n--- src/calculator.py\t\n+++ src/calculator.py\t\n@@ -1,7 +1,6 @@\n def add(a, b):\n     return a + b\n \n \n def subtract(a, b):\n-    # Intentional bug for synthetic agent tests.\n-    return a + b\n+    return a - b\n",
+            "additions": 1,
+            "deletions": 2,
+            "status": "modified"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "msg_eebbba365001CG387biRgjAE8H",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071403365,
+    "time_updated": 1782071408515,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 6327,
+        "input": 606,
+        "output": 89,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071403365,
+        "completed": 1782071408515
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbbb7850017o6ykId6vzimLD",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071408517,
+    "time_updated": 1782071410706,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 6382,
+        "input": 197,
+        "output": 41,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071408517,
+        "completed": 1782071410706
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbbc014001tyneIyNyYNVEgX",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071410708,
+    "time_updated": 1782071413098,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 6661,
+        "input": 3023,
+        "output": 54,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 3584
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071410708,
+        "completed": 1782071413098
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbbc96c001gTIIlNRhvaCP6B",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071413100,
+    "time_updated": 1782071416881,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 6790,
+        "input": 541,
+        "output": 91,
+        "reasoning": 14,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071413100,
+        "completed": 1782071416881
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbbd833001QOZWvYU1D2mukR",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071416883,
+    "time_updated": 1782071424552,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 7124,
+        "input": 666,
+        "output": 287,
+        "reasoning": 27,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071416883,
+        "completed": 1782071424552
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbbf629001TBMMSWTq4TGG2c",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071424553,
+    "time_updated": 1782071430392,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 7874,
+        "input": 1041,
+        "output": 135,
+        "reasoning": 42,
+        "cache": {
+          "write": 0,
+          "read": 6656
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071424553,
+        "completed": 1782071430392
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbc0cfa001vbvOODv2XTAaNc",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071430394,
+    "time_updated": 1782071436890,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 8085,
+        "input": 729,
+        "output": 98,
+        "reasoning": 90,
+        "cache": {
+          "write": 0,
+          "read": 7168
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071430394,
+        "completed": 1782071436890
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbc265b001qdhEruukDmPtoI",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071436891,
+    "time_updated": 1782071442329,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 8274,
+        "input": 1961,
+        "output": 169,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071436891,
+        "completed": 1782071442328
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbc3b9a001vkRI6glDFzvww7",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071442330,
+    "time_updated": 1782071446819,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 8451,
+        "input": 630,
+        "output": 132,
+        "reasoning": 9,
+        "cache": {
+          "write": 0,
+          "read": 7680
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071442330,
+        "completed": 1782071446818
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbc4d24001wYDgqUypMJ0aOG",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071446820,
+    "time_updated": 1782071454756,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 8801,
+        "input": 391,
+        "output": 103,
+        "reasoning": 115,
+        "cache": {
+          "write": 0,
+          "read": 8192
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071446820,
+        "completed": 1782071454755
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbc6c25001YAXLUWw2pnPcxA",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071454757,
+    "time_updated": 1782071463303,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 8873,
+        "input": 1135,
+        "output": 58,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 7680
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071454757,
+        "completed": 1782071463303
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbc8d880010gp6aj7NWm1y8c",
+    "session_id": "ses_114445e08ffe36hie84gYpX8ed",
+    "time_created": 1782071463304,
+    "time_updated": 1782071466753,
+    "data": {
+      "parentID": "msg_eebbba358001vqr8gJfD2rHOSa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-fix_bug/repo"
+      },
+      "tokens": {
+        "total": 8967,
+        "input": 186,
+        "output": 77,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 8704
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071463304,
+        "completed": 1782071466752
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbaed6400138341jQ03JcRMa",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071356772,
+    "time_updated": 1782071398619,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071356772
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": [
+          {
+            "file": "src/__pycache__/calculator.cpython-314.pyc",
+            "patch": "",
+            "additions": 0,
+            "deletions": 0,
+            "status": "added"
+          },
+          {
+            "file": "src/__pycache__/text_stats.cpython-314.pyc",
+            "patch": "",
+            "additions": 0,
+            "deletions": 0,
+            "status": "added"
+          },
+          {
+            "file": "tests/__pycache__/test_calculator.cpython-314.pyc",
+            "patch": "",
+            "additions": 0,
+            "deletions": 0,
+            "status": "added"
+          },
+          {
+            "file": "tests/__pycache__/test_text_stats.cpython-314.pyc",
+            "patch": "",
+            "additions": 0,
+            "deletions": 0,
+            "status": "added"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "msg_eebbaed73001bCJBpMmcTyNUir",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071356787,
+    "time_updated": 1782071363090,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 6478,
+        "input": 607,
+        "output": 221,
+        "reasoning": 18,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071356787,
+        "completed": 1782071363090
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb0614001g88Ce7NEvqjIoU",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071363092,
+    "time_updated": 1782071366660,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 6635,
+        "input": 400,
+        "output": 91,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071363092,
+        "completed": 1782071366659
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb1406001FLKnGQ0rLCCWcz",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071366662,
+    "time_updated": 1782071370956,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 6725,
+        "input": 515,
+        "output": 48,
+        "reasoning": 18,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071366662,
+        "completed": 1782071370956
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb24cd001W0ucX4TFhSDCIA",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071370957,
+    "time_updated": 1782071376409,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 7027,
+        "input": 3216,
+        "output": 227,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 3584
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071370957,
+        "completed": 1782071376408
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb3a1a001eoWo77jxOh5idU",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071376410,
+    "time_updated": 1782071380314,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 7389,
+        "input": 658,
+        "output": 61,
+        "reasoning": 14,
+        "cache": {
+          "write": 0,
+          "read": 6656
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071376410,
+        "completed": 1782071380314
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb495b001ubYxxOpW2NaAm5",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071380315,
+    "time_updated": 1782071390270,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 7772,
+        "input": 241,
+        "output": 250,
+        "reasoning": 113,
+        "cache": {
+          "write": 0,
+          "read": 7168
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071380315,
+        "completed": 1782071390269
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb703f00131Q6PT95fytwpx",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071390271,
+    "time_updated": 1782071398600,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 8591,
+        "input": 2135,
+        "output": 283,
+        "reasoning": 29,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071390271,
+        "completed": 1782071398599
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbb90c9001doCvW0dFNoR8Ps",
+    "session_id": "ses_1144513f9ffeAvpEWzkkHnEJrE",
+    "time_created": 1782071398601,
+    "time_updated": 1782071402363,
+    "data": {
+      "parentID": "msg_eebbaed6400138341jQ03JcRMa",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-test_diagnose/repo"
+      },
+      "tokens": {
+        "total": 8826,
+        "input": 540,
+        "output": 94,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 8192
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071398601,
+        "completed": 1782071402363
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbacda6001K67rGORJFjGV2B",
+    "session_id": "ses_1144533b2ffeOsvnjiYD1y0pBN",
+    "time_created": 1782071348646,
+    "time_updated": 1782071355898,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071348646
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": []
+      }
+    }
+  },
+  {
+    "id": "msg_eebbacdb4001ZuUmtKQ7OcSJar",
+    "session_id": "ses_1144533b2ffeOsvnjiYD1y0pBN",
+    "time_created": 1782071348660,
+    "time_updated": 1782071353485,
+    "data": {
+      "parentID": "msg_eebbacda6001K67rGORJFjGV2B",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-read_only/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-read_only/repo"
+      },
+      "tokens": {
+        "total": 6395,
+        "input": 6236,
+        "output": 132,
+        "reasoning": 27,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071348660,
+        "completed": 1782071353485
+      },
+      "finish": "tool-calls"
+    }
+  },
+  {
+    "id": "msg_eebbae08e001tw2vNHP2zeic2G",
+    "session_id": "ses_1144533b2ffeOsvnjiYD1y0pBN",
+    "time_created": 1782071353487,
+    "time_updated": 1782071355784,
+    "data": {
+      "parentID": "msg_eebbacda6001K67rGORJFjGV2B",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-read_only/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-read_only/repo"
+      },
+      "tokens": {
+        "total": 6677,
+        "input": 470,
+        "output": 63,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 6144
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071353487,
+        "completed": 1782071355783
+      },
+      "finish": "stop"
+    }
+  },
+  {
+    "id": "msg_eebbac42b001fM6hQ0rJAiYOdi",
+    "session_id": "ses_114453d30ffeK4jgDO14nafdBK",
+    "time_created": 1782071346219,
+    "time_updated": 1782071347782,
+    "data": {
+      "role": "user",
+      "time": {
+        "created": 1782071346219
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "openai",
+        "modelID": "gpt-5.5"
+      },
+      "summary": {
+        "diffs": []
+      }
+    }
+  },
+  {
+    "id": "msg_eebbac4380011tfJyWJJv84tnq",
+    "session_id": "ses_114453d30ffeK4jgDO14nafdBK",
+    "time_created": 1782071346232,
+    "time_updated": 1782071347668,
+    "data": {
+      "parentID": "msg_eebbac42b001fM6hQ0rJAiYOdi",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/tmp/agent-recorder-suite/runs/opencode-hello/repo",
+        "root": "/tmp/agent-recorder-suite/runs/opencode-hello/repo"
+      },
+      "tokens": {
+        "total": 6223,
+        "input": 585,
+        "output": 6,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 5632
+        }
+      },
+      "modelID": "gpt-5.5",
+      "providerID": "openai",
+      "time": {
+        "created": 1782071346232,
+        "completed": 1782071347667
+      },
+      "finish": "stop"
+    }
+  }
+]

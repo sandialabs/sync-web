@@ -160,7 +160,7 @@
 
     <section class="panel note">
       <h2>Authentication</h2>
-      <p>Use an API token as the password for Basic authentication. The username is accepted by most clients but is not the secret; the token/password is what authenticates the request.</p>
+      <p>Use a Sync Web API token as the <strong>password</strong> for Basic authentication. Do not enter your account password here: WebDAV clients do not use the browser login flow. The username field can be your username (for example, <code>admin</code>), but the API token in the password field is what authenticates the request.</p>
     </section>
 
     <section class="panel">
@@ -188,10 +188,15 @@
     <section class="panel">
       <h2>Desktop clients</h2>
       <ul>
-        <li><strong>GNOME Files / Nautilus:</strong> connect to <code>dav://HOST/webdav/stage/</code> or <code>davs://HOST/webdav/stage/</code>.</li>
-        <li><strong>macOS Finder:</strong> use <em>Go → Connect to Server…</em> and enter <code>http://HOST/webdav/stage/</code> or <code>https://HOST/webdav/stage/</code>.</li>
-        <li><strong>Windows:</strong> use <em>Map network drive</em> or <em>Add a network location</em> with the HTTP(S) WebDAV URL.</li>
+        <li><strong>GNOME Files / Nautilus:</strong> connect to <code>dav://HOST/webdav/stage/</code> or <code>davs://HOST/webdav/stage/</code>. If prompted, enter your username and paste an API token as the password.</li>
+        <li><strong>macOS Finder:</strong> use <em>Go → Connect to Server…</em> and enter <code>http://HOST/webdav/stage/</code> or <code>https://HOST/webdav/stage/</code>. In the password field, paste an API token, not your login password.</li>
+        <li><strong>Windows:</strong> built-in WebClient/MiniRedir behavior varies by Windows version and policy. If <em>Map network drive</em> or <em>Add a network location</em> cannot resolve the WebDAV URL, use a dedicated client such as rclone with WinFsp. In either case, use an API token as the network password.</li>
       </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Path names</h2>
+      <p>Spaces and other ordinary filename characters are supported. The WebDAV service escapes names that are unsafe as Scheme path symbols before journal calls, then decodes them again for directory listings.</p>
     </section>
 
     <section class="panel">

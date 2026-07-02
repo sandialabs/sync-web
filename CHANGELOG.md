@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.4.1
+
+### Added
+
+- **Windows ARM64 binaries** — Add Windows ARM64 builds for `ledger`, `journal-sdk`, and `agent-recorder` release artifacts.
+
+### Changed
+
+- **Journal SDK patch version** — Bump `journal-sdk` to `1.3.1` because the journal crate dependency configuration changed.
+- **Journal dependency build scope** — Disable unused default `pqcrypto` algorithm features so Windows ARM64 builds avoid compiling unused PQClean C implementations.
+
+## 1.4.0
+
+### Added
+
+- **Lightweight ledger binary** — Added a user-facing `ledger` executable for local and agent-recorder-oriented deployments without the full gateway/explorer/identity/router stack. The binary embeds core ledger records, initializes empty databases, runs periodic steps, supports record updates, bridge configuration, generated local secrets, and direct query evaluation.
+- **Ledger release artifacts** — Added a `Ledger Binaries` workflow that builds downloadable `ledger-*` and `journal-sdk-*` artifacts for Linux, Linux musl/Alpine, macOS, and Windows targets. Versioned tag builds publish release assets from a final publish job with `SHA256SUMS`.
+- **Ledger deployment docs** — Added lightweight ledger deployment notes and initial binary/Compose documentation.
+
+### Changed
+
+- **Explorer stage tree** — The staged-state tree now shows all readable stage users while keeping the current user’s staged home as the default view.
+- **Platform package metadata** — Added tooling to keep platform-versioned TypeScript package metadata aligned with top-level `VERSION`.
+
+### Fixed
+
+- **Ledger bridge tracing** — Preserve document metadata through remote bridge trace results.
+- **Ledger public config** — Restrict public configuration exposure to intended public fields.
+- **Log-chain truncation** — Ensure `truncate!` mutates log-chain state correctly.
+- **Ledger signing keys** — Derive ledger signing keys at step time instead of storing private signing keys in ledger config.
+- **Docs 404 page** — Added a custom docs 404 page and disabled Starlight’s injected 404 route to avoid build warnings.
+- **Windows ledger builds** — Patch vendored s7 at build time for Windows/MSVC builds without modifying vendored s7 sources.
+
+## 1.3.2
+
+### Fixed
+
+- **Explorer path handling** — Parse ledger directory entries as `[name, type]` pairs, preserve encoded path segments for API calls, and display decoded names for files and directories with spaces or other escaped characters.
+- **Release promotion** — Avoid expensive main-branch validation rebuilds for versioned releases by promoting branch-validated SHA images.
+- **WebDAV docs** — Clarified API-token authentication, service-side path escaping, and Windows client limitations.
+
+## 1.3.1
+
+### Fixed
+
+- **WebDAV compatibility** — Added minimal lock responses for clients that require class-2 WebDAV behavior, including macOS Finder.
+- **WebDAV path handling** — Percent-encode WebDAV names that are not unescaped R7RS identifiers before ledger calls and decode them for directory listings.
+- **Ledger browsing** — Accept synthetic ledger collection probes without trailing slashes for file managers that normalize paths.
+- **WebDAV authentication docs** — Clarified that WebDAV Basic Auth uses a Sync Web API token as the password, not the account password.
+
 ## 1.3.0
 
 ### Added
