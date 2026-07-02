@@ -1,4 +1,4 @@
-avpedne@s1117992:~/tla_sync-web/sync-web$ java -cp tla2tools.jar tlc2.TLC -config fast.cfg SyncWebJournal.tla
+avpedne@s1117992:~/tla_sync-web/sync-web$ java -cp tla2tools.jar tlc2.TLC -config SafetyInvariant_check.cfg SyncWebJournal.tla
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
