@@ -62,7 +62,7 @@ Tool calls and tool results are message annotations. Edges such as `follows-mess
 
 ### Integrity
 
-`agent-recorder` can add optional forward-integrity metadata to each record. For the 0.1.0 tool, treat this as initial tamper-evidence and forward-integrity plumbing for review and experimentation, not as a cryptographically audited production guarantee. The public metadata contains the algorithm, key id, absolute index, payload hash, and authenticator. Local key-evolution state stays private and is not stored in backend records.
+`agent-recorder` can add optional forward-integrity metadata to each record. For the 0.1.x tool, treat this as initial tamper-evidence and forward-integrity plumbing for review and experimentation, not as a cryptographically audited production guarantee. The public metadata contains the algorithm, key id, absolute index, payload hash, and authenticator. Local key-evolution state stays private and is not stored in backend records.
 
 The integrity layer authenticates each indexed record independently. Backend storage, including Sync Web, remains responsible for ordering and history. The recorder provides `read --integrity-key`, `verify`, `status`, and `rekey` commands for verification and emergency key cutover workflows.
 

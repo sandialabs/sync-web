@@ -154,7 +154,7 @@ The stable public JSON uses kebab-case where field names are controlled by `agen
 
 ## Integrity
 
-Integrity is optional and backend-independent. In the 0.1.0 tool, treat this as initial tamper-evidence and forward-integrity plumbing for review and experimentation, not as a cryptographically audited production guarantee. Enable it on writes with `--integrity agent-recorder-integrity-v1`, an integrity state path, and an initial key.
+Integrity is optional and backend-independent. In the 0.1.x tool, treat this as initial tamper-evidence and forward-integrity plumbing for review and experimentation, not as a cryptographically audited production guarantee. Enable it on writes with `--integrity agent-recorder-integrity-v1`, an integrity state path, and an initial key.
 
 ```sh
 AGENT_RECORDER_INTEGRITY_KEY='example secret' \
@@ -196,6 +196,8 @@ The HMAC layer is not a blockchain and does not include a previous authenticator
 Local integrity state stores private future keys and is not written into records. The key schedule is a no-horizon, 1-based `v2(i)` skip schedule. Backend indexes are zero-based, but key scheduling uses one-based event numbers.
 
 At one-based event `i`, compute `h = v2(i)` and generate future edge keys for levels `0..h`, each targeting `i + 2^d`. At event `j`, consume pending incoming keys whose target is `j`; after the backend write succeeds, consumed keys are deleted and the local state advances. A verifier with the root key derives `K_i` in logarithmic time and verifies the selected indexed record independently. Cryptographic review is still recommended before relying on this for high-assurance audit workflows.
+
+`run` persists integrity state after each new record because it is live capture. `import` treats the input as a replayable batch and persists integrity state after the batch completes, avoiding one durable state-file rewrite per imported record. If an integrity-backed import is interrupted, discard the partial output or rerun from a clean/aligned backend and state file.
 
 Read with verification:
 
@@ -271,7 +273,7 @@ A real signed JSON-LD example is checked in at `examples/integrity-agent-record.
 
 The `Agent Recorder Binaries` GitHub Actions workflow builds downloadable `agent-recorder-*` binaries for Linux, Linux musl/Alpine, macOS, and Windows targets. Branch workflow artifacts can be downloaded for testing before a tagged release.
 
-Tagged releases use `agent-recorder-v*` tags, for example `agent-recorder-v0.1.0`. Ledger binary releases use separate `ledger-v*` tags so agent-recorder artifacts do not mix with ledger/journal release assets.
+Tagged releases use `agent-recorder-v*` tags, for example `agent-recorder-v0.1.1`. Ledger binary releases use separate `ledger-v*` tags so agent-recorder artifacts do not mix with ledger/journal release assets.
 
 ## Sync Web Backend
 

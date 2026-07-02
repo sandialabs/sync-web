@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::adapters::AdapterRegistry;
 use crate::integrity::{
     integrity_status, load_state, rekey_state, verify_indexed_records, IntegrityKey,
-    IntegrityRecordAdapter, VerificationStatus, ALGORITHM,
+    IntegrityRecordAdapter, IntegrityStatePersistence, VerificationStatus, ALGORITHM,
 };
 use crate::records::{
     sync_web::{
@@ -445,6 +445,7 @@ fn cmd_run(
         args.recorder_data.as_deref(),
         &args.sync_web,
         &args.integrity,
+        IntegrityStatePersistence::Immediate,
     )?;
     let roots = vec![PathBuf::from(args.agent_data)];
     let mut seen = HashSet::new();
@@ -499,10 +500,13 @@ fn cmd_import(
         args.recorder_data.as_deref(),
         &args.sync_web,
         &args.integrity,
+        IntegrityStatePersistence::OnFlush,
     )?;
     let roots = vec![PathBuf::from(args.agent_data)];
     let report = if let Some(sink) = sink.as_mut() {
-        import_records(adapter.as_ref(), &roots, sink.as_mut())?
+        let report = import_records(adapter.as_ref(), &roots, sink.as_mut())?;
+        sink.flush()?;
+        report
     } else {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
@@ -775,6 +779,7 @@ fn create_record_adapter(
     recorder_data: Option<&str>,
     sync_web: &SyncWebArgs,
     integrity: &IntegrityArgs,
+    integrity_persistence: IntegrityStatePersistence,
 ) -> Result<Option<Box<dyn RecordAdapter>>> {
     let Some(recorder) = recorder else {
         if integrity.algorithm.is_some() {
@@ -815,12 +820,15 @@ fn create_record_adapter(
         .ok_or_else(|| anyhow!("integrity logging requires --integrity-state PATH"))?;
     let init_key = resolve_optional_integrity_key(integrity)?;
     let reader = create_record_reader(registry, recorder, recorder_data, sync_web)?;
-    Ok(Some(Box::new(IntegrityRecordAdapter::create_checked(
-        sink,
-        state,
-        init_key,
-        Some(reader.as_ref()),
-    )?)))
+    Ok(Some(Box::new(
+        IntegrityRecordAdapter::create_checked_with_persistence(
+            sink,
+            state,
+            init_key,
+            Some(reader.as_ref()),
+            integrity_persistence,
+        )?,
+    )))
 }
 
 fn resolve_optional_integrity_key(args: &IntegrityArgs) -> Result<Option<IntegrityKey>> {

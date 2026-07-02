@@ -7,7 +7,7 @@ use agent_recorder::{
     integrity::{
         integrity_status, rekey_state, verify_indexed_record, verify_indexed_records,
         verify_record, IntegrityAlignment, IntegrityKey, IntegrityRecordAdapter,
-        VerificationStatus,
+        IntegrityStatePersistence, VerificationStatus,
     },
     records,
     records::{RecordAdapter, RecordReader, RecordSelector},
@@ -522,6 +522,38 @@ fn integrity_wrapper_signs_jsonl_records_and_verifies_range() -> Result<()> {
     assert_eq!(verified.index, 6);
 
     let _ = fs::remove_file(out);
+    let _ = fs::remove_file(state);
+    Ok(())
+}
+
+#[test]
+fn integrity_on_flush_persists_state_after_batch() -> Result<()> {
+    let state = std::env::temp_dir().join(format!(
+        "agent-recorder-integrity-on-flush-{}.json",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&state);
+    let key = IntegrityKey::from_secret("batch-secret");
+    let records = import_fixture("pi")?;
+
+    let mut adapter = IntegrityRecordAdapter::create_checked_with_persistence(
+        Box::new(MemoryRecordAdapter::default()),
+        &state,
+        Some(key),
+        None,
+        IntegrityStatePersistence::OnFlush,
+    )?;
+    adapter.log(&records[0])?;
+    adapter.log(&records[1])?;
+
+    let before_flush = agent_recorder::integrity::load_state(&state)?;
+    assert_eq!(before_flush.next_index, 0);
+
+    adapter.flush()?;
+    let after_flush = agent_recorder::integrity::load_state(&state)?;
+    assert_eq!(after_flush.next_index, 2);
+    assert!(after_flush.future_keys.iter().all(|key| key.target >= 2));
+
     let _ = fs::remove_file(state);
     Ok(())
 }
