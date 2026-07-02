@@ -46,6 +46,11 @@ impl RecordAdapter for JsonlRecordAdapter {
         self.writer.flush()?;
         Ok(())
     }
+
+    fn flush(&mut self) -> Result<()> {
+        self.writer.flush()?;
+        Ok(())
+    }
 }
 
 impl RecordReader for JsonlRecordReader {

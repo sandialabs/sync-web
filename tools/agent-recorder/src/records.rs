@@ -58,6 +58,10 @@ pub trait RecordAdapter {
     fn name(&self) -> &'static str;
     /// Append or otherwise persist one normalized record.
     fn log(&mut self, record: &GraphRecord) -> Result<()>;
+    /// Flush any buffered adapter state after a batch of records.
+    fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Readable backend used by `read`, `verify`, `status`, and integrity recovery.

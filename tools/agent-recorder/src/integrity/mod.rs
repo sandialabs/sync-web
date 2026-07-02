@@ -75,6 +75,14 @@ pub struct IntegrityRecordAdapter {
     inner: Box<dyn RecordAdapter>,
     state_path: PathBuf,
     state: IntegrityState,
+    persistence: IntegrityStatePersistence,
+    dirty: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegrityStatePersistence {
+    Immediate,
+    OnFlush,
 }
 
 /// Root verifier/signing secret for one integrity stream.
@@ -155,6 +163,22 @@ impl IntegrityRecordAdapter {
         init_key: Option<IntegrityKey>,
         reader: Option<&dyn RecordReader>,
     ) -> Result<Self> {
+        Self::create_checked_with_persistence(
+            inner,
+            state_path,
+            init_key,
+            reader,
+            IntegrityStatePersistence::Immediate,
+        )
+    }
+
+    pub fn create_checked_with_persistence(
+        inner: Box<dyn RecordAdapter>,
+        state_path: impl AsRef<Path>,
+        init_key: Option<IntegrityKey>,
+        reader: Option<&dyn RecordReader>,
+        persistence: IntegrityStatePersistence,
+    ) -> Result<Self> {
         let state_path = state_path.as_ref().to_path_buf();
         let mut state = load_or_create_state(&state_path, init_key.as_ref())?;
         if let Some(reader) = reader {
@@ -166,6 +190,8 @@ impl IntegrityRecordAdapter {
             inner,
             state_path,
             state,
+            persistence,
+            dirty: false,
         })
     }
 }
@@ -184,7 +210,19 @@ impl RecordAdapter for IntegrityRecordAdapter {
         self.inner.log(&signed)?;
 
         advance_state(&mut self.state, index, generated)?;
-        store_state(&self.state_path, &self.state)?;
+        match self.persistence {
+            IntegrityStatePersistence::Immediate => store_state(&self.state_path, &self.state)?,
+            IntegrityStatePersistence::OnFlush => self.dirty = true,
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.inner.flush()?;
+        if self.dirty {
+            store_state(&self.state_path, &self.state)?;
+            self.dirty = false;
+        }
         Ok(())
     }
 }
