@@ -56,7 +56,9 @@ podman-compose -f deploy/compose/general/compose.yaml up -d
 - `SECRET` (required): authentication secret for restricted journal/gateway operations
 - `HTTP_PORT` (default `8192`): host HTTP port exposed by router
 - `HTTPS_PORT` (default `8193`): host TLS port exposed by router
-- `ORIGIN` (default `http://localhost:8192`): public origin used by the identity provider; set this explicitly when using non-default/public ports or hostnames
+- `ORIGIN` (default `http://localhost:8192`): public origin used by the identity provider and as the default base for the raw journal interface URL; set this explicitly when using non-default/public ports or hostnames
+- `INTERFACE` (default `${ORIGIN}/api/v1/journal/interface`): public raw journal interface endpoint advertised to bridge peers
+- `JOURNAL_NAME` (default `INTERFACE`): public journal display/peer name advertised to bridge peers
 - `PERIOD` (default `2`): journal periodicity exponent
 - `WINDOW` (default `1024`): retained historical state window
 - `JOURNAL_UPDATE` (default empty): set to `1` to update an existing journal database from the mounted Lisp files before serving
@@ -65,7 +67,7 @@ podman-compose -f deploy/compose/general/compose.yaml up -d
 - `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
-- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.4.1`): image used by the `file-system` service
+- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.4.3`): image used by the `file-system` service
 - `SYNC_FS_MAX_OBJECT_BYTES` (default `1048576`): maximum WebDAV object size
 
 Gateway note:

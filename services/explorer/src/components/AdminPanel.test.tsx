@@ -37,7 +37,7 @@ describe('AdminPanel', () => {
 
     expect(screen.getByPlaceholderText('Remote name')).toHaveValue('journal-0');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create bridge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
       expect(journalService.saveBridge).toHaveBeenCalledWith({
@@ -60,7 +60,7 @@ describe('AdminPanel', () => {
     fireEvent.change(screen.getByPlaceholderText('Remote endpoint'), {
       target: { value: 'ftp://beagle.sync-web.org/api/v1/journal/interface' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create bridge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('Remote endpoint must be an http:// or https:// URL.')).toBeInTheDocument();
     expect(journalService.saveBridge).not.toHaveBeenCalled();

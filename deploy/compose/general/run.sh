@@ -54,7 +54,8 @@ run_startup() {
     document=$( cat "$(resolve_lisp_file document.scm)" )
     interface=$( cat "$(resolve_lisp_file interface.scm)" )
     admins=$( build_admins_list )
-    interface_url="${INTERFACE:-$SECRET}"
+    origin="${ORIGIN:-http://localhost:8192}"
+    interface_url="${INTERFACE:-$origin/api/v1/journal/interface}"
     journal_name="${JOURNAL_NAME:-$interface_url}"
     bridge_publish="${BRIDGE_PUBLISH:-push}"
     bridge_subscribe="${BRIDGE_SUBSCRIBE:-pull}"

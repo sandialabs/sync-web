@@ -445,7 +445,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
             type="submit"
             disabled={isSaving || !bridgeName.trim() || !bridgeEndpoint.trim()}
           >
-            Create bridge
+            Create
           </button>
         </form>
       </section>

@@ -33,6 +33,12 @@
                                 ',standard-src ',chain-src ',tree-src ',ledger-src ',document-src)
                #t journal))
 
+  (define (journal-update journal admin-secret interface-secret admins)
+    (sync-call `(*eval* ,admin-secret
+                        (,interface-src ,(interface-config #f admin-secret interface-secret admins 4)
+                                        ',standard-src ',chain-src ',tree-src ',ledger-src ',document-src))
+               #t journal))
+
   (define (journal-query journal query)
     (sync-call query #t journal))
 
@@ -359,6 +365,11 @@
     (assert (interface-query journal-1 interface-1 query) #t))
 
   ; promoted alice can now call *admins-get* — confirms admin list is enforced
+  (let ((query '((function *admins-get*))))
+    (assert (interface-query journal-1 interface-1 query 'alice) '(alice)))
+
+  ; updating installed code/config does not reset the runtime-managed admin list
+  (assert (journal-update journal-1 "pass-1" interface-1 '(bob)) "Installed interface")
   (let ((query '((function *admins-get*))))
     (assert (interface-query journal-1 interface-1 query 'alice) '(alice)))
 

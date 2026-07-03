@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.4.3
+
+### Changed
+
+- **Journal interface defaults** — General Compose now derives the raw journal interface endpoint from `ORIGIN` instead of ever falling back to `SECRET`, and passes `ORIGIN`, `INTERFACE`, and `JOURNAL_NAME` into the journal container.
+- **Admin update behavior** — `JOURNAL_UPDATE=1` preserves the existing runtime-managed admin list instead of reseeding it from `INTERFACE_ADMINS`.
+- **Bridge admin UI polish** — Shortened the bridge creation button to “Create” and aligned selected Push/Pull/None segment color with the page’s primary button color.
+
+## 1.4.2
+
+### Added
+
+- **Bridge admin controls** — Added Explorer admin controls for subscribing to peers and publishing to peers, including endpoint editing, delete actions, and Push/Pull/None policy selection.
+- **Bridge delete operations** — Added explicit incoming bridge and outgoing subscriber delete operations through the interface and gateway.
+- **Version-driven ledger releases** — Ledger and journal-sdk release artifacts are now published from main `VERSION` changes, using `VERSION` as the release source of truth.
+
+### Changed
+
+- **Bridge configuration** — Disabled bridge and subscriber entries are preserved as `none` tombstones, while delete removes the config entry.
+- **Bridge identity defaults** — Ledger public config now stores the journal name so Explorer can autofill the remote name when creating publishing relationships.
+- **Idea docs** — Consolidated current cross-journal data-flow notes and removed stale/superseded idea documents.
+
+### Fixed
+
+- **Stale bridge endpoints** — Explorer now prefers authoritative bridge interface config over legacy local registration snapshots.
+- **Bridge sync loop** — Incoming bridges with negotiated `none` policy are skipped during periodic bridge synchronization.
+
 ## 1.4.1
 
 ### Added
