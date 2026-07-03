@@ -90,7 +90,8 @@
   ;; define secret store and admin list
   (call `(lambda (root)
            ((root 'set!) '(interface secret) (sync-hash (expression->byte-vector ,(config-ref 'interface-secret))))
-           ((root 'set!) '(interface admins) ,(config-ref 'admins))
+           (if ,(config-ref 'clear?)
+               ((root 'set!) '(interface admins) ,(config-ref 'admins)))
            ((root 'set!) '(interface endpoint) ,(config-ref 'interface))
            ((root 'set!) '(interface name) ,(config-ref 'name))
            ((root 'set!) '(interface push-enabled?) ,(config-ref 'push-enabled?))))
