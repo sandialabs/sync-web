@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "vector",
+    "string"
+  ],
+  "description": "sort comparator side effects must actually run when handling multiple-value predicates.",
+  "expected_to_fail_candidate": true
+}

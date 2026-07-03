@@ -1,4 +1,4 @@
-(let* ((n 40000)
+(let* ((n 5000)
        (v (make-vector n 0)))
   (let fill ((i 0))
     (if (= i n)

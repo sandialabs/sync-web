@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "diagnostic-payload"
+  ],
+  "description": "procedure-source setter diagnostic for macro value should match s7 printing.",
+  "expected_to_fail_candidate": true
+}

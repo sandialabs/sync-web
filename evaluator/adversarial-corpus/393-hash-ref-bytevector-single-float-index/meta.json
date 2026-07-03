@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "hash"
+  ],
+  "description": "hash-table-ref implicit byte-vector access with one real index should report byte-vector-ref type error, not too many indices.",
+  "expected_to_fail_candidate": true
+}

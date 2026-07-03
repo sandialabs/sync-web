@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "vector",
+    "multivector",
+    "diagnostic"
+  ],
+  "description": "multivector vector-set! first too-large index should use full s7 out-of-range diagnostic.",
+  "expected_to_fail_candidate": true
+}

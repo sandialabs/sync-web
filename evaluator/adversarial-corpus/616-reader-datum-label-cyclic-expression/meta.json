@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "datum labels should be read enough to produce s7 cyclic-improper evaluation error, not read-error.",
+  "expected_to_fail_candidate": true
+}

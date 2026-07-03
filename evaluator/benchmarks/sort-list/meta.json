@@ -7,5 +7,5 @@
     "procedure"
   ],
   "description": "List sorting with Scheme comparator calls.",
-  "scale": "5000 integers"
+  "scale": "20000 integers"
 }

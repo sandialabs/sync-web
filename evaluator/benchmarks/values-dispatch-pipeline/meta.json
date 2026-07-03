@@ -1,0 +1,11 @@
+{
+  "category": "values",
+  "description": "Multiple-values through apply-style dispatch and aggregation.",
+  "scale": "70000 iterations",
+  "tags": [
+    "benchmark",
+    "values",
+    "apply",
+    "closure"
+  ]
+}

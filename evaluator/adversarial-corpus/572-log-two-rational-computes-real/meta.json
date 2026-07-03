@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "reader",
+    "numeric",
+    "environment",
+    "procedure-source"
+  ],
+  "description": "two-argument rational log should compute a real, not complex with zero imaginary part.",
+  "expected_to_fail_candidate": true
+}

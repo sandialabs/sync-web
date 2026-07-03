@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "append should handle vectors as s7 sequences.",
+  "expected_to_fail_candidate": true
+}

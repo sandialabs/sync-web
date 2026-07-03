@@ -1,0 +1,6 @@
+{
+  "category": "mixed-dispatch",
+  "description": "Request-routing style workload mixing alists, case, hash-table state, authorization, and response lists.",
+  "scale": "4500 routed requests",
+  "tags": ["benchmark", "mixed", "dispatch", "hash-table", "authorization"]
+}

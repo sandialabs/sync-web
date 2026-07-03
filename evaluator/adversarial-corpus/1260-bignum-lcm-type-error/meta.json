@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior"
+  ],
+  "description": "lcm on bignum should match s7 type behavior.",
+  "expected_to_fail_candidate": true
+}

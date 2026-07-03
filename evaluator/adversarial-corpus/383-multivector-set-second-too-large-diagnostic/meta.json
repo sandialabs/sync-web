@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "vector",
+    "multivector",
+    "diagnostic"
+  ],
+  "description": "multivector vector-set! second too-large index should report argument 3.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector"
+  ],
+  "description": "multiple-value comparator and live mutation must preserve actual target index and value.",
+  "expected_to_fail_candidate": true
+}

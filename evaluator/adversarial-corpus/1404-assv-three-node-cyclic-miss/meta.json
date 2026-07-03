@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "termination"
+  ],
+  "description": "assv miss on a cyclic alist should terminate.",
+  "expected_to_fail_candidate": true
+}

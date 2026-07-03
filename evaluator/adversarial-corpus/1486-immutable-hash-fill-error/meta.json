@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "diagnostic-payload"
+  ],
+  "description": "fill! on immutable hash-table should error.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior"
+  ],
+  "description": "format ~F should honor width and precision like s7.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior"
+  ],
+  "description": "copy string with start should match s7 mutation behavior.",
+  "expected_to_fail_candidate": true
+}

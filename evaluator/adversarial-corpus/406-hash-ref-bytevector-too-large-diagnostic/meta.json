@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "hash",
+    "diagnostic"
+  ],
+  "description": "hash-table-ref implicit byte-vector too-large index diagnostic should match s7.",
+  "expected_to_fail_candidate": true
+}

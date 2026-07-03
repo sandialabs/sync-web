@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "installed procedure setters should participate in generalized set!.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior"
+  ],
+  "description": "do with no result expressions should return s7 test value behavior.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "diagnostic",
+    "float-vector"
+  ],
+  "description": "#r1d dotted contents should report float-vector proper-list read-error.",
+  "expected_to_fail_candidate": true
+}

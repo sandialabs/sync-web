@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior"
+  ],
+  "description": "letrec forward reference should produce s7 undefined value.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior"
+  ],
+  "description": "format should reject extra args with empty control string.",
+  "expected_to_fail_candidate": true
+}

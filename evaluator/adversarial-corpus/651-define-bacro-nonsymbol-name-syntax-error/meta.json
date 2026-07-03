@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "define-bacro shorthand should reject non-symbol macro names.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag"
+  ],
+  "description": "case else clause before the end should syntax-error, not return the else body.",
+  "expected_to_fail_candidate": true
+}

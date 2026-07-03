@@ -24,6 +24,7 @@ The Rust port should target sync-web-compatible s7 behavior, not necessarily ful
 - Do not preserve the s7 C API or ABI.
 - Do not provide a C-style FFI just to mimic `s7_define_function`, `s7_call`, or raw `s7_pointer` lifetimes.
 - Do not implement sync-web's currently blacklisted/system features only to remove them later; unsupported features should simply be absent.
+- Do not grant the interpreter direct filesystem, process, native loading, network, nondeterministic, or broad debug/profiling authority beyond deterministic in-memory evaluation and explicit sync-web-provided host primitives. See [`docs/system-authority-guardrails.md`](docs/system-authority-guardrails.md).
 - Do not rewrite sync-web record semantics as part of this project.
 - Do not optimize before differential correctness is strong.
 

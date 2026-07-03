@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "environment",
+    "side-effects",
+    "diagnostics"
+  ],
+  "description": "values procedure can be stored in a list.",
+  "expected_to_fail_candidate": true
+}

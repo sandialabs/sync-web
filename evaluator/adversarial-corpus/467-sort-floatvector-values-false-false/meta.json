@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector",
+    "typed-vector"
+  ],
+  "description": "typed float-vector sort should share the same comparator multiple-value semantics as vector sort.",
+  "expected_to_fail_candidate": true
+}

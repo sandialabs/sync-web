@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "termination"
+  ],
+  "description": "copy of mutually cyclic hash-tables should terminate and preserve cycle.",
+  "expected_to_fail_candidate": true
+}

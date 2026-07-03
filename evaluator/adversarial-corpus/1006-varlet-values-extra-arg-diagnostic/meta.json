@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "diagnostic-payload"
+  ],
+  "description": "varlet with multiple values should follow s7 argument-splicing diagnostics.",
+  "expected_to_fail_candidate": true
+}

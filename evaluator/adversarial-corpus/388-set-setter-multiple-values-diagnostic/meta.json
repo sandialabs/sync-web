@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "values",
+    "diagnostic"
+  ],
+  "description": "setter assignment with multiple values should be a set! syntax-error, not silently accept one value.",
+  "expected_to_fail_candidate": true
+}

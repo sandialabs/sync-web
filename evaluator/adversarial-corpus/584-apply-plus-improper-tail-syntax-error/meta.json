@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "apply should report s7 syntax-error for improper final argument list, not a generic tail type error.",
+  "expected_to_fail_candidate": true
+}

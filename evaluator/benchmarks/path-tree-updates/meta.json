@@ -1,0 +1,11 @@
+{
+  "category": "tree",
+  "description": "Nested association-list path updates and reads, modeling path-addressed state without host primitives.",
+  "scale": "5000 updates + 5000 reads",
+  "tags": [
+    "benchmark",
+    "path",
+    "state",
+    "list-mutation"
+  ]
+}

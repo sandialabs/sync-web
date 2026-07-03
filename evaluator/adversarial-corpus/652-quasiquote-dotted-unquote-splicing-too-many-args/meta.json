@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "quasiquote dotted unquote-splicing should follow s7 list* error behavior.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "optimization-regression", "bytecode", "case", "diagnostics"],
+  "description": "bytecode case streaming should preserve improper key-list syntax diagnostics.",
+  "expected_to_fail_candidate": true
+}

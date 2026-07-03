@@ -1,0 +1,10 @@
+{
+  "category": "reader",
+  "description": "Read many record-like expressions from one in-memory input string.",
+  "scale": "5000 expressions",
+  "tags": [
+    "benchmark",
+    "reader",
+    "expression"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "optimization-regression", "bytecode", "or", "multiple-values"],
+  "description": "bytecode or should preserve s7 multiple-value truth scanning even when values come from a call.",
+  "expected_to_fail_candidate": true
+}

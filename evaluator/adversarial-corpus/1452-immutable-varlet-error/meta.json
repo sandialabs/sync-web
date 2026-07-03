@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "diagnostic-payload"
+  ],
+  "description": "varlet on immutable environment should error.",
+  "expected_to_fail_candidate": true
+}

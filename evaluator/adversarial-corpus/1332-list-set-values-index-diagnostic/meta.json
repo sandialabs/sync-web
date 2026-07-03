@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "diagnostic-payload"
+  ],
+  "description": "generalized list set! with multiple index values should report list-set! arity like s7.",
+  "expected_to_fail_candidate": true
+}

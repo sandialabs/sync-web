@@ -1,0 +1,1 @@
+"(if expr true-stuff optional-false-stuff) evaluates expr, then if it is true, evaluates true-stuff; otherwise, if optional-false-stuff exists, it is evaluated."

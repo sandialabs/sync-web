@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "macro"
+  ],
+  "description": "multiple values can be produced through a locally bound procedure.",
+  "expected_to_fail_candidate": true
+}

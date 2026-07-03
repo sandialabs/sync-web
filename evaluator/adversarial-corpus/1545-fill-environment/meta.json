@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior"
+  ],
+  "description": "fill! should mutate environment values like s7.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "keyword normalization for +...+ keys should be consistent across inlet, varlet, and env application.",
+  "expected_to_fail_candidate": true
+}

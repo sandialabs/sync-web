@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "mutation",
+    "vector"
+  ],
+  "description": "vector sort! comparator side effect should preserve mutation to nonzero slot.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,1 @@
+(make-iterator 1)

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "sync-profile C oracle has no public list* binding; Rust should not expose extra surface.",
+  "expected_to_fail_candidate": true
+}

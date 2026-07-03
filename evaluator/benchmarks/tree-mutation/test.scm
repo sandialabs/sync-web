@@ -8,6 +8,6 @@
     (let ((cell (assoc k al)))
       (if cell (cdr cell) #f)))
   (let loop ((i 0) (state root))
-    (if (= i 15000)
-        (list (get state 17) (get state 14999) (length state))
+    (if (= i 4000)
+        (list (get state 17) (get state 3999) (length state))
         (loop (+ i 1) (put state i (list i (* i i)))))))

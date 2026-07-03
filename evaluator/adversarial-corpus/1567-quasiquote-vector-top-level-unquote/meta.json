@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "optimization-regression", "quasiquote", "vector"],
+  "description": "top-level vector quasiquote should evaluate direct unquote elements like s7.",
+  "expected_to_fail_candidate": true
+}

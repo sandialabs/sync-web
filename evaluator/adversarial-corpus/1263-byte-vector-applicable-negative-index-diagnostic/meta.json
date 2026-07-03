@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "diagnostic-payload"
+  ],
+  "description": "applicable byte-vector negative index diagnostic should use s7 vector-ref name.",
+  "expected_to_fail_candidate": true
+}

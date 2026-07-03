@@ -1,0 +1,6 @@
+(let ((h (hash-table)))
+  (set! (h 1) 'int)
+  (let loop ((i 0))
+    (if (= i 1)
+        (h 1.0)
+        (loop 1))))

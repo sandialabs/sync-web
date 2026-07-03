@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "hash-table",
+    "numeric-key-identity"
+  ],
+  "description": "hash-table applicable lookup should distinguish exact integer and inexact float keys like s7.",
+  "expected_to_fail_candidate": true
+}

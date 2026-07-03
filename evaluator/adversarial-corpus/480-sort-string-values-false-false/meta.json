@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "vector",
+    "string"
+  ],
+  "description": "string sort should share comparator multiple-value semantics with vector/list sort.",
+  "expected_to_fail_candidate": true
+}

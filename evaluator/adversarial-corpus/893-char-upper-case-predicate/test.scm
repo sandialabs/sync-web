@@ -1,0 +1,1 @@
+(char-upper-case? #\A)

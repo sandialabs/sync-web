@@ -1,0 +1,16 @@
+(define (make-counter seed)
+  (let ((state (hash-table 'value seed))
+        (methods (hash-table)))
+    (set! (methods 'get) (lambda () (state 'value)))
+    (set! (methods 'add) (lambda (x) (set! (state 'value) (+ (state 'value) x)) (state 'value)))
+    (set! (methods 'mul) (lambda (x) (set! (state 'value) (* (state 'value) x)) (state 'value)))
+    (lambda (msg . args) (apply (methods msg) args))))
+
+(let ((obj (make-counter 1)))
+  (let loop ((i 0) (acc 0))
+    (if (= i 50000)
+        (list (obj 'get) acc)
+        (begin
+          (obj 'add (remainder i 7))
+          (if (= (remainder i 97) 0) (obj 'mul 1))
+          (loop (+ i 1) (+ acc (obj 'get)))))))

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "datum label zero should be accepted as label syntax, not confused with #nD vector dimensions.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "mutation",
+    "vector"
+  ],
+  "description": "sort! mutation behavior should not infer wrong value/index from let mutation forms.",
+  "expected_to_fail_candidate": true
+}

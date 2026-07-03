@@ -1,0 +1,1 @@
+(make-weak-hash-table)

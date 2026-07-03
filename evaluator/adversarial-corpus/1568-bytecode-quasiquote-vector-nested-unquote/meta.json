@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "optimization-regression", "bytecode", "quasiquote", "vector"],
+  "description": "bytecode quasiquote fallback should preserve nested vector unquote form printing exactly like s7.",
+  "expected_to_fail_candidate": true
+}

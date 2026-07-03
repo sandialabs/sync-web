@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "macro"
+  ],
+  "description": "multiple-value comparator behavior can be hidden behind case, not just if.",
+  "expected_to_fail_candidate": true
+}

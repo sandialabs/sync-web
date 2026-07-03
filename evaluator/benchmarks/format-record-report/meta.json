@@ -1,0 +1,10 @@
+{
+  "category": "format",
+  "description": "Format nested rows with numeric fields and list iteration.",
+  "scale": "20000 rows",
+  "tags": [
+    "benchmark",
+    "format",
+    "report"
+  ]
+}

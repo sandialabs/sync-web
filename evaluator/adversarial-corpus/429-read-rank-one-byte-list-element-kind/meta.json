@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "diagnostic"
+  ],
+  "description": "#u1d list element diagnostic should report pair kind.",
+  "expected_to_fail_candidate": true
+}

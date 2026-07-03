@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "string"
+  ],
+  "description": "call count for b-triggered multiple-value comparator should be operational.",
+  "expected_to_fail_candidate": true
+}

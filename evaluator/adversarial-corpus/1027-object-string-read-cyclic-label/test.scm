@@ -1,0 +1,1 @@
+(object->string (read (open-input-string "#1=(a #1#)")))

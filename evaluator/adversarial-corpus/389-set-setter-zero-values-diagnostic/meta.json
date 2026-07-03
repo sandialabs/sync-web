@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "values",
+    "diagnostic"
+  ],
+  "description": "setter assignment with zero values should check unspecified against procedure-or-#f.",
+  "expected_to_fail_candidate": true
+}

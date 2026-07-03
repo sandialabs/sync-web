@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "mutation",
+    "vector"
+  ],
+  "description": "sort! comparator side effects should preserve arbitrary index-one mutation value 6.",
+  "expected_to_fail_candidate": true
+}

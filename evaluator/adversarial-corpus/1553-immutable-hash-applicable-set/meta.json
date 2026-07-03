@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "hash-table",
+    "immutability"
+  ],
+  "description": "hash-table applicable set! should preserve immutable object errors on optimized paths.",
+  "expected_to_fail_candidate": true
+}

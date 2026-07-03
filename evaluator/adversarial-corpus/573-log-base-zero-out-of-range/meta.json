@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "reader",
+    "numeric",
+    "environment",
+    "procedure-source"
+  ],
+  "description": "log base zero should be out-of-range, not NaN complex.",
+  "expected_to_fail_candidate": true
+}

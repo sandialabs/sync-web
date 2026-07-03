@@ -1,0 +1,1 @@
+(char-numeric? #\1)

@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "macro"
+  ],
+  "description": "mutation index can depend on live comparator arguments.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "environment",
+    "side-effects",
+    "diagnostics"
+  ],
+  "description": "runtime errors hidden behind comparator values path should preserve oracle diagnostics.",
+  "expected_to_fail_candidate": true
+}

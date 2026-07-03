@@ -1,0 +1,1 @@
+(truncate +nan.0)

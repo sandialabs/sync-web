@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "vector",
+    "string"
+  ],
+  "description": "multiple-value sort comparator behavior should not require enumerated vector lengths.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "macro"
+  ],
+  "description": "comparator error behavior through vector setter should match oracle diagnostics.",
+  "expected_to_fail_candidate": true
+}

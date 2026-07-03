@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior"
+  ],
+  "description": "format ~F on infinity should match s7 width spelling.",
+  "expected_to_fail_candidate": true
+}

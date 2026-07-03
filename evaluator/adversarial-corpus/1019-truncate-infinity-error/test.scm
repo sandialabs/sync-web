@@ -1,0 +1,1 @@
+(truncate +inf.0)

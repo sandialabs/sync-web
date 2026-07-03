@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "side-effects",
+    "vector",
+    "environment",
+    "dilambda"
+  ],
+  "description": "higher-order comparator helpers should preserve oracle error diagnostics.",
+  "expected_to_fail_candidate": true
+}

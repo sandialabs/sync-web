@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "reader",
+    "diagnostic"
+  ],
+  "description": "rank-one vector reader with dotted contents should use vector proper-list read-error.",
+  "expected_to_fail_candidate": true
+}

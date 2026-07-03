@@ -1,0 +1,1 @@
+(string->byte-vector "abc")

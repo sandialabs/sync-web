@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "mutation",
+    "vector"
+  ],
+  "description": "sort! length-five comparator mutation should support index-one mutation.",
+  "expected_to_fail_candidate": true
+}

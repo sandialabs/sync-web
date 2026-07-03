@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "diagnostic",
+    "byte-vector"
+  ],
+  "description": "#u2d nested pair element should reach byte-vector type diagnostic with pair kind.",
+  "expected_to_fail_candidate": true
+}

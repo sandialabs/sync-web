@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "reader",
+    "numeric",
+    "environment",
+    "procedure-source"
+  ],
+  "description": "sublet should accept keyword keys like inlet.",
+  "expected_to_fail_candidate": true
+}

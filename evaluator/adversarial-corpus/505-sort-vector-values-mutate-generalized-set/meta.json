@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "macro"
+  ],
+  "description": "comparator mutation can use generalized vector set! rather than vector-set!.",
+  "expected_to_fail_candidate": true
+}

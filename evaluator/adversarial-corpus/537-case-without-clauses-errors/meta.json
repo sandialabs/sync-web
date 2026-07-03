@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag",
+    "diagnostics"
+  ],
+  "description": "case without clauses should be a syntax-error, not unspecified.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "hash"
+  ],
+  "description": "hash-table-ref implicit float-vector access with one real index should report float-vector-ref type error, not too many indices.",
+  "expected_to_fail_candidate": true
+}

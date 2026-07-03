@@ -1,0 +1,25 @@
+(define (score target key)
+  (let ((v (target key)))
+    (cond ((number? v) v)
+          ((char? v) (char->integer v))
+          ((symbol? v) (string-length (symbol->string v)))
+          ((boolean? v) (if v 1 0))
+          (else 0))))
+
+(let ((vec #(3 5 7 11))
+      (lst '(13 17 19 23))
+      (env (inlet 'a 29 'b 31 'c 37 'd 41))
+      (tab (hash-table 'a 43 'b 47 'c 53 'd 59))
+      (str "abcd"))
+  (let loop ((i 0) (acc 0))
+    (if (= i 8200)
+        acc
+        (let ((which (modulo i 5)))
+          (loop (+ i 1)
+                (+ acc
+                   (case which
+                     ((0) (score vec (modulo i 4)))
+                     ((1) (score lst (modulo i 4)))
+                     ((2) (score env (case (modulo i 4) ((0) 'a) ((1) 'b) ((2) 'c) (else 'd))))
+                     ((3) (score tab (case (modulo i 4) ((0) 'a) ((1) 'b) ((2) 'c) (else 'd))))
+                     (else (score str (modulo i 4))))))))))

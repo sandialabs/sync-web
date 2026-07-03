@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag",
+    "diagnostics"
+  ],
+  "description": "list-set! out-of-range should use out-of-range tag, not wrong-type-arg.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "diagnostic",
+    "complex"
+  ],
+  "description": "#i1d complex element diagnostic should report complex number kind.",
+  "expected_to_fail_candidate": true
+}

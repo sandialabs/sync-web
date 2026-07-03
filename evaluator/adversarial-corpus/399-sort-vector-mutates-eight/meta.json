@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector"
+  ],
+  "description": "vector sort! should preserve comparator vector-set! side effect with value 8, not only hard-coded 9.",
+  "expected_to_fail_candidate": true
+}

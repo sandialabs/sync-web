@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "diagnostics",
+    "vector",
+    "typed-vector"
+  ],
+  "description": "typed vector mutation diagnostic should use oracle value kind wording.",
+  "expected_to_fail_candidate": true
+}

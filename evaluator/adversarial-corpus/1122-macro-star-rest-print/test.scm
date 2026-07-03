@@ -1,0 +1,1 @@
+(macro* (:rest r) r)

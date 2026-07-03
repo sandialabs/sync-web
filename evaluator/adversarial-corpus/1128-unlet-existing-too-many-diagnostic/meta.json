@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "diagnostic-payload"
+  ],
+  "description": "unlet arity behavior with env/symbol should match s7.",
+  "expected_to_fail_candidate": true
+}

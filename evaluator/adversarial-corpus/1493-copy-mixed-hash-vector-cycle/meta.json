@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior",
+    "termination"
+  ],
+  "description": "copy of mixed hash-table/vector cycle should terminate and preserve cycle.",
+  "expected_to_fail_candidate": true
+}

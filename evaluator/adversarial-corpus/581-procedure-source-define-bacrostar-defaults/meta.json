@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "reader",
+    "numeric",
+    "environment",
+    "procedure-source"
+  ],
+  "description": "procedure-source should preserve define-bacro* default parameter shape.",
+  "expected_to_fail_candidate": true
+}

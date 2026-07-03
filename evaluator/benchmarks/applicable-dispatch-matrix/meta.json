@@ -1,0 +1,6 @@
+{
+  "category": "dispatch",
+  "description": "Applicable-object dispatch across vectors, lists, environments, hash-tables, and strings.",
+  "scale": "8200 mixed applicable reads",
+  "tags": ["benchmark", "mixed", "applicable", "dispatch"]
+}

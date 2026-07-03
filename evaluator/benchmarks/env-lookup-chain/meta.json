@@ -7,5 +7,5 @@
     "loop"
   ],
   "description": "Repeated lexical lookup through nested environments.",
-  "scale": "300000 iterations, 5 lexical variables"
+  "scale": "90000 iterations, 5 lexical variables"
 }

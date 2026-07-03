@@ -1,0 +1,1 @@
+(inlet '+documentation+ "(catch tag thunk handler) evaluates thunk; if an error occurs that matches the tag (#t matches all), the handler is called" '+signature+ (values (symbol? boolean?) procedure? procedure?) 'value catch 'type procedure? 'arity (3 . 3) 'mutable? #t)

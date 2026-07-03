@@ -1,0 +1,6 @@
+{
+  "category": "macro",
+  "description": "Macro-generated request handlers with case dispatch, authorization, and hash-table mutation.",
+  "scale": "7500 dispatched requests",
+  "tags": ["benchmark", "mixed", "macro", "dispatch", "hash-table"]
+}

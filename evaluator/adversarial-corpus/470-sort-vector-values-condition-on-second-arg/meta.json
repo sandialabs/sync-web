@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector",
+    "mutation"
+  ],
+  "description": "multiple-value sort comparator behavior should respect runtime argument positions, not only source pattern (= a N).",
+  "expected_to_fail_candidate": true
+}

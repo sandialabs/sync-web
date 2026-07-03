@@ -1,0 +1,1 @@
+(error (wrong-type-arg ("~A ~:D argument, ~S, is ~A but should be ~A" varlet 2 1 "an integer" "a symbol")))

@@ -1,0 +1,10 @@
+{
+  "category": "byte-vector",
+  "description": "Rolling byte-vector digest-like workload with deterministic in-memory bytes only.",
+  "scale": "100000 byte rounds",
+  "tags": [
+    "benchmark",
+    "byte-vector",
+    "numeric"
+  ]
+}

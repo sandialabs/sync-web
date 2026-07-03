@@ -1,0 +1,11 @@
+{
+  "category": "hash-table",
+  "description": "Hash table indexed collection of environments with nested vector fields.",
+  "scale": "7000 records, 14000 lookups",
+  "tags": [
+    "benchmark",
+    "hash-table",
+    "environment",
+    "vector"
+  ]
+}

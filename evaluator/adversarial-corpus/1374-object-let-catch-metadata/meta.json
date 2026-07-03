@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "diagnostic-payload"
+  ],
+  "description": "object->let metadata for catch should match s7.",
+  "expected_to_fail_candidate": true
+}

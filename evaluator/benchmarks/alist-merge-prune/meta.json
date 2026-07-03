@@ -1,0 +1,11 @@
+{
+  "category": "list-mutation",
+  "description": "Repeated alist merge, overwrite, tombstone, and prune operations over path-like keys.",
+  "scale": "3500 edits",
+  "tags": [
+    "benchmark",
+    "list",
+    "merge",
+    "state"
+  ]
+}

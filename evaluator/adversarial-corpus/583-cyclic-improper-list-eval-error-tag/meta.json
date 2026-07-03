@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "reader",
+    "numeric",
+    "environment",
+    "procedure-source"
+  ],
+  "description": "cyclic improper list reader/eval should reach s7 syntax-error behavior, not read-error.",
+  "expected_to_fail_candidate": true
+}

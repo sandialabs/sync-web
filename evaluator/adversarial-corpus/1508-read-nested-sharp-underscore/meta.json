@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior"
+  ],
+  "description": "reader nested #_ token behavior should match s7 profile.",
+  "expected_to_fail_candidate": true
+}

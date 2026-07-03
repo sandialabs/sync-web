@@ -1,0 +1,27 @@
+(define routes
+  (list (cons 'get (lambda (user path state)
+                     (let ((node (state path)))
+                       (if node (list 'ok user path node) (list 'missing path)))))
+        (cons 'set (lambda (user path state)
+                     (if (eq? user 'admin)
+                         (begin (set! (state path) (+ (or (state path) 0) 1))
+                                (list 'updated path (state path)))
+                         (list 'denied user path))))
+        (cons 'stat (lambda (user path state)
+                      (list 'stat user path (if (state path) 'present 'absent))))))
+
+(define (route op user path state)
+  (let ((entry (assq op routes)))
+    (if entry
+        ((cdr entry) user path state)
+        (list 'unknown op))))
+
+(let ((state (hash-table 'alpha 1 'beta 2 'gamma 3)))
+  (let loop ((i 0) (score 0) (last '()))
+    (if (= i 4500)
+        (list score last (state 'alpha) (state 'delta))
+        (let* ((op (case (modulo i 4) ((0) 'get) ((1) 'set) ((2) 'stat) (else 'set)))
+               (user (if (= (modulo i 7) 0) 'admin 'guest))
+               (path (case (modulo i 5) ((0) 'alpha) ((1) 'beta) ((2) 'gamma) ((3) 'delta) (else 'epsilon)))
+               (res (route op user path state)))
+          (loop (+ i 1) (+ score (length res)) res)))))

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "applicable",
+    "environment",
+    "diagnostic"
+  ],
+  "description": "environment applicable extra-argument diagnostic should preserve s7 form object, not a string.",
+  "expected_to_fail_candidate": true
+}

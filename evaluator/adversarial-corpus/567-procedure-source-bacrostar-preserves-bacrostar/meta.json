@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag"
+  ],
+  "description": "procedure-source should preserve bacro* source kind/default shape.",
+  "expected_to_fail_candidate": true
+}

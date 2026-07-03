@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "side-effects",
+    "vector",
+    "environment",
+    "dilambda"
+  ],
+  "description": "multiple values can be produced through an applicable dilambda getter.",
+  "expected_to_fail_candidate": true
+}

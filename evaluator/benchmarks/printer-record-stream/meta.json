@@ -1,0 +1,11 @@
+{
+  "category": "printer",
+  "description": "Write many nested record-like objects to an output string.",
+  "scale": "12000 objects",
+  "tags": [
+    "benchmark",
+    "printer",
+    "write",
+    "expression"
+  ]
+}

@@ -1,0 +1,1 @@
+(ceiling +nan.0)

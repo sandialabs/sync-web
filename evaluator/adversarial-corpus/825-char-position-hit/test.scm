@@ -1,0 +1,1 @@
+(char-position #\b "abcd")

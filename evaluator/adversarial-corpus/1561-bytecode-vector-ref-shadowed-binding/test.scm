@@ -1,0 +1,6 @@
+(let ((v #(10 20)))
+  (let ((vector-ref (lambda (x i) 99)))
+    (let loop ((i 0))
+      (if (= i 1)
+          (vector-ref v 0)
+          (loop 1)))))

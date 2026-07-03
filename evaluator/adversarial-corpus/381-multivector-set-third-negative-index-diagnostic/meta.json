@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "vector",
+    "multivector",
+    "diagnostic"
+  ],
+  "description": "3D vector-set! third negative index should report argument 4.",
+  "expected_to_fail_candidate": true
+}

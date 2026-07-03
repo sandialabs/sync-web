@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag",
+    "diagnostics"
+  ],
+  "description": "log with non-number first argument should be wrong-type-arg, not wrong-number-of-args.",
+  "expected_to_fail_candidate": true
+}

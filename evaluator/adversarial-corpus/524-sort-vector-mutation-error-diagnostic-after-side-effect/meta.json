@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "string",
+    "diagnostics",
+    "mutation"
+  ],
+  "description": "operational vector sort should preserve oracle error path when comparator mutates element then continues.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "varlet should reject non-symbol/non-keyword keys rather than defining an empty key.",
+  "expected_to_fail_candidate": true
+}

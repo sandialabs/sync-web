@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag"
+  ],
+  "description": "atan with too many args should error, not ignore extras.",
+  "expected_to_fail_candidate": true
+}

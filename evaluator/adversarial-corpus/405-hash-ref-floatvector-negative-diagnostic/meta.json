@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "hash",
+    "diagnostic",
+    "float-vector"
+  ],
+  "description": "hash-table-ref implicit float-vector negative index diagnostic should match s7.",
+  "expected_to_fail_candidate": true
+}

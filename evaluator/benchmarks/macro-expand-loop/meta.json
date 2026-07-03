@@ -1,7 +1,7 @@
 {
   "category": "macro",
   "description": "Repeated first-class macro expansion plus arithmetic loop.",
-  "scale": "50000 macro-expanded iterations",
+  "scale": "35000 macro-expanded iterations",
   "tags": [
     "benchmark"
   ]

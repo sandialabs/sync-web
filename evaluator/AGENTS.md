@@ -28,6 +28,7 @@ The copied C baseline comes from sync-web's `journal/external/s7/` and should be
 - Future sync-web integration should use a Rust-native API for primitive registration, host values, evaluation, and structured errors.
 - Features currently blacklisted/removed by sync-web's C evaluator should generally be absent in the Rust port, not implemented and removed later.
 - Do not implement filesystem loading, system extras, dynamic C loading, continuations, profiling/hooks, or other host/system features unless explicitly approved.
+- Enforce the system-authority boundary in [`docs/system-authority-guardrails.md`](docs/system-authority-guardrails.md): `s7-rust` must not gain direct filesystem, process, native loading, network, nondeterministic, or broad debug/profiling authority beyond deterministic in-memory evaluation and explicit sync-web-provided host primitives.
 
 ## Validation strategy
 

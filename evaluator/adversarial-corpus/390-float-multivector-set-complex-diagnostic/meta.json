@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "values",
+    "vector",
+    "multivector",
+    "diagnostic"
+  ],
+  "description": "float multivector set! should report complex number kind for complex values.",
+  "expected_to_fail_candidate": true
+}

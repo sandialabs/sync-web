@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag",
+    "diagnostics"
+  ],
+  "description": "procedure-source should reject non-procedure values rather than returning #f.",
+  "expected_to_fail_candidate": true
+}

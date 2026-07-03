@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "diagnostic-payload"
+  ],
+  "description": "format ~:@R should report unknown colon directive like s7.",
+  "expected_to_fail_candidate": true
+}

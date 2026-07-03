@@ -1,0 +1,11 @@
+{
+  "category": "tree",
+  "description": "Copy-on-write nested vector tree updates and lookups, approximating immutable-ish record edits.",
+  "scale": "3000 path updates",
+  "tags": [
+    "benchmark",
+    "path",
+    "vector",
+    "copy"
+  ]
+}

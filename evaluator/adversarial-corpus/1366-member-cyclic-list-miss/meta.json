@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "termination"
+  ],
+  "description": "member on cyclic list miss should terminate like s7.",
+  "expected_to_fail_candidate": true
+}

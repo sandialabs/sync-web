@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector"
+  ],
+  "description": "multiple-value comparator compatibility must match oracle comparator call count for condition on b.",
+  "expected_to_fail_candidate": true
+}

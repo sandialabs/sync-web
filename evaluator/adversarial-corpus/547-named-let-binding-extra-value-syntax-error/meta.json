@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag"
+  ],
+  "description": "malformed named-let binding with too many values should syntax-error, not silently use first value.",
+  "expected_to_fail_candidate": true
+}

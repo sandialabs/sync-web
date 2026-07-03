@@ -7,5 +7,5 @@
     "mutation"
   ],
   "description": "Vector allocation, indexed mutation, indexed read, and integer accumulation.",
-  "scale": "40000 vector writes + 40000 reads"
+  "scale": "5000 vector writes + 5000 reads"
 }

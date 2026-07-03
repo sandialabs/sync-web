@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "broad-coverage",
+    "semantic-error-behavior",
+    "termination"
+  ],
+  "description": "number->string should reject radix below 2 instead of hanging.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,10 @@
+(let build ((i 0) (s "("))
+  (if (= i 5000)
+      (let* ((exprs (read (open-input-string (string-append s ")")))))
+        (let read-loop ((xs exprs) (acc 0))
+          (if (null? xs)
+              acc
+              (let ((x (car xs)))
+                (read-loop (cdr xs) (+ acc (cadr x) (caddr x)))))))
+      (build (+ i 1)
+             (string-append s "(node " (number->string i) " " (number->string (+ i 1)) " \"payload\") "))))

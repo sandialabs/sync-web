@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "set! of list procedure application should produce no-setter rather than generic wrong-type-arg.",
+  "expected_to_fail_candidate": true
+}

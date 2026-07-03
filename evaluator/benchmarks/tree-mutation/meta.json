@@ -1,7 +1,7 @@
 {
   "category": "list-mutation",
   "description": "Association-list mutation and lookup workload resembling small object/state maps.",
-  "scale": "15000 inserts",
+  "scale": "4000 inserts",
   "tags": [
     "benchmark"
   ]

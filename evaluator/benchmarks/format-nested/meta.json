@@ -1,7 +1,7 @@
 {
   "category": "format",
   "description": "Nested format over list data; stresses printer/format paths.",
-  "scale": "3000 rows",
+  "scale": "18000 rows",
   "tags": [
     "benchmark"
   ]

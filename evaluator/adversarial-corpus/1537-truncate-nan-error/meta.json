@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior",
+    "diagnostic-payload"
+  ],
+  "description": "truncate NaN should reject out-of-range like s7.",
+  "expected_to_fail_candidate": true
+}

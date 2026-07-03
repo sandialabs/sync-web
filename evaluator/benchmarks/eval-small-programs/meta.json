@@ -1,0 +1,10 @@
+{
+  "category": "eval",
+  "description": "Repeated eval of small in-memory expressions in a shared environment.",
+  "scale": "25000 evals",
+  "tags": [
+    "benchmark",
+    "eval",
+    "environment"
+  ]
+}

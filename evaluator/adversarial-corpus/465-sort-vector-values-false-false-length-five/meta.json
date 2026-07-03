@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector",
+    "typed-vector"
+  ],
+  "description": "vector sort multiple-value comparator behavior should generalize beyond length-four/source-shaped cases.",
+  "expected_to_fail_candidate": true
+}

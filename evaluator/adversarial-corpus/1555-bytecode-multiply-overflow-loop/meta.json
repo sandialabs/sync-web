@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "bytecode",
+    "named-let",
+    "integer-overflow",
+    "multiplication"
+  ],
+  "description": "bytecode integer multiply fast paths should preserve s7 overflow behavior in named-let loops.",
+  "expected_to_fail_candidate": true
+}

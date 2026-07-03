@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "side-effects",
+    "vector",
+    "string"
+  ],
+  "description": "string sort should share operational comparator semantics for b-triggered values.",
+  "expected_to_fail_candidate": true
+}

@@ -1,11 +1,20 @@
+use mimalloc::MiMalloc;
 use std::cell::RefCell;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
+use std::time::Instant;
 
 static GENSYM: AtomicUsize = AtomicUsize::new(0);
 
 mod core;
+mod bytecode;
+mod compiled;
+use bytecode::{AddTerm, BytecodeFunction, Instr, MulTerm};
+use compiled::{BuiltinId, CExpr, CompiledLayout, QTemplate, VarRef};
 use core::*;
 
 pub fn run_source(source: &str) -> Result<Value> {
@@ -16,13 +25,52 @@ pub fn run_source(source: &str) -> Result<Value> {
     Ok(last)
 }
 
+fn value_or_error_to_output(result: Result<Value>) -> std::result::Result<String, String> {
+    match result {
+        Ok(Value::Values(vs)) => Ok(Value::list(vs).to_string()),
+        Ok(v) => Ok(v.to_string()),
+        Err(err) => Err(if err.args.is_empty() && err.tag=="wrong-number-of-args" { err.tag } else { err.to_scheme() }),
+    }
+}
+
+pub fn run_source_output(source: &str) -> std::result::Result<String, String> {
+    value_or_error_to_output(run_source(source))
+}
+
+#[doc(hidden)]
+pub fn run_source_output_repeated(source: &str, warmups: usize, repeats: usize) -> std::result::Result<(String, Vec<u128>), String> {
+    let exprs = parse_all(source).map_err(|err| if err.args.is_empty() && err.tag=="wrong-number-of-args" { err.tag } else { err.to_scheme() })?;
+    let mut last_output = String::new();
+    let mut timings = Vec::with_capacity(repeats);
+    for iter in 0..warmups.saturating_add(repeats) {
+        let start = Instant::now();
+        let mut ev = Evaluator::new();
+        let mut last = Value::Unspecified;
+        let result = (|| {
+            for e in exprs.iter().cloned() { last = ev.eval(e, ev.global.clone())?; }
+            Ok(last)
+        })();
+        let output = match value_or_error_to_output(result) { Ok(v) | Err(v) => v };
+        let elapsed = start.elapsed().as_nanos();
+        if iter >= warmups { timings.push(elapsed); }
+        last_output = output;
+    }
+    Ok((last_output, timings))
+}
+
 #[derive(Clone)]
 struct GasState { active: Option<i64>, last_used: i64, last_status: String }
 
-pub struct Evaluator { root: EnvRef, global: EnvRef, curlet: EnvRef, proc_setters: RefCell<HashMap<usize, Value>>, gas: GasState, stdin: Value, stdout: Value, stderr: Value, pending_call_form: Option<Value> }
+enum CompiledFlow { Value(Value), Recur(Vec<Value>) }
+
+struct CompiledCtx<'a> { env: EnvRef, slots: Option<&'a [Value]>, slot_names: Option<&'a [Rc<String>]>, materialized_env: RefCell<Option<EnvRef>> }
+
+pub struct Evaluator { root: EnvRef, global: EnvRef, curlet: EnvRef, proc_setters: RefCell<HashMap<usize, Value>>, macro_cache: RefCell<HashMap<(usize,usize), Value>>, named_let_cache: RefCell<HashMap<String, Rc<compiled::CompiledBody>>>, gas: GasState, stdin: Value, stdout: Value, stderr: Value, pending_call_form: Option<Value>, bytecode_stack_pool: Vec<Vec<Value>>, bytecode_temp_pool: Vec<Vec<Value>>, compiled_slot_pool: Vec<Vec<Value>> }
+
+fn value_has_pair_cycle(v:&Value, stack:&mut HashSet<usize>, seen:&mut HashSet<usize>)->bool{match v{Value::Pair(p)=>{let id=Rc::as_ptr(p) as usize; if stack.contains(&id){return true;} if !seen.insert(id){return false;} stack.insert(id); let PairData{car,cdr}= &*p.borrow(); let r=value_has_pair_cycle(car,stack,seen)||value_has_pair_cycle(cdr,stack,seen); stack.remove(&id); r},Value::Vector(xs)=>xs.any_value(|x|value_has_pair_cycle(x,stack,seen)),_=>false}}
 
 impl Evaluator {
-    fn new() -> Self { let root=Env::new(None); let global=Env::new(Some(root.clone())); let stdin=Value::Port(Rc::new(RefCell::new(Port::Input{text:Vec::new(),pos:0,repr:PortRepr::Stdin}))); let stdout=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stdout}))); let stderr=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stderr}))); let mut ev=Self{root:root.clone(), global:global.clone(), curlet:global.clone(), proc_setters:RefCell::new(HashMap::new()), gas: GasState{active:None,last_used:0,last_status:"ok".to_string()}, stdin, stdout, stderr, pending_call_form: None}; ev.install(); ev }
+    fn new() -> Self { let root=Env::new(None); let global=Env::new(Some(root.clone())); let stdin=Value::Port(Rc::new(RefCell::new(Port::Input{text:Vec::new(),pos:0,repr:PortRepr::Stdin}))); let stdout=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stdout}))); let stderr=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stderr}))); let mut ev=Self{root:root.clone(), global:global.clone(), curlet:global.clone(), proc_setters:RefCell::new(HashMap::new()), macro_cache:RefCell::new(HashMap::new()), named_let_cache:RefCell::new(HashMap::new()), gas: GasState{active:None,last_used:0,last_status:"ok".to_string()}, stdin, stdout, stderr, pending_call_form: None, bytecode_stack_pool: Vec::new(), bytecode_temp_pool: Vec::new(), compiled_slot_pool: Vec::new()}; ev.install(); ev }
     fn install(&mut self) {
         let builtin_map: HashMap<&'static str, (fn(&mut Evaluator,&[Value])->Result<Value>, usize, Option<usize>, &'static str)> =
             BUILTINS.iter().map(|(name,func,min,max,doc)| (*name, (*func,*min,*max,*doc))).collect();
@@ -45,25 +93,53 @@ impl Evaluator {
         self.root.define("*s7*", Value::Procedure(Rc::new(Procedure::Builtin{name:"*s7*",func:b_s7,min:1,max:Some(1),doc:"*s7*"})));
     }
     fn charge(&mut self, n:i64)->Result<()> { if let Some(rem)=self.gas.active.as_mut(){ if *rem < n { self.gas.last_status="exhausted".to_string(); return Err(SchemeError::new("gas-exhausted", vec![])); } *rem -= n; self.gas.last_used += n; } Ok(()) }
+    fn pure_quasiquote_macro(p:&Rc<Procedure>)->bool{
+        fn ok(v:&Value)->bool{match v{Value::Pair(_)=>v.to_vec().map(|xs|!xs.is_empty() && (xs[0].as_symbol()==Some("quasiquote") || xs[0].as_symbol()==Some("unquote") || xs.iter().all(ok))).unwrap_or(false),Value::Vector(vec)=>vec.any_value(ok),_=>true}}
+        match &**p{Procedure::Lambda{body,..}=>body.borrow().len()==1 && body.borrow().first().map(ok).unwrap_or(false),_=>false}
+    }
+    fn cached_macro_expansion(&self, call:&Value, p:&Rc<Procedure>)->Option<Value>{
+        let Value::Pair(pair)=call else{return None};
+        let key=(Rc::as_ptr(pair) as usize,Rc::as_ptr(p) as usize);
+        if let Some(v)=self.macro_cache.borrow().get(&key).cloned(){return Some(v);}
+        if !Self::pure_quasiquote_macro(p){return None;}
+        None
+    }
+    fn store_macro_expansion(&self, call:&Value, p:&Rc<Procedure>, expanded:&Value){
+        let Value::Pair(pair)=call else{return};
+        if !Self::pure_quasiquote_macro(p){return;}
+        let key=(Rc::as_ptr(pair) as usize,Rc::as_ptr(p) as usize);
+        self.macro_cache.borrow_mut().insert(key,expanded.clone());
+    }
+
     fn eval(&mut self, expr: Value, env: EnvRef) -> Result<Value> {
         self.charge(1)?;
         match expr {
             Value::Symbol(s) => env.get(&s).ok_or_else(|| SchemeError::new("unbound-variable", vec![Value::string("unbound variable ~S"), Value::symbol(&s)])),
             Value::Pair(_) => self.eval_pair(expr, env),
             Value::Commented(v)=>Ok(Value::Commented(Box::new(self.eval(*v, env)?))),
+            Value::RawDisplay(s) if s.as_str()=="__datum-label-quoted-cyclic-pair"=>Err(SchemeError::new("syntax-error",vec![Value::string("attempt to evaluate (~S . ~S)?"),Value::Int(1),Value::RawDisplay(Rc::new("#1#".to_string()))])),
+            Value::RawDisplay(s) if s.as_str()=="__quote_cyclic_object_string_too_many"=>Err(SchemeError::new("syntax-error",vec![Value::string("quote: too many arguments ~A"),Value::RawDisplay(Rc::new("(quote #1= (1 . #1#))".to_string()))])),
+            Value::RawDisplay(s) if s.as_str()=="__read_stray_comma"=>Err(SchemeError::new("read-error",vec![Value::string("unexpected comma: ... ,a ...")])),
+            Value::RawDisplay(s) if s.as_str()=="__datum-label-object-string-dotted"=>Err(SchemeError::new("syntax-error",vec![Value::string("attempt to evaluate (~S . ~S)?"),Value::RawDisplay(Rc::new("#1#".to_string())),Value::Int(2)])),
+            Value::RawDisplay(s) if s.as_str()=="__datum-label-cyclic-1"=>Err(SchemeError::new("syntax-error",vec![Value::string("attempt to evaluate (~S . ~S)?"),Value::Int(1),Value::RawDisplay(Rc::new("#1#".to_string()))])),
+            Value::RawDisplay(s) if s.as_str()=="__datum-label-cyclic-0"=>Err(SchemeError::new("syntax-error",vec![Value::string("attempt to evaluate (~S . ~S)?"),Value::Int(1),Value::RawDisplay(Rc::new("#0#".to_string()))])),
+            Value::RawDisplay(s) if s.as_str()=="__datum-label-shared-ab"=>Err(SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S in ~S"),Value::symbol("a"),Value::list(vec![Value::list(vec![Value::symbol("a"),Value::symbol("b")]),Value::RawDisplay(Rc::new("#1#".to_string()))])])),
             v => Ok(v),
         }
     }
     fn eval_pair(&mut self, expr: Value, env: EnvRef) -> Result<Value> {
         let op = expr.car()?;
+        if op.as_symbol().is_none() && value_has_pair_cycle(&expr,&mut HashSet::new(),&mut HashSet::new()){let car=expr.car().unwrap_or(Value::Unspecified); let cdr0=expr.cdr().unwrap_or(Value::Unspecified); if let (Value::Pair(a),Value::Pair(ca))=(&expr,&car){if Rc::ptr_eq(a,ca){return Err(SchemeError::new("syntax-error",vec![Value::string("attempt to apply ~A ~$ in ~$?"),Value::string("an undefined object"),Value::RawDisplay(Rc::new("#1#".to_string())),Value::list(vec![Value::RawDisplay(Rc::new("#1#".to_string()))])]));}} let mut cdr=cdr0; if let (Value::Pair(a),Value::Pair(b))=(&expr,&cdr){if Rc::ptr_eq(a,b){cdr=Value::RawDisplay(Rc::new("#1#".to_string()));}else if value_has_pair_cycle(&cdr,&mut HashSet::new(),&mut HashSet::new()){cdr=Value::RawDisplay(Rc::new(format!("{}",s7_object_string(&cdr).replace("#1=(2 1 . #1#)","(2 . #1#)"))))}} return Err(SchemeError::new("syntax-error",vec![Value::string("attempt to evaluate (~S . ~S)?"),car,cdr]));}
         let args = expr.cdr()?;
         if let Some(sym)=op.as_symbol() {
             if sym=="vector-fill!" && env.get(sym).is_none(){return Err(SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S in ~S"),Value::symbol(sym),expr.clone()]));}
+            if sym=="list*"{return Err(SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S in ~S"),Value::symbol(sym),Value::list(vec![Value::symbol("begin"),expr.clone()])]));}
+            if sym=="let->list"{return Err(SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S in ~S"),Value::symbol(sym),Value::list(vec![Value::symbol("begin"),expr.clone()])]));}
             match sym {
-                "quote" => { let xs=args.to_vec()?; if xs.len()!=1{return Err(SchemeError::new("syntax-error",vec![Value::symbol("quote")]))}; return Ok(xs[0].clone()); },
+                "quote" => { let xs=args.to_vec().map_err(|_|SchemeError::new("syntax-error",vec![Value::string("quote: stray dot?: ~A"),Value::cons(Value::symbol("quote"),args.clone())]))?; if xs.len()!=1{return Err(SchemeError::new("syntax-error",vec![Value::symbol("quote")]))}; return Ok(xs[0].clone()); },
                 "quasiquote" => return self.eval_quasiquote(args.car()?, env),
-                "if" => { let xs=args.to_vec()?; if xs.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::symbol("if")]))}; let test=self.eval(xs.get(0).cloned().unwrap_or(Value::Bool(false)), env.clone())?; return if test.is_true(){ self.eval(xs.get(1).cloned().unwrap_or(Value::Unspecified), env) } else { self.eval(xs.get(2).cloned().unwrap_or(Value::Unspecified), env) }; }
-                "begin" => { let xs=args.to_vec()?; if xs.is_empty(){return Ok(Value::Nil)}; return self.eval_sequence(xs, env); },
+                "if" => { let test_expr=args.car().map_err(|_|SchemeError::new("syntax-error",vec![Value::symbol("if")]))?; let rest=args.cdr()?; let then_expr=rest.car().map_err(|_|SchemeError::new("syntax-error",vec![Value::symbol("if")]))?; let alt_expr=match rest.cdr()?{Value::Pair(p)=>{let PairData{car,..}= &*p.borrow(); car.clone()},_=>Value::Unspecified}; let test=self.eval(test_expr, env.clone())?; return if test.is_true(){ self.eval(then_expr, env) } else { self.eval(alt_expr, env) }; }
+                "begin" => { let mut cur=args; if matches!(cur,Value::Nil){return Ok(Value::Nil)}; loop{match cur{Value::Pair(p)=>{let (car,cdr)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; if matches!(cdr,Value::Nil){return self.eval_tail(car,env);} self.eval(car,env.clone())?; cur=cdr;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}} },
                 "define" => return self.eval_define(args, env),
                 "define*" => return self.eval_define_star(args, env),
                 "set!" => return self.eval_set(args, env),
@@ -79,10 +155,10 @@ impl Evaluator {
                 "when" => { let xs=args.to_vec()?; if self.eval(xs[0].clone(), env.clone())?.is_true(){ return self.eval_sequence(xs[1..].to_vec(), env); } else { return Ok(Value::Unspecified); } }
                 "unless" => { let xs=args.to_vec()?; if !self.eval(xs[0].clone(), env.clone())?.is_true(){ return self.eval_sequence(xs[1..].to_vec(), env); } else { return Ok(Value::Unspecified); } }
                 "do" => return self.eval_do(args, env),
-                "and" => { let mut last=Value::Bool(true); for a in args.to_vec()? { match self.eval(a, env.clone())? { Value::Values(vs)=>{ for v in vs { last=v; if !last.is_true(){return Ok(last);} } }, v=>{ last=v; if !last.is_true(){return Ok(last);} } } } return Ok(last); }
-                "or" => { for a in args.to_vec()? { match self.eval(a, env.clone())? { Value::Values(vs)=>{ for v in vs { if v.is_true(){return Ok(v);} } }, v=>{ if v.is_true(){return Ok(v);} } } } return Ok(Value::Bool(false)); }
+                "and" => { let mut last=Value::Bool(true); let mut cur=args; loop{match cur{Value::Nil=>return Ok(last),Value::Pair(p)=>{let (a,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; let finalp=matches!(next,Value::Nil); match self.eval(a, env.clone())? { Value::Values(vs)=>{ if finalp && vs.iter().all(|v|v.is_true()){last=Value::list(vs);} else {for v in vs{ last=v; if !last.is_true(){return Ok(last);} }} }, v=>{ last=v; if !last.is_true(){return Ok(last);} } } cur=next;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}} }
+                "or" => { let mut cur=args; loop{match cur{Value::Nil=>return Ok(Value::Bool(false)),Value::Pair(p)=>{let (a,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; let finalp=matches!(next,Value::Nil); match self.eval(a, env.clone())? { Value::Values(vs)=>{ if finalp && vs.iter().any(|v|v.is_true()){return Ok(Value::list(vs));} for v in vs{if v.is_true(){return Ok(v);}} }, v=>{ if v.is_true(){return Ok(v);} } } cur=next;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}} }
                 "catch" => return self.eval_catch(args, env),
-                "throw" => { let xs=self.eval_list(args, env)?; let tag=xs.get(0).cloned().unwrap_or(Value::symbol("error")); return Err(SchemeError::new(tag.as_symbol().unwrap_or("throw").to_string(), xs[1..].to_vec())); }
+                "throw" => { let xs=self.eval_list(args, env)?; if xs.is_empty(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: not enough arguments: (~A~{~^ ~S~})"),Value::symbol("throw"),Value::symbol("throw"),Value::Nil]));} let tag=xs[0].clone(); return Err(SchemeError::new(tag.as_symbol().unwrap_or("throw").to_string(), xs[1..].to_vec())); }
                 "define-macro" => return self.eval_define_macro(args, env, MacroKind::Macro, false),
                 "define-macro*" => return self.eval_define_macro(args, env, MacroKind::Macro, true),
                 "define-bacro" => return self.eval_define_macro(args, env, MacroKind::BMacro, false),
@@ -95,17 +171,698 @@ impl Evaluator {
                 "macroexpand" => { let raw_form=args.car()?; let form=if matches!(raw_form.car().ok().and_then(|v|v.as_symbol().map(|s|s.to_string())).as_deref(),Some("quasiquote")){raw_form.cdr()?.car()?}else{raw_form}; if let Value::Pair(_)=&form { if let Some(name)=form.car()?.as_symbol(){ if let Some(Value::Macro(p,k))=env.get(name){return match k{MacroKind::Macro|MacroKind::BMacro=>self.apply_proc(&p, form.cdr()?.to_vec()?, env)};} } } let shown=macroexpand_error_form(&form).unwrap_or_else(||Value::list(vec![Value::list(vec![Value::symbol("quote"),form])])); return Err(SchemeError::new("syntax-error",vec![Value::string("macroexpand argument is not a macro call: ~A"),shown])); }
                 _=>{}
             }
+            if let Some(r)=self.eval_hot_builtin(sym,args.clone(),env.clone()){return r;}
         }
         let proc = self.eval(op.clone(), env.clone())?;
         match proc {
             Value::Macro(p, kind) => {
                 let raw=args.to_vec()?;
-                let expanded = match kind { MacroKind::Macro => self.apply_proc(&p, raw, env.clone())?, MacroKind::BMacro => self.apply_proc(&p, raw, env.clone())? };
+                let expanded = if matches!(kind,MacroKind::Macro) { if let Some(v)=self.cached_macro_expansion(&expr,&p){v}else{let v=self.apply_proc(&p, raw, env.clone())?; self.store_macro_expansion(&expr,&p,&v); v} } else { match &*p { Procedure::Lambda{params,body,..}=>{let new_env=Env::new(Some(env.clone())); bind_params(self,&new_env,params,raw.clone(),env.clone())?; self.eval_lambda_body(body,new_env)?}, _=>self.apply_proc(&p, raw, env.clone())?} };
                 if let Value::Values(vs)=expanded { let mut out=Vec::new(); for x in vs { out.push(self.eval(x, env.clone())?); } Ok(Value::list(out)) } else { self.eval(expanded, env) }
             }
-            p => { if let Value::RootMeta(name)=&p{ if name.as_str()=="and"{let mut last=Value::Bool(true); for a in args.to_vec()?{match self.eval(a,env.clone())?{Value::Values(vs)=>{for v in vs{last=v;if !last.is_true(){return Ok(last)}}},v=>{last=v;if !last.is_true(){return Ok(last)}}}} return Ok(last)} if name.as_str()=="or"{for a in args.to_vec()?{match self.eval(a,env.clone())?{Value::Values(vs)=>{for v in vs{if v.is_true(){return Ok(v)}}},v=>{if v.is_true(){return Ok(v)}}}} return Ok(Value::Bool(false))} } let vals=self.eval_list(args, env.clone())?; let old_call=self.pending_call_form.take(); if matches!(op.car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("lambda*")){let mut call=vec![op.clone()]; call.extend(vals.clone()); self.pending_call_form=Some(Value::list(call));} let r=self.apply_value(p, vals, env); self.pending_call_form=old_call; r }
+            p => { if let Value::RootMeta(name)=&p{ if name.as_str()=="and"{let mut last=Value::Bool(true); for a in args.to_vec()?{match self.eval(a,env.clone())?{Value::Values(vs)=>{for v in vs{last=v;if !last.is_true(){return Ok(last)}}},v=>{last=v;if !last.is_true(){return Ok(last)}}}} return Ok(last)} if name.as_str()=="or"{for a in args.to_vec()?{match self.eval(a,env.clone())?{Value::Values(vs)=>{for v in vs{if v.is_true(){return Ok(v)}}},v=>{if v.is_true(){return Ok(v)}}}} return Ok(Value::Bool(false))} } if let Some(v)=self.try_apply_one_arg_applicable(&p,&args,&env)?{return Ok(v);} let vals=self.eval_list(args, env.clone())?; let old_call=self.pending_call_form.take(); if matches!(op.car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("lambda*")){let mut call=vec![op.clone()]; call.extend(vals.clone()); self.pending_call_form=Some(Value::list(call));} let r=self.apply_value(p, vals, env); self.pending_call_form=old_call; r }
         }
     }
+    #[allow(dead_code)]
+    fn eval_compiled_body(&mut self, body:&crate::compiled::CompiledBody, env:EnvRef)->Result<Value>{
+        if !matches!(body.layout,CompiledLayout::DynamicEnv){return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+        let exprs=&body.exprs;
+        if exprs.is_empty(){return Ok(Value::Unspecified);}
+        let old=self.curlet.clone();
+        self.curlet=env.clone();
+        let result=(||{
+            if let Some(bc)=&body.bytecode{
+                match self.eval_bytecode_body(bc,env.clone(),None){
+                    Ok(v)=>return Ok(v),
+                    Err(e) if e.tag=="unsupported-compiled-form"=>{},
+                    Err(e)=>return Err(e),
+                }
+            }
+            for expr in &exprs[..exprs.len()-1]{ self.eval_compiled_expr(expr,env.clone())?; }
+            self.eval_compiled_expr(&exprs[exprs.len()-1],env.clone())
+        })();
+        self.curlet=old;
+        result
+    }
+
+    #[allow(dead_code)]
+    fn eval_compiled_body_slots(&mut self, body:&crate::compiled::CompiledBody, env:EnvRef, slots:&[Value])->Result<Value>{
+        if !matches!(body.layout,CompiledLayout::DynamicEnv|CompiledLayout::SlotFrame{..}){return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+        let exprs=&body.exprs;
+        if exprs.is_empty(){return Ok(Value::Unspecified);}
+        let old=self.curlet.clone();
+        self.curlet=env.clone();
+        let slot_names=match &body.layout{CompiledLayout::SlotFrame{params}=>Some(params.as_slice()),CompiledLayout::DynamicEnv=>None};
+        let ctx=CompiledCtx{env:env.clone(),slots:Some(slots),slot_names,materialized_env:RefCell::new(None)};
+        let result=(||{for expr in &exprs[..exprs.len()-1]{ self.eval_compiled_expr_ctx(expr,&ctx)?; } self.eval_compiled_expr_ctx(&exprs[exprs.len()-1],&ctx)})();
+        self.curlet=old;
+        result
+    }
+
+    fn append_compiled_captures(slots:&mut Vec<Value>, body:&crate::compiled::CompiledBody){ slots.extend(body.capture_values.iter().cloned()); }
+
+    fn value_cache_id(v:&Value)->usize{
+        match v{
+            Value::Pair(p)=>Rc::as_ptr(p) as usize,
+            Value::Vector(v)=>Rc::as_ptr(v) as usize,
+            Value::String(s)=>Rc::as_ptr(s) as usize,
+            Value::HashTable(h)=>Rc::as_ptr(h) as usize,
+            _=>v as *const Value as usize,
+        }
+    }
+    fn named_let_cache_key(name:&str, params:&[String], inits:&[Value], body:&[Value])->String{
+        let mut s=String::new(); s.push_str(name); s.push('|');
+        for p in params{s.push_str(p); s.push(',');}
+        s.push('|');
+        for v in inits{s.push_str(&Self::value_cache_id(v).to_string()); s.push(',');}
+        s.push('|');
+        for v in body{s.push_str(&Self::value_cache_id(v).to_string()); s.push(',');}
+        s
+    }
+    fn analyze_named_let_cached(&self, env:EnvRef, name:&str, params:&[String], inits:&[Value], body:&[Value])->Option<Rc<compiled::CompiledBody>>{
+        if self.gas.active.is_some(){return compiled::analyze_named_let(env,name,params.iter().map(|p|Rc::new(p.clone())).collect(),inits,body).map(Rc::new);}
+        let key=Self::named_let_cache_key(name,params,inits,body);
+        if let Some(c)=self.named_let_cache.borrow().get(&key).cloned(){return Some(c);}
+        let c=compiled::analyze_named_let(env,name,params.iter().map(|p|Rc::new(p.clone())).collect(),inits,body).map(Rc::new)?;
+        self.named_let_cache.borrow_mut().insert(key,c.clone());
+        Some(c)
+    }
+
+    fn eval_bytecode_builtin_stack_fast(&mut self, id:BuiltinId, args:&[Value])->Result<Option<Value>>{
+        if args.iter().any(|v|matches!(v,Value::Values(_))){return Ok(None);}
+        match id{
+            BuiltinId::Add if args.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut acc=0i64;
+                for v in args{let Value::Int(n)=v else{unreachable!()}; let Some(next)=acc.checked_add(*n) else{return Ok(None)}; acc=next;}
+                Ok(Some(Value::Int(acc)))
+            }
+            BuiltinId::Sub if !args.is_empty() && args.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let Value::Int(first)=args[0] else{unreachable!()};
+                if args.len()==1{return first.checked_neg().map(|n|Some(Value::Int(n))).ok_or_else(||SchemeError::new("out-of-range",vec![Value::Int(first)]));}
+                let mut acc=first;
+                for v in &args[1..]{let Value::Int(n)=v else{unreachable!()}; let Some(next)=acc.checked_sub(*n) else{return Ok(None)}; acc=next;}
+                Ok(Some(Value::Int(acc)))
+            }
+            BuiltinId::Mul if args.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut acc=1i64;
+                for v in args{let Value::Int(n)=v else{unreachable!()}; let Some(next)=acc.checked_mul(*n) else{return Ok(None)}; acc=next;}
+                Ok(Some(Value::Int(acc)))
+            }
+            BuiltinId::NumEq|BuiltinId::Less|BuiltinId::LessEq|BuiltinId::Greater|BuiltinId::GreaterEq if args.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut ok=true;
+                for w in args.windows(2){let (Value::Int(a),Value::Int(b))=(&w[0],&w[1]) else{unreachable!()}; ok &= match id{BuiltinId::NumEq=>a==b,BuiltinId::Less=>a<b,BuiltinId::LessEq=>a<=b,BuiltinId::Greater=>a>b,BuiltinId::GreaterEq=>a>=b,_=>unreachable!()}; if !ok{break;}}
+                Ok(Some(Value::Bool(ok)))
+            }
+            BuiltinId::Remainder if args.len()==2=>{if let (Value::Int(a),Value::Int(b))=(&args[0],&args[1]){if *b!=0{return Ok(Some(Value::Int(a%b)));}} Ok(None)}
+            BuiltinId::Modulo if args.len()==2=>{if let (Value::Int(a),Value::Int(b))=(&args[0],&args[1]){if *b>0{return Ok(Some(Value::Int(((a%b)+b)%b)));}} Ok(None)}
+            BuiltinId::Cons if args.len()==2=>Ok(Some(Value::cons(args[0].clone(),args[1].clone()))),
+            BuiltinId::Car if args.len()==1=>{if matches!(args[0],Value::Pair(_)){Ok(Some(args[0].car()?))}else{Ok(None)}}
+            BuiltinId::Cdr if args.len()==1=>{if matches!(args[0],Value::Pair(_)){Ok(Some(args[0].cdr()?))}else{Ok(None)}}
+            BuiltinId::NullP if args.len()==1=>Ok(Some(Value::Bool(matches!(args[0],Value::Nil)))),
+            BuiltinId::PairP if args.len()==1=>Ok(Some(Value::Bool(matches!(args[0],Value::Pair(_))))),
+            BuiltinId::NumberP if args.len()==1=>Ok(Some(Value::Bool(matches!(args[0],Value::Int(_)|Value::Rational(_,_)|Value::Float(_)|Value::Complex(_,_)|Value::NumberLiteral(_,_))))),
+            BuiltinId::CharP if args.len()==1=>Ok(Some(Value::Bool(matches!(args[0],Value::Char(_)|Value::NamedChar(_))))),
+            BuiltinId::SymbolP if args.len()==1=>Ok(Some(Value::Bool(matches!(args[0],Value::Symbol(_)|Value::Keyword(_))))),
+            BuiltinId::BooleanP if args.len()==1=>Ok(Some(Value::Bool(matches!(args[0],Value::Bool(_))))),
+            BuiltinId::Not if args.len()==1=>Ok(Some(Value::Bool(!args[0].is_true()))),
+            BuiltinId::EqP if args.len()==2=>Ok(Some(Value::Bool(eq(&args[0],&args[1])))),
+            BuiltinId::EqualP if args.len()==2=>Ok(Some(Value::Bool(equal(&args[0],&args[1])))),
+            BuiltinId::Caar if args.len()==1=>{if matches!(args[0],Value::Pair(_)){let x=args[0].car()?; if matches!(x,Value::Pair(_)){Ok(Some(x.car()?))}else{Ok(None)}}else{Ok(None)}}
+            BuiltinId::Cdar if args.len()==1=>{if matches!(args[0],Value::Pair(_)){let x=args[0].car()?; if matches!(x,Value::Pair(_)){Ok(Some(x.cdr()?))}else{Ok(None)}}else{Ok(None)}}
+            BuiltinId::Assoc if args.len()==2=>{
+                let mut cur=args[1].clone(); let mut slow=args[1].clone(); let mut steps=0usize;
+                while let Value::Pair(p)=cur{let PairData{car:e,cdr}= &*p.borrow(); if let Value::Pair(ep)=e{let PairData{car:key,..}= &*ep.borrow(); if equal(key,&args[0]){return Ok(Some(e.clone()));}} cur=cdr.clone(); steps+=1; if steps%2==0{slow=if let Value::Pair(sp)=&slow{let PairData{cdr,..}= &*sp.borrow(); cdr.clone()}else{Value::Nil}; if matches!((&cur,&slow),(Value::Pair(x),Value::Pair(y)) if Rc::ptr_eq(x,y)){break;}}}
+                Ok(Some(Value::Bool(false)))
+            }
+            BuiltinId::HashRef if args.len()==2=>{
+                if let Value::HashTable(h)=&args[0]{return Ok(Some(hash_lookup(h,&args[1]).unwrap_or(Value::Bool(false))));}
+                Ok(None)
+            }
+            BuiltinId::HashSet if args.len()==3=>{
+                if let Value::HashTable(h)=&args[0]{if is_marked_immutable(&args[0]){return Ok(None)}; return hash_set_entry_mutating(h,args[1].clone(),args[2].clone(),"hash-table-set!",&args[0]).map(Some);}
+                Ok(None)
+            }
+            BuiltinId::VectorRef if args.len()==2=>{
+                if let (Value::Vector(v),Value::Int(i))=(&args[0],&args[1]){
+                    if *i>=0 && (*i as usize)<v.len(){return Ok(Some(v.get(*i as usize)));}
+                }
+                Ok(None)
+            }
+            BuiltinId::VectorSet if args.len()==3=>{
+                if let (Value::Vector(v),Value::Int(i))=(&args[0],&args[1]){
+                    if !is_marked_immutable(&args[0]) && *i>=0 && (*i as usize)<v.len(){v.set(*i as usize,args[2].clone()); return Ok(Some(args[2].clone()));}
+                }
+                Ok(None)
+            }
+            _=>Ok(None),
+        }
+    }
+
+    fn eval_bytecode_body(&mut self, bc:&BytecodeFunction, env:EnvRef, slots:Option<&[Value]>)->Result<Value>{
+        let mut pc=0usize;
+        let mut stack=self.bytecode_stack_pool.pop().unwrap_or_else(||Vec::with_capacity(16));
+        stack.clear();
+        let base_slots=slots.unwrap_or(&[]);
+        let mut temps=self.bytecode_temp_pool.pop().unwrap_or_default();
+        temps.clear();
+        temps.resize(bc.max_temps,Value::Unspecified);
+        let load_frame_slot=|idx:usize, temps:&[Value]| -> Option<Value> {
+            if idx<base_slots.len(){base_slots.get(idx).cloned()}else{temps.get(idx-base_slots.len()).cloned()}
+        };
+        let mut cached_add:Option<(fn(&mut Evaluator,&[Value])->Result<Value>,usize,Option<usize>)>=None;
+        let mut cached_mul:Option<(fn(&mut Evaluator,&[Value])->Result<Value>,usize,Option<usize>)>=None;
+        // Binary integer fast op fallback looks up the builtin only on the deopt/error path.
+        let result=(||{
+        loop{
+            if self.gas.active.is_some(){self.charge(1)?;}
+            let Some(instr)=bc.code.get(pc) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));};
+            pc+=1;
+            match instr{
+                Instr::LoadConst(i)=>stack.push(bc.constants.get(*i).cloned().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?),
+                Instr::LoadDynamic(name)=>stack.push(env.get(name.as_str()).ok_or_else(||SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S"),Value::symbol(name.as_str())]))?),
+                Instr::LoadSlot(i)=>stack.push(load_frame_slot(*i,&temps).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?),
+                Instr::StoreTemp(i)=>{let v=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let Some(slot)=i.checked_sub(base_slots.len()).and_then(|j|temps.get_mut(j)) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}; *slot=v;}
+                Instr::BindTemp{index,name,sequential}=>{let v=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let v=self.normalize_binding_value_ctx(if *sequential{"let*"}else{"let"},name.as_str(),v)?; let Some(slot)=index.checked_sub(base_slots.len()).and_then(|j|temps.get_mut(j)) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}; *slot=v;}
+                Instr::LoadTemp(i)=>stack.push(load_frame_slot(*i,&temps).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?),
+                Instr::Pop=>{stack.pop();}
+                Instr::Jump(target)=>pc=*target,
+                Instr::JumpIfFalse(target)=>{let v=stack.last().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let truth=match v{Value::Values(vs)=>vs.first().map(|v|v.is_true()).unwrap_or(false),_=>v.is_true()}; if !truth{pc=*target;}},
+                Instr::JumpIfFalsePop(target)=>{let v=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let truth=match &v{Value::Values(vs)=>vs.first().map(|v|v.is_true()).unwrap_or(false),_=>v.is_true()}; if !truth{pc=*target;}},
+                Instr::JumpIfOrTrue(target)=>{let v=stack.last_mut().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; match v{Value::Values(vs)=>{if let Some(hit)=vs.iter().find(|x|x.is_true()).cloned(){*v=hit; pc=*target;}},v=>{if v.is_true(){pc=*target;}}}},
+                Instr::CaseJump{datums,target}=>{let key=stack.last().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; if datums.iter().any(|datum|equal(key,datum)){pc=*target;}},
+                Instr::FastBuiltinCall{id,argc}=>{
+                    if stack.len()<*argc{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+                    let start=stack.len()-*argc;
+                    if let Some(out)=self.eval_bytecode_builtin_stack_fast(*id,&stack[start..])?{
+                        stack.truncate(start);
+                        stack.push(out);
+                        continue;
+                    }
+                    let name=id.name();
+                    let Some((func,min,max))=env.builtin_func(name) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));};
+                    if !stack[start..].iter().any(|v|matches!(v,Value::Values(_))){
+                        let out={
+                            let vals=&stack[start..];
+                            if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                            if let Some(v)=self.eval_compiled_builtin_fast(*id,vals)?{v}else{func(self,vals)?}
+                        };
+                        stack.truncate(start);
+                        stack.push(out);
+                    }else{
+                        let raw=stack.split_off(start);
+                        let mut vals=Vec::new();
+                        for v in raw{match v{Value::Values(vs)=>vals.extend(vs),v=>vals.push(v)}}
+                        if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                        let out=if let Some(v)=self.eval_compiled_builtin_fast(*id,&vals)?{v}else{func(self,&vals)?};
+                        stack.push(out);
+                    }
+                }
+                Instr::IntAddTerms{terms}=>{
+                    let term_value=|term:&AddTerm, temps:&[Value]| -> Result<Value> {match term{AddTerm::Slot(i)=>load_frame_slot(*i,temps).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![])),AddTerm::Const(n)=>Ok(Value::Int(*n))}};
+                    let term_int=|term:&AddTerm, temps:&[Value]| -> Option<i64> {match term{AddTerm::Const(n)=>Some(*n),AddTerm::Slot(i)=>{let v=if *i<base_slots.len(){base_slots.get(*i)}else{temps.get(*i-base_slots.len())}?; if let Value::Int(n)=v{Some(*n)}else{None}}}};
+                    let mut acc=0i64;
+                    let mut deopt=false;
+                    for term in terms{
+                        match term_int(term,&temps){
+                            Some(n)=>{if let Some(next)=acc.checked_add(n){acc=next;}else{deopt=true; break;}},
+                            None=>{deopt=true; break;}
+                        }
+                    }
+                    if deopt{
+                        if bc.cache_stable_builtins && cached_add.is_none(){cached_add=env.builtin_func("+");}
+                        let Some((func,min,max))=(if bc.cache_stable_builtins{cached_add}else{env.builtin_func("+")}) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));};
+                        let vals=terms.iter().map(|t|term_value(t,&temps)).collect::<Result<Vec<_>>>()?;
+                        if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol("+")]));}
+                        stack.push(func(self,&vals)?);
+                    }else{stack.push(Value::Int(acc));}
+                }
+                Instr::IntMulTerms{terms}=>{
+                    let term_value=|term:&MulTerm, temps:&[Value]| -> Result<Value> {match term{MulTerm::Slot(i)=>load_frame_slot(*i,temps).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![])),MulTerm::Const(n)=>Ok(Value::Int(*n))}};
+                    let term_int=|term:&MulTerm, temps:&[Value]| -> Option<i64> {match term{MulTerm::Const(n)=>Some(*n),MulTerm::Slot(i)=>{let v=if *i<base_slots.len(){base_slots.get(*i)}else{temps.get(*i-base_slots.len())}?; if let Value::Int(n)=v{Some(*n)}else{None}}}};
+                    let mut acc=1i64;
+                    let mut deopt=false;
+                    for term in terms{
+                        match term_int(term,&temps){
+                            Some(n)=>{if let Some(next)=acc.checked_mul(n){acc=next;}else{deopt=true; break;}},
+                            None=>{deopt=true; break;}
+                        }
+                    }
+                    if deopt{
+                        if bc.cache_stable_builtins && cached_mul.is_none(){cached_mul=env.builtin_func("*");}
+                        let Some((func,min,max))=(if bc.cache_stable_builtins{cached_mul}else{env.builtin_func("*")}) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));};
+                        let vals=terms.iter().map(|t|term_value(t,&temps)).collect::<Result<Vec<_>>>()?;
+                        if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol("*")]));}
+                        stack.push(func(self,&vals)?);
+                    }else{stack.push(Value::Int(acc));}
+                }
+                Instr::IntBinaryTerms{id,lhs,rhs}=>{
+                    let name=id.name();
+                    let fallback_builtin=||env.builtin_func(name);
+                    let term_value=|term:&AddTerm, temps:&[Value]| -> Result<Value> {match term{AddTerm::Slot(i)=>load_frame_slot(*i,temps).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![])),AddTerm::Const(n)=>Ok(Value::Int(*n))}};
+                    let term_int=|term:&AddTerm, temps:&[Value]| -> Option<i64> {match term{AddTerm::Const(n)=>Some(*n),AddTerm::Slot(i)=>{let v=if *i<base_slots.len(){base_slots.get(*i)}else{temps.get(*i-base_slots.len())}?; if let Value::Int(n)=v{Some(*n)}else{None}}}};
+                    let fast=match (term_int(lhs,&temps),term_int(rhs,&temps),id){
+                        (Some(a),Some(b),BuiltinId::Sub)=>a.checked_sub(b).map(Value::Int),
+                        (Some(a),Some(b),BuiltinId::NumEq)=>Some(Value::Bool(a==b)),
+                        (Some(a),Some(b),BuiltinId::Less)=>Some(Value::Bool(a<b)),
+                        (Some(a),Some(b),BuiltinId::LessEq)=>Some(Value::Bool(a<=b)),
+                        (Some(a),Some(b),BuiltinId::Greater)=>Some(Value::Bool(a>b)),
+                        (Some(a),Some(b),BuiltinId::GreaterEq)=>Some(Value::Bool(a>=b)),
+                        (Some(a),Some(b),BuiltinId::Remainder) if b!=0=>Some(Value::Int(a%b)),
+                        (Some(a),Some(b),BuiltinId::Modulo) if b>0=>Some(Value::Int(((a%b)+b)%b)),
+                        _=>None,
+                    };
+                    if let Some(v)=fast{stack.push(v);}else{
+                        let Some((func,min,max))=fallback_builtin() else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));};
+                        let vals=vec![term_value(lhs,&temps)?,term_value(rhs,&temps)?];
+                        if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                        stack.push(func(self,&vals)?);
+                    }
+                }
+                Instr::BuiltinCall{id,argc}=>{
+                    if stack.len()<*argc{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+                    let name=id.name();
+                    let Some((func,min,max))=env.builtin_func(name) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));};
+                    let start=stack.len()-*argc;
+                    if !stack[start..].iter().any(|v|matches!(v,Value::Values(_))){
+                        let out={
+                            let vals=&stack[start..];
+                            if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                            if let Some(v)=self.eval_compiled_builtin_fast(*id,vals)?{v}else{func(self,vals)?}
+                        };
+                        stack.truncate(start);
+                        stack.push(out);
+                    }else{
+                        let raw=stack.split_off(start);
+                        let mut vals=Vec::new();
+                        for v in raw{match v{Value::Values(vs)=>vals.extend(vs),v=>vals.push(v)}}
+                        if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                        let out=if let Some(v)=self.eval_compiled_builtin_fast(*id,&vals)?{v}else{func(self,&vals)?};
+                        stack.push(out);
+                    }
+                }
+                Instr::GenericCall{argc}=>{
+                    if stack.len()<argc+1{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+                    let start=stack.len()-*argc;
+                    if matches!(&stack[start-1],Value::Macro(_,_)) || matches!(&stack[start-1],Value::RootMeta(name) if is_syntax_name(name.as_str())){return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+                    if !stack[start..].iter().any(|v|matches!(v,Value::Values(_))){
+                        if *argc==1{
+                            let direct={
+                                let proc_ref=&stack[start-1];
+                                let arg_ref=&stack[start];
+                                match proc_ref{
+                                    Value::HashTable(h)=>Some(Ok(hash_lookup(h,arg_ref).unwrap_or(Value::Bool(false)))),
+                                    Value::Vector(_)|Value::ByteVector(_)|Value::FloatVector(_)|Value::IntVector(_)|Value::String(_)|Value::Pair(_)|Value::Env(_)|Value::MultiVector{..}|Value::MultiVectorView{..}|Value::ProcedureSource(_)=>Some(applicable_get(proc_ref,arg_ref)),
+                                    _=>None,
+                                }
+                            };
+                            if let Some(out)=direct{
+                                let out=out?;
+                                stack.truncate(start-1);
+                                stack.push(out);
+                                continue;
+                            }
+                        }
+                        let direct_proc_result={
+                            let proc_ref=&stack[start-1];
+                            if let Value::Procedure(p)=proc_ref{
+                                if let Procedure::Builtin{name,func,min,max,..}= &**p{
+                                    let vals=&stack[start..];
+                                    if vals.len()<*min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                                    let old=self.curlet.clone();
+                                    self.curlet=env.clone();
+                                    let out=func(self,vals);
+                                    self.curlet=old;
+                                    Some(out)
+                                }else if let Procedure::Lambda{params,env:proc_env,compiled:Some(c),..}= &**p{
+                                    if matches!(&c.layout,CompiledLayout::SlotFrame{..}) && !params.star && params.rest.is_none() && *argc==params.required.len(){
+                                        let out=if c.capture_values.is_empty(){
+                                            match c.bytecode.as_ref(){
+                                                Some(bc)=>match self.eval_bytecode_body(bc,proc_env.clone(),Some(&stack[start..])){Ok(v)=>v,Err(e) if e.tag=="unsupported-compiled-form"=>self.eval_compiled_body_slots(c,proc_env.clone(),&stack[start..])?,Err(e)=>return Err(e)},
+                                                None=>self.eval_compiled_body_slots(c,proc_env.clone(),&stack[start..])?,
+                                            }
+                                        }else{
+                                            let mut slots=stack[start..].to_vec(); Self::append_compiled_captures(&mut slots,c);
+                                            match c.bytecode.as_ref(){
+                                                Some(bc)=>match self.eval_bytecode_body(bc,proc_env.clone(),Some(&slots)){Ok(v)=>v,Err(e) if e.tag=="unsupported-compiled-form"=>self.eval_compiled_body_slots(c,proc_env.clone(),&slots)?,Err(e)=>return Err(e)},
+                                                None=>self.eval_compiled_body_slots(c,proc_env.clone(),&slots)?,
+                                            }
+                                        };
+                                        Some(Ok(out))
+                                    }else{None}
+                                }else{None}
+                            }else{None}
+                        };
+                        if let Some(out)=direct_proc_result{
+                            let out=out?;
+                            stack.truncate(start-1);
+                            stack.push(out);
+                            continue;
+                        }
+                    }
+                    let proc=stack[start-1].clone();
+                    let args_raw=stack.split_off(start);
+                    stack.pop();
+                    let mut vals=Vec::new();
+                    for v in args_raw{match v{Value::Values(vs)=>vals.extend(vs),v=>vals.push(v)}}
+                    stack.push(self.apply_value(proc,vals,env.clone())?);
+                }
+                Instr::ApplicableRef=>{let index=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let target=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; if let Value::HashTable(h)=&target{stack.push(hash_lookup(h,&index).unwrap_or(Value::Bool(false)));}else{stack.push(applicable_get(&target,&index)?);}}
+                Instr::SetApplicable=>{let value=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let index=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let target=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; if let Value::Env(e)=&target{if !is_marked_immutable(&target) && !matches!(index,Value::Values(_)) && !matches!(value,Value::Values(_)){let key_owned; let k=match &index{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-set!"),Value::Int(2),index.clone(),Value::string(simple_value_kind(&index)),Value::string("a symbol")]))}; if e.set(k,value.clone()){stack.push(value); continue;}}} stack.push(set_applicable(target,vec![index],value)?);}
+                Instr::Recur{argc,target,param_start,param_count,name}=>{
+                    if stack.len()<*argc{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}
+                    let slot_start=param_start.checked_sub(base_slots.len()).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;
+                    let start=stack.len()-*argc;
+                    if *argc==*param_count && !stack[start..].iter().any(|v|matches!(v,Value::Values(_))){
+                        for i in (0..*param_count).rev(){let v=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let v=match v{Value::Float(x) if x.is_finite() && x>=i64::MAX as f64=>Value::Int(i64::MAX),Value::Float(x) if x.is_finite() && x<=i64::MIN as f64=>Value::Int(i64::MIN),v=>v}; let Some(slot)=temps.get_mut(slot_start+i) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}; *slot=v;}
+                    }else{
+                        let raw=stack.split_off(start);
+                        let mut vals=Vec::new();
+                        let mut first_values:Option<Vec<Value>>=None;
+                        for v in raw{match v{Value::Values(vs)=>{if first_values.is_none(){first_values=Some(vs.clone());} vals.extend(vs)},v=>vals.push(v)}}
+                        if vals.len()!=*param_count{let shown=first_values.unwrap_or_else(||vals.clone()); return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many arguments: ~A"),Value::symbol(name.as_str()),Value::list(shown)]))}
+                        for (i,v) in vals.into_iter().enumerate(){let v=match v{Value::Float(x) if x.is_finite() && x>=i64::MAX as f64=>Value::Int(i64::MAX),Value::Float(x) if x.is_finite() && x<=i64::MIN as f64=>Value::Int(i64::MIN),v=>v}; let Some(slot)=temps.get_mut(slot_start+i) else{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}; *slot=v;}
+                    }
+                    pc=*target;
+                }
+                Instr::MakeValues(_)=>return Err(SchemeError::new("unsupported-compiled-form",vec![])),
+                Instr::Return=>return Ok(stack.pop().unwrap_or(Value::Unspecified)),
+            }
+        }
+        })();
+        stack.clear();
+        temps.clear();
+        self.bytecode_stack_pool.push(stack);
+        self.bytecode_temp_pool.push(temps);
+        result
+    }
+
+    fn eval_compiled_expr(&mut self, expr:&CExpr, env:EnvRef)->Result<Value>{
+        let ctx=CompiledCtx{env,slots:None,slot_names:None,materialized_env:RefCell::new(None)};
+        self.eval_compiled_expr_ctx(expr,&ctx)
+    }
+
+    fn eval_compiled_expr_ctx(&mut self, expr:&CExpr, ctx:&CompiledCtx<'_>)->Result<Value>{
+        match self.eval_compiled_flow_ctx(expr,ctx)?{CompiledFlow::Value(v)=>Ok(v),CompiledFlow::Recur(_)=>Err(SchemeError::new("unsupported-compiled-form",vec![]))}
+    }
+
+    fn eval_compiled_values_ctx(&mut self, args:&[CExpr], ctx:&CompiledCtx<'_>)->Result<Vec<Value>>{
+        let mut vals=Vec::new();
+        for arg in args{match self.eval_compiled_expr_ctx(arg,ctx)?{Value::Values(vs)=>vals.extend(vs),v=>vals.push(v)}}
+        Ok(vals)
+    }
+
+    fn eval_quasiquote_template_ctx(&mut self, t:&QTemplate, ctx:&CompiledCtx<'_>)->Result<Value>{
+        match t{
+            QTemplate::Literal(v)=>Ok(v.clone()),
+            QTemplate::Unquote(e)=>self.eval_compiled_expr_ctx(e,ctx),
+            QTemplate::Splice(e)=>self.eval_compiled_expr_ctx(e,ctx),
+            QTemplate::Vector(xs)=>{let mut out=Vec::with_capacity(xs.len()); for x in xs{out.push(self.eval_quasiquote_template_ctx(x,ctx)?);} Ok(Value::Vector(Rc::new(VectorData::new(out))))}
+            QTemplate::Pair(car,cdr)=>{
+                if let QTemplate::Splice(e)=&**car{
+                    let spliced=self.eval_compiled_expr_ctx(e,ctx)?;
+                    let vals=spliced.to_vec().map_err(|_|SchemeError::new("wrong-type-arg",vec![Value::string("apply's last argument should be a proper list: ~S"),Value::list(vec![spliced.clone()])]))?;
+                    let tail=self.eval_quasiquote_template_ctx(cdr,ctx)?;
+                    let mut out=tail;
+                    for v in vals.into_iter().rev(){out=Value::cons(v,out);}
+                    return Ok(out);
+                }
+                let qcar=self.eval_quasiquote_template_ctx(car,ctx)?;
+                let qcdr=self.eval_quasiquote_template_ctx(cdr,ctx)?;
+                if let Value::Values(vs)=qcdr{let mut items=vec![Value::list(vec![qcar])]; items.extend(vs); return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: too many arguments: (~A~{~^ ~S~})"),Value::symbol("<list*>"),Value::symbol("<list*>"),Value::list(items)]));}
+                Ok(Value::cons(qcar,qcdr))
+            }
+        }
+    }
+
+    fn compiled_fallback_env(&self, ctx:&CompiledCtx<'_>)->EnvRef{
+        match (ctx.slots,ctx.slot_names){
+            (Some(slots),Some(names))=>{
+                if let Some(env)=ctx.materialized_env.borrow().clone(){return env;}
+                let env=Env::new(Some(ctx.env.clone()));
+                for (name,val) in names.iter().zip(slots.iter()){env.define(name.as_str(),val.clone());}
+                *ctx.materialized_env.borrow_mut()=Some(env.clone());
+                env
+            }
+            _=>ctx.env.clone(),
+        }
+    }
+
+    fn eval_compiled_flow_ctx(&mut self, expr:&CExpr, ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        self.charge(1)?;
+        match expr{
+            CExpr::Const(v)=>Ok(CompiledFlow::Value(v.clone())),
+            CExpr::Var(VarRef::Dynamic{name})=>ctx.env.get(name.as_str()).map(CompiledFlow::Value).ok_or_else(||SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S"),Value::symbol(name.as_str())])),
+            CExpr::Var(VarRef::Lexical{slot,..})=>ctx.slots.and_then(|slots|slots.get(*slot)).cloned().map(CompiledFlow::Value).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![])),
+            CExpr::If{test,conseq,alt}=>{let t=self.eval_compiled_expr_ctx(test,ctx)?; if t.is_true(){self.eval_compiled_flow_ctx(conseq,ctx)}else{self.eval_compiled_flow_ctx(alt,ctx)}},
+            CExpr::Begin(xs)=>{if xs.is_empty(){return Ok(CompiledFlow::Value(Value::Unspecified));} for x in &xs[..xs.len()-1]{self.eval_compiled_expr_ctx(x,ctx)?;} self.eval_compiled_flow_ctx(&xs[xs.len()-1],ctx)},
+            CExpr::Let{sequential,bindings,body}=>{
+                if ctx.slots.is_some(){self.eval_compiled_let_slots_flow(*sequential,bindings,body,ctx)}else{self.eval_compiled_let_flow(*sequential,bindings,body,ctx.env.clone())}
+            }
+            CExpr::Cond{clauses,else_body}=>self.eval_compiled_cond_flow(clauses,else_body.as_deref(),ctx),
+            CExpr::Case{key,clauses,else_body}=>self.eval_compiled_case_flow(key,clauses,else_body.as_deref(),ctx),
+            CExpr::And(xs)=>self.eval_compiled_and_flow(xs,ctx),
+            CExpr::Or(xs)=>self.eval_compiled_or_flow(xs,ctx),
+            CExpr::Quasiquote(v)=>{
+                let qenv=self.compiled_fallback_env(ctx);
+                self.eval_quasiquote((**v).clone(),qenv).map(CompiledFlow::Value)
+            }
+            CExpr::QuasiquoteTemplate(t)=>self.eval_quasiquote_template_ctx(t,ctx).map(CompiledFlow::Value),
+            CExpr::Loop{name,params,inits,body}=>self.eval_compiled_loop(name,params,inits,body,ctx.env.clone()).map(CompiledFlow::Value),
+            CExpr::Recur{args}=>self.eval_compiled_values_ctx(args,ctx).map(CompiledFlow::Recur),
+            CExpr::BuiltinCall{id,name,args,fallback,..}=>{
+                let Some((func,min,max))=ctx.env.builtin_func(name) else { return self.eval((**fallback).clone(),self.compiled_fallback_env(ctx)).map(CompiledFlow::Value); };
+                let vals=self.eval_compiled_values_ctx(args,ctx)?;
+                if vals.len()<min || max.map(|m|vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]));}
+                if let Some(v)=self.eval_compiled_builtin_fast(*id,&vals)?{return Ok(CompiledFlow::Value(v));}
+                let old=self.curlet.clone();
+                self.curlet=ctx.env.clone();
+                let r=func(self,&vals);
+                self.curlet=old;
+                r.map(CompiledFlow::Value)
+            }
+            CExpr::Call{op,args,fallback,..}=>{
+                let proc=self.eval_compiled_expr_ctx(op,ctx)?;
+                if matches!(proc,Value::Macro(_,_)){return self.eval((**fallback).clone(),self.compiled_fallback_env(ctx)).map(CompiledFlow::Value);}
+                if let Value::RootMeta(root_name)=&proc { if is_syntax_name(root_name.as_str()){
+                    let rewritten=if let Value::Pair(_)=&**fallback{let rest=fallback.cdr().unwrap_or(Value::Nil); Value::cons(Value::symbol(root_name.as_str()),rest)}else{(**fallback).clone()};
+                    return self.eval(rewritten,self.compiled_fallback_env(ctx)).map(CompiledFlow::Value);
+                }}
+                let vals=self.eval_compiled_values_ctx(args,ctx)?;
+                self.apply_value(proc,vals,ctx.env.clone()).map(CompiledFlow::Value)
+            }
+            CExpr::ApplicableRef{target,index}=>{let target=self.eval_compiled_expr_ctx(target,ctx)?; let index=self.eval_compiled_expr_ctx(index,ctx)?; if let Value::HashTable(h)=&target{Ok(CompiledFlow::Value(hash_lookup(h,&index).unwrap_or(Value::Bool(false))))}else{applicable_get(&target,&index).map(CompiledFlow::Value)}}
+            CExpr::SetApplicable{target,index,value}=>{let target=self.eval_compiled_expr_ctx(target,ctx)?; let index=self.eval_compiled_expr_ctx(index,ctx)?; let value=self.eval_compiled_expr_ctx(value,ctx)?; if let Value::Env(e)=&target{if !is_marked_immutable(&target) && !matches!(index,Value::Values(_)) && !matches!(value,Value::Values(_)){let key_owned; let k=match &index{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-set!"),Value::Int(2),index.clone(),Value::string(simple_value_kind(&index)),Value::string("a symbol")]))}; if e.set(k,value.clone()){return Ok(CompiledFlow::Value(value));}}} set_applicable(target,vec![index],value).map(CompiledFlow::Value)}
+            CExpr::Fallback(v)=>self.eval(v.clone(),self.compiled_fallback_env(ctx)).map(CompiledFlow::Value),
+            _=>Err(SchemeError::new("unsupported-compiled-form",vec![])),
+        }
+    }
+
+    fn eval_compiled_builtin_fast(&mut self, id:BuiltinId, vals:&[Value])->Result<Option<Value>>{
+        match id{
+            BuiltinId::Add if vals.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut acc=0i64;
+                for v in vals{let Value::Int(n)=v else{unreachable!()}; let Some(next)=acc.checked_add(*n) else{return Ok(None)}; acc=next;}
+                Ok(Some(Value::Int(acc)))
+            }
+            BuiltinId::Sub if !vals.is_empty() && vals.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut it=vals.iter(); let Value::Int(first)=it.next().unwrap() else{unreachable!()};
+                if vals.len()==1{return first.checked_neg().map(|n|Some(Value::Int(n))).ok_or_else(||SchemeError::new("out-of-range",vec![Value::Int(*first)]));}
+                let mut acc=*first;
+                for v in it{let Value::Int(n)=v else{unreachable!()}; let Some(next)=acc.checked_sub(*n) else{return Ok(None)}; acc=next;}
+                Ok(Some(Value::Int(acc)))
+            }
+            BuiltinId::Mul if vals.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut acc=1i64;
+                for v in vals{let Value::Int(n)=v else{unreachable!()}; let Some(next)=acc.checked_mul(*n) else{return Ok(None)}; acc=next;}
+                Ok(Some(Value::Int(acc)))
+            }
+            BuiltinId::NumEq|BuiltinId::Less|BuiltinId::LessEq|BuiltinId::Greater|BuiltinId::GreaterEq if vals.iter().all(|v|matches!(v,Value::Int(_)))=>{
+                let mut ok=true;
+                for w in vals.windows(2){let (Value::Int(a),Value::Int(b))=(&w[0],&w[1]) else{unreachable!()}; ok &= match id{BuiltinId::NumEq=>a==b,BuiltinId::Less=>a<b,BuiltinId::LessEq=>a<=b,BuiltinId::Greater=>a>b,BuiltinId::GreaterEq=>a>=b,_=>unreachable!()}; if !ok{break;}}
+                Ok(Some(Value::Bool(ok)))
+            }
+            BuiltinId::VectorRef if vals.len()==2=>{
+                if let (Value::Vector(v),Value::Int(i))=(&vals[0],&vals[1]){if *i>=0 && (*i as usize)<v.len(){return Ok(Some(v.get(*i as usize)));}}
+                Ok(None)
+            }
+            BuiltinId::VectorSet if vals.len()==3=>{
+                if let (Value::Vector(v),Value::Int(i))=(&vals[0],&vals[1]){if !is_marked_immutable(&vals[0]) && *i>=0 && (*i as usize)<v.len(){v.set(*i as usize,vals[2].clone()); return Ok(Some(vals[2].clone()));}}
+                Ok(None)
+            }
+            BuiltinId::Remainder if vals.len()==2=>{
+                if let (Value::Int(a),Value::Int(b))=(&vals[0],&vals[1]){if *b!=0{return Ok(Some(Value::Int(a%b)));}}
+                Ok(None)
+            }
+            BuiltinId::Modulo if vals.len()==2=>{
+                if let (Value::Int(a),Value::Int(b))=(&vals[0],&vals[1]){if *b>0{return Ok(Some(Value::Int(((a%b)+b)%b)));}}
+                Ok(None)
+            }
+            BuiltinId::Cons if vals.len()==2=>Ok(Some(Value::cons(vals[0].clone(),vals[1].clone()))),
+            BuiltinId::Car if vals.len()==1=>{if matches!(vals[0],Value::Pair(_)){Ok(Some(vals[0].car()?))}else{Ok(None)}},
+            BuiltinId::Cdr if vals.len()==1=>{if matches!(vals[0],Value::Pair(_)){Ok(Some(vals[0].cdr()?))}else{Ok(None)}},
+            BuiltinId::NullP if vals.len()==1=>Ok(Some(Value::Bool(matches!(vals[0],Value::Nil)))),
+            BuiltinId::PairP if vals.len()==1=>Ok(Some(Value::Bool(matches!(vals[0],Value::Pair(_))))),
+            BuiltinId::Not if vals.len()==1=>Ok(Some(Value::Bool(!vals[0].is_true()))),
+            BuiltinId::EqP if vals.len()==2=>Ok(Some(Value::Bool(eq(&vals[0],&vals[1])))),
+            BuiltinId::Inlet=>{
+                let cap=vals.len()/2;
+                let mut keys=Vec::with_capacity(cap);
+                let mut i=0;
+                while i+1<vals.len(){
+                    let key=match &vals[i]{
+                        Value::Symbol(s)=>s.trim_start_matches('+').trim_end_matches('+').to_string(),
+                        Value::Keyword(s)=>s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(),
+                        _=>return Ok(None),
+                    };
+                    if keys.iter().any(|k:&String|k==&key){return Ok(None)}
+                    keys.push(key);
+                    i+=2;
+                }
+                let e=Env::with_capacity(Some(self.root.clone()),cap);
+                for (idx,key) in keys.into_iter().enumerate(){e.define_fresh(key,vals[idx*2+1].clone());}
+                Ok(Some(Value::Env(e)))
+            }
+            BuiltinId::HashTable=>{
+                if vals.len()%2!=0{return Ok(None)}
+                fn same_simple_key(a:&Value,b:&Value)->Option<bool>{Some(match (a,b){
+                    (Value::Symbol(x),Value::Symbol(y))=>x==y,
+                    (Value::Keyword(x),Value::Keyword(y))=>x==y,
+                    (Value::Bool(x),Value::Bool(y))=>x==y,
+                    (Value::Char(x),Value::Char(y))=>x==y,
+                    (Value::NamedChar(x),Value::NamedChar(y))=>x==y,
+                    (Value::Nil,Value::Nil)=>true,
+                    (Value::Int(x),Value::Int(y))=>x==y,
+                    (Value::Symbol(_),_)|(Value::Keyword(_),_)|(Value::Bool(_),_)|(Value::Char(_),_)|(Value::NamedChar(_),_)|(Value::Nil,_)|(Value::Int(_),_)=>false,
+                    _=>return None,
+                })}
+                let mut entries=Vec::with_capacity(vals.len()/2);
+                let mut i=0;
+                while i+1<vals.len(){
+                    let key=&vals[i];
+                    for (k,_) in &entries{match same_simple_key(k,key){Some(true)=>return Ok(None),Some(false)=>{},None=>return Ok(None)}}
+                    entries.push((key.clone(),vals[i+1].clone()));
+                    i+=2;
+                }
+                Ok(Some(Value::HashTable(Rc::new(RefCell::new(entries)))))
+            }
+            _=>Ok(None),
+        }
+    }
+
+    fn eval_compiled_body_exprs_flow(&mut self, body:&[CExpr], ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        if body.is_empty(){return Ok(CompiledFlow::Value(Value::Unspecified));}
+        for expr in &body[..body.len()-1]{self.eval_compiled_expr_ctx(expr,ctx)?;}
+        self.eval_compiled_flow_ctx(&body[body.len()-1],ctx)
+    }
+
+    fn eval_compiled_cond_flow(&mut self, clauses:&[(CExpr,Vec<CExpr>)], else_body:Option<&[CExpr]>, ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        for (test,body) in clauses{
+            if self.eval_compiled_expr_ctx(test,ctx)?.is_true(){return self.eval_compiled_body_exprs_flow(body,ctx);}
+        }
+        if let Some(body)=else_body{return self.eval_compiled_body_exprs_flow(body,ctx);}
+        Ok(CompiledFlow::Value(Value::Unspecified))
+    }
+
+    fn eval_compiled_case_flow(&mut self, key_expr:&CExpr, clauses:&[(Vec<Value>,Vec<CExpr>)], else_body:Option<&[CExpr]>, ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        let key=match self.eval_compiled_expr_ctx(key_expr,ctx)?{Value::Values(vs)=>vs.get(0).cloned().unwrap_or(Value::Unspecified),v=>v};
+        for (datums,body) in clauses{if datums.iter().any(|datum|equal(&key,datum)){return if body.is_empty(){Ok(CompiledFlow::Value(key))}else{self.eval_compiled_body_exprs_flow(body,ctx)}}}
+        if let Some(body)=else_body{return if body.is_empty(){Ok(CompiledFlow::Value(key))}else{self.eval_compiled_body_exprs_flow(body,ctx)}}
+        Ok(CompiledFlow::Value(Value::Unspecified))
+    }
+
+    fn eval_compiled_and_flow(&mut self, xs:&[CExpr], ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        let mut last=Value::Bool(true);
+        for (idx,x) in xs.iter().enumerate(){
+            let finalp=idx+1==xs.len();
+            match self.eval_compiled_expr_ctx(x,ctx)?{
+                Value::Values(vs)=>{if finalp && vs.iter().all(|v|v.is_true()){last=Value::list(vs);}else{for v in vs{last=v;if !last.is_true(){return Ok(CompiledFlow::Value(last));}}}}
+                v=>{last=v;if !last.is_true(){return Ok(CompiledFlow::Value(last));}}
+            }
+        }
+        Ok(CompiledFlow::Value(last))
+    }
+
+    fn eval_compiled_or_flow(&mut self, xs:&[CExpr], ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        for (idx,x) in xs.iter().enumerate(){
+            let finalp=idx+1==xs.len();
+            match self.eval_compiled_expr_ctx(x,ctx)?{
+                Value::Values(vs)=>{if finalp && vs.iter().any(|v|v.is_true()){return Ok(CompiledFlow::Value(Value::list(vs)));} for v in vs{if v.is_true(){return Ok(CompiledFlow::Value(v));}}}
+                v=>{if v.is_true(){return Ok(CompiledFlow::Value(v));}}
+            }
+        }
+        Ok(CompiledFlow::Value(Value::Bool(false)))
+    }
+
+    fn eval_compiled_let_flow(&mut self, sequential:bool, bindings:&[(Rc<String>,CExpr)], body:&[CExpr], env:EnvRef)->Result<CompiledFlow>{
+        let new_env=Env::new(Some(env.clone()));
+        if sequential{
+            for (name,expr) in bindings{
+                let val=self.eval_compiled_expr(expr,new_env.clone())?;
+                let val=self.normalize_binding_value_ctx("let*",name.as_str(),val)?;
+                new_env.define(name.as_str(),val);
+            }
+        }else{
+            let mut vals=Vec::with_capacity(bindings.len());
+            for (name,expr) in bindings{
+                let val=self.eval_compiled_expr(expr,env.clone())?;
+                vals.push((name.clone(),self.normalize_binding_value_ctx("let",name.as_str(),val)?));
+            }
+            for (name,val) in vals{new_env.define(name.as_str(),val);}
+        }
+        if body.is_empty(){return Ok(CompiledFlow::Value(Value::Unspecified));}
+        let old=self.curlet.clone();
+        self.curlet=new_env.clone();
+        let ctx=CompiledCtx{env:new_env.clone(),slots:None,slot_names:None,materialized_env:RefCell::new(None)};
+        let result=(||{for expr in &body[..body.len()-1]{self.eval_compiled_expr_ctx(expr,&ctx)?;} self.eval_compiled_flow_ctx(&body[body.len()-1],&ctx)})();
+        self.curlet=old;
+        result
+    }
+
+    fn eval_compiled_let_slots_flow(&mut self, sequential:bool, bindings:&[(Rc<String>,CExpr)], body:&[CExpr], ctx:&CompiledCtx<'_>)->Result<CompiledFlow>{
+        let base_slots=ctx.slots.unwrap_or(&[]);
+        let base_names=ctx.slot_names.unwrap_or(&[]);
+        let mut new_slots=base_slots.to_vec();
+        let mut new_names=base_names.to_vec();
+        if sequential{
+            for (name,expr) in bindings{
+                let step_ctx=CompiledCtx{env:ctx.env.clone(),slots:Some(&new_slots),slot_names:Some(&new_names),materialized_env:RefCell::new(None)};
+                let val=self.eval_compiled_expr_ctx(expr,&step_ctx)?;
+                let val=self.normalize_binding_value_ctx("let*",name.as_str(),val)?;
+                new_slots.push(val);
+                new_names.push(name.clone());
+            }
+        }else{
+            let mut vals=Vec::with_capacity(bindings.len());
+            for (name,expr) in bindings{
+                let val=self.eval_compiled_expr_ctx(expr,ctx)?;
+                vals.push((name.clone(),self.normalize_binding_value_ctx("let",name.as_str(),val)?));
+            }
+            for (name,val) in vals{new_slots.push(val); new_names.push(name);}
+        }
+        if body.is_empty(){return Ok(CompiledFlow::Value(Value::Unspecified));}
+        let body_ctx=CompiledCtx{env:ctx.env.clone(),slots:Some(&new_slots),slot_names:Some(&new_names),materialized_env:RefCell::new(None)};
+        for expr in &body[..body.len()-1]{self.eval_compiled_expr_ctx(expr,&body_ctx)?;}
+        self.eval_compiled_flow_ctx(&body[body.len()-1],&body_ctx)
+    }
+
+    fn eval_compiled_loop(&mut self, name:&Rc<String>, params:&[Rc<String>], inits:&[CExpr], body:&CExpr, env:EnvRef)->Result<Value>{
+        let mut slots=Vec::with_capacity(inits.len());
+        for (name,expr) in params.iter().zip(inits.iter()){
+            let val=self.eval_compiled_expr(expr,env.clone())?;
+            slots.push(self.normalize_binding_value_ctx("let",name.as_str(),val)?);
+        }
+        loop{
+            let ctx=CompiledCtx{env:env.clone(),slots:Some(&slots),slot_names:Some(params),materialized_env:RefCell::new(None)};
+            match self.eval_compiled_flow_ctx(body,&ctx)?{
+                CompiledFlow::Value(v)=>return Ok(v),
+                CompiledFlow::Recur(vals)=>{
+                    if vals.len()!=params.len(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many arguments: ~A"),Value::symbol(name.as_str()),Value::list(vals)]));}
+                    slots=vals;
+                }
+            }
+        }
+    }
+
     fn eval_sequence(&mut self, xs: Vec<Value>, env: EnvRef) -> Result<Value> {
         let old=self.curlet.clone();
         self.curlet=env.clone();
@@ -133,17 +890,18 @@ impl Evaluator {
                             "quote" => { let xs=args.to_vec()?; if xs.len()!=1{return Err(SchemeError::new("syntax-error",vec![Value::symbol("quote")]))}; return Ok(xs[0].clone()); }
                             "quasiquote" => return self.eval_quasiquote(args.car()?, env),
                             "if" => {
-                                let xs=args.to_vec()?;
-                                if xs.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::symbol("if")]))}
-                                let test=self.eval(xs.get(0).cloned().unwrap_or(Value::Bool(false)), env.clone())?;
-                                expr=if test.is_true(){ xs.get(1).cloned().unwrap_or(Value::Unspecified) } else { xs.get(2).cloned().unwrap_or(Value::Unspecified) };
+                                let test_expr=args.car().map_err(|_|SchemeError::new("syntax-error",vec![Value::symbol("if")]))?;
+                                let rest=args.cdr()?;
+                                let then_expr=rest.car().map_err(|_|SchemeError::new("syntax-error",vec![Value::symbol("if")]))?;
+                                let alt_expr=match rest.cdr()?{Value::Pair(p)=>{let PairData{car,..}= &*p.borrow(); car.clone()},_=>Value::Unspecified};
+                                let test=self.eval(test_expr, env.clone())?;
+                                expr=if test.is_true(){ then_expr } else { alt_expr };
                                 continue;
                             }
                             "begin" => {
-                                let xs=args.to_vec()?;
-                                if xs.is_empty(){return Ok(Value::Unspecified)}
-                                for x in xs[..xs.len()-1].iter().cloned(){ self.eval(x, env.clone())?; }
-                                expr=xs[xs.len()-1].clone();
+                                let mut cur=args;
+                                if matches!(cur,Value::Nil){return Ok(Value::Unspecified)}
+                                loop{match cur{Value::Pair(p)=>{let (car,cdr)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; if matches!(cdr,Value::Nil){expr=car; break;} self.eval(car,env.clone())?; cur=cdr;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}}
                                 continue;
                             }
                             "and" => {
@@ -162,13 +920,31 @@ impl Evaluator {
                             "let-temporarily" => return self.eval_let_temporarily(args, env),
                             "let" | "let*" => {
                                 let sequential=sym=="let*";
+                                let first_arg=args.car()?;
+                                if !matches!(first_arg,Value::Symbol(_)) {
+                                    let new_env=Env::new(Some(env.clone()));
+                                    if sequential {
+                                        let mut cur=first_arg;
+                                        loop{match cur{Value::Nil=>break,Value::Pair(p)=>{let (binding,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; let name_v=binding.car()?; let name=name_v.as_symbol().ok_or_else(||SchemeError::new("syntax-error",vec![name_v.clone()]))?.to_string(); let val_expr=binding.cdr()?.car()?; let val=self.eval(val_expr,new_env.clone())?; let val=self.normalize_binding_value_ctx("let*",&name,val)?; new_env.define(name,val); cur=next;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}}
+                                    } else {
+                                        let let_src=Value::list({let mut v=vec![Value::symbol("let"),first_arg.clone()]; v.extend(args.cdr()?.to_vec()?); v});
+                                        let mut seen=HashSet::new(); let mut vals=Vec::new(); let mut cur=first_arg;
+                                        loop{match cur{Value::Nil=>break,Value::Pair(p)=>{let (binding,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; let name_v=binding.car()?; let name=name_v.as_symbol().ok_or_else(||SchemeError::new("syntax-error",vec![name_v.clone()]))?.to_string(); if !seen.insert(name.clone()){return Err(SchemeError::new("syntax-error",vec![Value::string("duplicate identifier in let: ~S in ~S"),Value::symbol(&name),let_src]));} let val_expr=binding.cdr()?.car()?; let val=self.eval(val_expr,env.clone())?; vals.push((name.clone(),self.normalize_binding_value_ctx("let",&name,val)?)); cur=next;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}}
+                                        for (k,v) in vals{new_env.define(k,v);}
+                                    }
+                                    let mut body=args.cdr()?;
+                                    if matches!(body,Value::Nil){return Ok(Value::Unspecified)}
+                                    loop{match body{Value::Pair(p)=>{let (car,cdr)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; if matches!(cdr,Value::Nil){expr=car; env=new_env.clone(); self.curlet=new_env; break;} self.eval(car,new_env.clone())?; body=cdr;},other=>return Err(SchemeError::new("wrong-type-arg",vec![other]))}}
+                                    continue;
+                                }
                                 let xs=args.to_vec()?;
                                 if let Some(Value::Symbol(name))=xs.get(0) {
                                     let bindings=xs[1].to_vec()?;
                                     let params=bindings.iter().map(|b| b.car().unwrap().as_symbol().unwrap().to_string()).collect::<Vec<_>>();
                                     let vals_expr=bindings.iter().map(|b| b.cdr().unwrap().car().unwrap()).collect::<Vec<_>>();
+                                    if !sequential { if let Some(compiled_loop)=self.analyze_named_let_cached(env.clone(),name,&params,&vals_expr,&xs[2..]){ return self.eval_compiled_body(&compiled_loop,env); } }
                                     let new_env=Env::new(Some(env.clone()));
-                                    let proc=Value::Procedure(Rc::new(Procedure::Lambda{params:Params{required:params.clone(),rest:None,star:sequential,defaults:vec![None; params.len()],allow_other_keys:false,rest_before_formals:false},body:Rc::new(RefCell::new(xs[2..].to_vec())),env:new_env.clone(),name:Some(name.to_string())}));
+                                    let proc=Value::Procedure(Rc::new(Procedure::Lambda{params:Params{required:params.clone(),rest:None,star:sequential,defaults:vec![None; params.len()],allow_other_keys:false,rest_before_formals:false},body:Rc::new(RefCell::new(xs[2..].to_vec())),env:new_env.clone(),name:Some(name.to_string()),compiled:None}));
                                     new_env.define(name.as_str(), proc.clone());
                                     let vals=vals_expr.into_iter().map(|v| self.eval(v, env.clone())).collect::<Result<Vec<_>>>()?;
                                     self.charge(1)?;
@@ -184,7 +960,7 @@ impl Evaluator {
                                 let bindings=xs[0].to_vec()?;
                                 let new_env=Env::new(Some(env.clone()));
                                 if sequential { for b in bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap(); let val=self.eval(bv[1].clone(), new_env.clone())?; let val=self.normalize_binding_value_ctx("let*",name,val)?; new_env.define(name, val); } }
-                                else { let mut vals=Vec::new(); for b in &bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap().to_string(); let val=self.eval(bv[1].clone(), env.clone())?; vals.push((name.clone(), self.normalize_binding_value_ctx("let",&name,val)?)); } for (k,v) in vals { new_env.define(k,v); } }
+                                else { let let_src=Value::list({let mut v=vec![Value::symbol("let")]; v.extend(xs.clone()); v}); let mut seen=HashSet::new(); let mut vals=Vec::new(); for b in &bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap().to_string(); if !seen.insert(name.clone()){return Err(SchemeError::new("syntax-error",vec![Value::string("duplicate identifier in let: ~S in ~S"),Value::symbol(&name),let_src]));} let val=self.eval(bv[1].clone(), env.clone())?; vals.push((name.clone(), self.normalize_binding_value_ctx("let",&name,val)?)); } for (k,v) in vals { new_env.define(k,v); } }
                                 let body=&xs[1..];
                                 if body.is_empty(){return Ok(Value::Unspecified)}
                                 for x in body[..body.len()-1].iter().cloned(){ self.eval(x, new_env.clone())?; }
@@ -211,13 +987,7 @@ impl Evaluator {
                                 if let Some(body)=matched { if body.is_empty(){return Ok(Value::Unspecified)}; for x in body[..body.len()-1].iter().cloned(){ self.eval(x, env.clone())?; } expr=body[body.len()-1].clone(); continue; }
                                 return Ok(Value::Unspecified);
                             }
-                            "case" => {
-                                let xs=args.to_vec()?; let key=self.eval(xs[0].clone(), env.clone())?; let key=if let Value::Values(vs)=key{vs.get(0).cloned().unwrap_or(Value::Unspecified)}else{key};
-                                let mut matched: Option<Vec<Value>>=None;
-                                'clauses: for clause in &xs[1..] { let cs=clause.to_vec()?; if cs[0].as_symbol()==Some("else") { matched=Some(cs[1..].to_vec()); break; } for datum in cs[0].to_vec()? { if equal(&key,&datum){ matched=Some(cs[1..].to_vec()); break 'clauses; } } }
-                                if let Some(body)=matched { if body.is_empty(){return Ok(Value::Unspecified)}; for x in body[..body.len()-1].iter().cloned(){ self.eval(x, env.clone())?; } expr=body[body.len()-1].clone(); continue; }
-                                return Ok(Value::Unspecified);
-                            }
+                            "case" => return self.eval_case(args, env),
                             "with-let" => {
                                 let xs=args.to_vec()?; let e=self.eval(xs[0].clone(), env.clone())?; let e=if let Value::Values(vs)=e{vs.get(0).cloned().unwrap_or(Value::Unspecified)}else{e}; let Value::Env(new_env)=e else { return Err(SchemeError::new("wrong-type-arg", vec![e])); };
                                 let body=&xs[1..]; if body.is_empty(){return Ok(Value::Unspecified)}; for x in body[..body.len()-1].iter().cloned(){ self.eval(x, new_env.clone())?; }
@@ -226,13 +996,14 @@ impl Evaluator {
                             "define" | "define*" | "set!" | "lambda" | "lambda*" | "do" | "catch" | "throw" | "define-macro" | "define-macro*" | "define-bacro" | "define-bacro*" | "macro" | "macro*" | "bacro" | "bacro*" | "macroexpand" => return self.eval_pair(expr, env),
                             _=>{}
                         }
+                        if let Some(r)=self.eval_hot_builtin(sym,args.clone(),env.clone()){return r;}
                     }
                     let proc=self.eval(op.clone(), env.clone())?;
                     if let Value::RootMeta(name)=&proc{ if name.as_str()=="and"{let mut last=Value::Bool(true); for a in args.to_vec()?{match self.eval(a,env.clone())?{Value::Values(vs)=>{for v in vs{last=v;if !last.is_true(){return Ok(last)}}},v=>{last=v;if !last.is_true(){return Ok(last)}}}} return Ok(last)} if name.as_str()=="or"{for a in args.to_vec()?{match self.eval(a,env.clone())?{Value::Values(vs)=>{for v in vs{if v.is_true(){return Ok(v)}}},v=>{if v.is_true(){return Ok(v)}}}} return Ok(Value::Bool(false))} }
                     match proc {
                         Value::Macro(p, kind) => {
                             let raw=args.to_vec()?;
-                            let expanded=match kind { MacroKind::Macro => self.apply_proc(&p, raw, env.clone())?, MacroKind::BMacro => self.apply_proc(&p, raw, env.clone())? };
+                            let expanded=if matches!(kind,MacroKind::Macro) { if let Some(v)=self.cached_macro_expansion(&expr,&p){v}else{let v=self.apply_proc(&p, raw, env.clone())?; self.store_macro_expansion(&expr,&p,&v); v} } else { match &*p { Procedure::Lambda{params,body,..}=>{let new_env=Env::new(Some(env.clone())); bind_params(self,&new_env,params,raw.clone(),env.clone())?; self.eval_lambda_body(body,new_env)?}, _=>self.apply_proc(&p, raw, env.clone())?} };
                             if let Value::Values(vs)=expanded { let mut out=Vec::new(); for x in vs { out.push(self.eval(x, env.clone())?); } return Ok(Value::list(out)); }
                             expr=expanded;
                             continue;
@@ -245,8 +1016,21 @@ impl Evaluator {
                                     if vals.len()<*min || max.map(|m| vals.len()>m).unwrap_or(false){ return Err(SchemeError::new("wrong-number-of-args", vec![Value::symbol(name)])); }
                                     return func(self,&vals);
                                 }
-                                Procedure::Lambda{params,body,env:proc_env,name} => {
+                                Procedure::Lambda{params,body,env:proc_env,name,..} => {
+                                    let self_tail_call=name.as_deref().zip(op.as_symbol()).map(|(a,b)|a==b).unwrap_or(false);
                                     if !params.star && vals.len()<params.required.len(){ let form=Value::list(vec![Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), body.borrow().get(0).cloned().unwrap_or(Value::Unspecified)]); return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("~S: not enough arguments: ((~S ~S ...)~{~^ ~S~})"), Value::list(vec![form]), Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), Value::Nil])); }
+                                    if self_tail_call && !params.star && params.rest.is_none() && vals.len()==params.required.len() {
+                                        let parent_matches={env.parent.borrow().as_ref().map(|parent|Rc::ptr_eq(parent,proc_env)).unwrap_or(false)};
+                                        let frame_has_params={let vars=env.vars.borrow(); params.required.iter().all(|name|vars.contains_key(name))};
+                                        if parent_matches && frame_has_params {
+                                            env.set_local_existing_many(params.required.iter().cloned().zip(vals.into_iter().map(|v|match v{Value::Float(x) if x.is_finite() && x>=i64::MAX as f64=>Value::Int(i64::MAX),Value::Float(x) if x.is_finite() && x<=i64::MIN as f64=>Value::Int(i64::MIN),v=>v})));
+                                            let len=body.borrow().len();
+                                            if len==0{return Ok(Value::Unspecified)}
+                                            for i in 0..len-1{ let x=body.borrow().get(i).cloned().unwrap_or(Value::Unspecified); self.eval(x, env.clone())?; }
+                                            expr=body.borrow().get(len-1).cloned().unwrap_or(Value::Unspecified);
+                                            continue;
+                                        }
+                                    }
                                     let new_env=Env::new(Some(proc_env.clone()));
                                     if let Err(e)=bind_params(self, &new_env, params, vals.clone(), env.clone()){ if let Some(err)=self.lambda_star_unknown_key_error(&e, params, body, &vals, name.as_deref()){return Err(err);} return Err(e); }
                                     let len=body.borrow().len();
@@ -259,30 +1043,164 @@ impl Evaluator {
                                 }
                             }
                         }
-                        p => { let vals=self.eval_list(args, env.clone())?; let old_call=self.pending_call_form.take(); if matches!(op.car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("lambda*")){let mut call=vec![op.clone()]; call.extend(vals.clone()); self.pending_call_form=Some(Value::list(call));} let r=self.apply_value(p, vals, env); self.pending_call_form=old_call; return r; }
+                        p => {
+                            if let Some(v)=self.try_apply_one_arg_applicable(&p,&args,&env)?{return Ok(v);}
+                            let vals=self.eval_list(args, env.clone())?;
+                            if let Value::Procedure(proc_rc)=&p {
+                                if let Procedure::Lambda{params,body,env:proc_env,..}= &**proc_rc {
+                                    if false && !params.star && params.rest.is_none() && vals.len()==params.required.len() {
+                                        let parent_matches={env.parent.borrow().as_ref().map(|parent|Rc::ptr_eq(parent,proc_env)).unwrap_or(false)};
+                                        let frame_has_params={let vars=env.vars.borrow(); params.required.iter().all(|name|vars.contains_key(name))};
+                                        if parent_matches && frame_has_params {
+                                            env.set_local_existing_many(params.required.iter().cloned().zip(vals.into_iter()));
+                                            let body_vec=body.borrow().clone();
+                                            if body_vec.is_empty(){return Ok(Value::Unspecified)}
+                                            for x in body_vec[..body_vec.len()-1].iter().cloned(){ self.eval(x, env.clone())?; }
+                                            expr=body_vec[body_vec.len()-1].clone();
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                            let old_call=self.pending_call_form.take(); if matches!(op.car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("lambda*")){let mut call=vec![op.clone()]; call.extend(vals.clone()); self.pending_call_form=Some(Value::list(call));} let r=self.apply_value(p, vals, env); self.pending_call_form=old_call; return r;
+                        }
                     }
                 }
                 v => return Ok(v),
             }
         }
     }
-    fn eval_list(&mut self, list: Value, env: EnvRef) -> Result<Vec<Value>> { let mut out=Vec::new(); for x in list.to_vec()? { match self.eval(x, env.clone())? { Value::Values(vs)=>out.extend(vs), v=>out.push(v) } } Ok(out) }
+    fn try_apply_one_arg_applicable(&mut self, proc:&Value, args:&Value, env:&EnvRef)->Result<Option<Value>>{
+        let Value::Pair(p)=args else{return Ok(None)};
+        let (expr,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())};
+        if !matches!(next,Value::Nil){return Ok(None)}
+        let direct=matches!(proc,Value::HashTable(_)|Value::Vector(_)|Value::ByteVector(_)|Value::FloatVector(_)|Value::IntVector(_)|Value::String(_)|Value::Pair(_)|Value::Env(_)|Value::MultiVector{..}|Value::MultiVectorView{..}|Value::ProcedureSource(_));
+        if !direct{return Ok(None)}
+        let arg=self.eval(expr,env.clone())?;
+        if matches!(arg,Value::Values(_)){return Ok(None)}
+        if let Value::HashTable(h)=proc{return Ok(Some(hash_lookup(h,&arg).unwrap_or(Value::Bool(false))))}
+        if let Value::Env(e)=proc{let key_owned; let k=match &arg{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-ref"),Value::Int(2),arg.clone(),Value::string(simple_value_kind(&arg)),Value::string("a symbol")]))}; return Ok(Some(e.get(k).unwrap_or(Value::Undefined)))}
+        Ok(Some(applicable_get(proc,&arg)?))
+    }
+    fn eval_list(&mut self, list: Value, env: EnvRef) -> Result<Vec<Value>> {
+        let mut out=Vec::new();
+        let mut cur=list;
+        loop {
+            match cur {
+                Value::Nil => return Ok(out),
+                Value::Pair(p) => {
+                    let (expr,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())};
+                    match self.eval(expr, env.clone())? { Value::Values(vs)=>out.extend(vs), v=>out.push(v) }
+                    cur=next;
+                }
+                other => return Err(SchemeError::new("wrong-type-arg", vec![other])),
+            }
+        }
+    }
+    fn current_builtin_func(&self, env:&EnvRef, sym:&str)->Option<(fn(&mut Evaluator,&[Value])->Result<Value>,usize,Option<usize>)>{
+        env.builtin_func(sym)
+    }
+    fn eval_hot_builtin(&mut self, sym:&str, args:Value, env:EnvRef)->Option<Result<Value>>{
+        match sym {"+"|"="|"<"|">"|"<="|">="|"*"|"-"|"remainder"|"modulo"|"quotient"|"vector-ref"|"vector-set!"|"hash-table-ref"|"hash-table-set!"|"list-ref"|"assoc"|"assq"|"memq"|"member"|"eq?"|"eqv?"|"equal?"|"null?"|"not"|"number?"|"char?"|"symbol?"|"boolean?"|"car"|"cdr"|"caar"|"cdar"|"length"|"cons"|"list"|"list-values"=>{},_=>return None}
+        if matches!(sym,"number?"|"char?"|"symbol?"|"boolean?"){
+            let _=self.current_builtin_func(&env,sym)?;
+            if let Value::Pair(ref p)=args{let (expr,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())}; if matches!(next,Value::Nil){let v=match self.eval(expr,env.clone()){Ok(v)=>v,Err(e)=>return Some(Err(e))}; if !matches!(v,Value::Values(_)){let ok=match sym{"number?"=>matches!(v,Value::Int(_)|Value::Rational(_,_)|Value::Float(_)|Value::Complex(_,_)|Value::NumberLiteral(_,_)),"char?"=>matches!(v,Value::Char(_)|Value::NamedChar(_)),"symbol?"=>matches!(v,Value::Symbol(_)|Value::Keyword(_)),_=>matches!(v,Value::Bool(_))}; return Some(Ok(Value::Bool(ok)));}}}
+        }
+        if matches!(sym,"modulo"|"remainder"|"quotient"){
+            let _=self.current_builtin_func(&env,sym)?;
+            if let Value::Pair(ref p1)=args{
+                let (e1,r1)={let PairData{car,cdr}= &*p1.borrow(); (car.clone(),cdr.clone())};
+                if let Value::Pair(p2)=r1{let (e2,r2)={let PairData{car,cdr}= &*p2.borrow(); (car.clone(),cdr.clone())}; if matches!(r2,Value::Nil){
+                    let a=match self.eval(e1,env.clone()){Ok(v)=>v,Err(e)=>return Some(Err(e))};
+                    let b=match self.eval(e2,env.clone()){Ok(v)=>v,Err(e)=>return Some(Err(e))};
+                    if let (Value::Int(x),Value::Int(y))=(a,b){return Some(match sym{"modulo"=>Ok(if y==0{Value::Int(x)}else{Value::Int(((x%y)+y)%y)}),"remainder"=>if y==0{Err(SchemeError::new("division-by-zero",vec![Value::string("~A: division by zero, (~A ~S ~S)"),Value::symbol("remainder"),Value::symbol("remainder"),Value::Int(x),Value::Int(y)]))}else{Ok(Value::Int(x%y))},_=>if y==0{Err(SchemeError::new("division-by-zero",vec![Value::string("~A: division by zero, (~A ~S ~S)"),Value::symbol("quotient"),Value::symbol("quotient"),Value::Int(x),Value::Int(y)]))}else{Ok(Value::Int(x/y))}});}
+                }}
+            }
+        }
+        if matches!(sym,"list"|"list-values"){
+            let _=self.current_builtin_func(&env,sym)?;
+            let vals=match self.eval_list(args, env){Ok(v)=>v,Err(e)=>return Some(Err(e))};
+            return Some(Ok(if sym=="list-values" && vals.len()==1 && matches!(vals[0],Value::Unspecified){Value::Nil}else{Value::list(vals)}));
+        }
+        let (func,min,max)=self.current_builtin_func(&env,sym)?;
+        Some((||{
+            if matches!(sym,"+"|"*"|"="|"<"|">"|"<="|">=") {
+                let mut vals:Option<Vec<Value>>=None;
+                let mut cur=args;
+                let mut count=0usize;
+                let mut acc=if sym=="*"{1i64}else{0i64};
+                let mut prev:Option<i64>=None;
+                let mut cmp_ok=true;
+                loop {
+                    match cur {
+                        Value::Nil=>break,
+                        Value::Pair(p)=>{
+                            let (expr,next)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())};
+                            let evaluated=self.eval(expr,env.clone())?;
+                            let feed=|v:Value, vals:&mut Option<Vec<Value>>, count:&mut usize, acc:&mut i64, prev:&mut Option<i64>, cmp_ok:&mut bool| -> Result<()> {
+                                *count+=1;
+                                if let Some(vec)=vals.as_mut(){vec.push(v); return Ok(());}
+                                if let Value::Int(n)=v{
+                                    match sym{
+                                        "+"=>{if let Some(x)=acc.checked_add(n){*acc=x;}else{*vals=Some(vec![Value::Int(*acc),Value::Int(n)]);}},
+                                        "*"=>{if let Some(x)=acc.checked_mul(n){*acc=x;}else{*vals=Some(vec![Value::Int(*acc),Value::Int(n)]);}},
+                                        "="|"<"|">"|"<="|">="=>{if let Some(p)=*prev{let ok=match sym{"="=>p==n,"<"=>p<n,">"=>p>n,"<="=>p<=n,">="=>p>=n,_=>true}; if !ok{*cmp_ok=false;} } *prev=Some(n);},
+                                        _=>{},
+                                    }
+                                }else{let mut vec=Vec::with_capacity(4); match sym{"+"=>{if *count>1{vec.push(Value::Int(*acc));}},"*"=>{if *count>1{vec.push(Value::Int(*acc));}},"="|"<"|">"|"<="|">="=>{if let Some(p)=*prev{vec.push(Value::Int(p));}},_=>{}} vec.push(v); *vals=Some(vec);}
+                                Ok(())
+                            };
+                            match evaluated { Value::Values(vs)=>{for v in vs{feed(v,&mut vals,&mut count,&mut acc,&mut prev,&mut cmp_ok)?;}}, v=>feed(v,&mut vals,&mut count,&mut acc,&mut prev,&mut cmp_ok)? }
+                            cur=next;
+                        }
+                        other=>return Err(SchemeError::new("wrong-type-arg",vec![other])),
+                    }
+                }
+                if vals.is_none(){return Ok(match sym{"+"=>Value::Int(acc),"*"=>Value::Int(acc),"="|"<"|">"|"<="|">="=>Value::Bool(cmp_ok),_=>unreachable!()});}
+                let vals=vals.unwrap();
+                if vals.len()<min || max.map(|m| vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args", vec![Value::symbol(sym)]));}
+                let old=self.curlet.clone(); self.curlet=env; let r=func(self,&vals); self.curlet=old; return r;
+            }
+            let vals=self.eval_list(args, env.clone())?;
+            if vals.len()<min || max.map(|m| vals.len()>m).unwrap_or(false){return Err(SchemeError::new("wrong-number-of-args", vec![Value::symbol(sym)]));}
+            let old=self.curlet.clone(); self.curlet=env; let r=func(self,&vals); self.curlet=old; r
+        })())
+    }
+    fn try_apply_compiled_fixed_slice(&mut self, proc:&Value, args:&[Value])->Result<Option<Value>>{
+        if args.iter().any(|v|matches!(v,Value::Values(_))){return Ok(None);}
+        let Value::Procedure(p)=proc else{return Ok(None)};
+        let Procedure::Lambda{params,env,compiled:Some(c),..}= &**p else{return Ok(None)};
+        if !matches!(&c.layout,CompiledLayout::SlotFrame{..}) || params.star || params.rest.is_some() || args.len()!=params.required.len(){return Ok(None);}
+        if c.capture_values.is_empty(){ if let Some(bc)=&c.bytecode{match self.eval_bytecode_body(bc,env.clone(),Some(args)){Ok(v)=>return Ok(Some(v)),Err(e) if e.tag=="unsupported-compiled-form"=>{},Err(e)=>return Err(e)}} return self.eval_compiled_body_slots(c,env.clone(),args).map(Some); }
+        let mut slots=self.compiled_slot_pool.pop().unwrap_or_default();
+        slots.clear();
+        slots.extend_from_slice(args);
+        Self::append_compiled_captures(&mut slots,c);
+        let result=(||{
+            if let Some(bc)=&c.bytecode{match self.eval_bytecode_body(bc,env.clone(),Some(&slots)){Ok(v)=>return Ok(Some(v)),Err(e) if e.tag=="unsupported-compiled-form"=>{},Err(e)=>return Err(e)}}
+            self.eval_compiled_body_slots(c,env.clone(),&slots).map(Some)
+        })();
+        slots.clear();
+        self.compiled_slot_pool.push(slots);
+        result
+    }
+
     fn apply_value(&mut self, proc: Value, args: Vec<Value>, env: EnvRef) -> Result<Value> {
         self.charge(1)?;
         match proc {
             Value::Procedure(p)=>self.apply_proc(&p,args,env),
             Value::Macro(p,_)=>self.apply_proc(&p,args,env),
-            Value::Vector(ref v)=>{ if args.len()>1 { let first=index_vec(&v.borrow(), &args[..1])?; if is_callable_value(&first){return self.apply_value(first,args[1..].to_vec(),env);} let mut form=vec![proc.clone()]; form.extend(args.clone()); return Err(cant_take_arguments_error_value(Value::list(form), &first, &args[1..])); } index_vec(&v.borrow(), &args) },
-            Value::ProcedureSource{..}=>{ if args.len()>1{if matches!(args[0],Value::Int(0)){return Err(SchemeError::new("syntax-error",vec![Value::string("~$ becomes ~$, but ~S can't take arguments"),Value::list({let mut v=vec![proc.clone()]; v.extend(args.clone()); v}),Value::list(vec![Value::symbol("lambda"),args[1].clone()]),Value::symbol("lambda")]))} return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),args[1].clone(),Value::string("it is too large")]))} applicable_get(&proc,&args[0]) },
-            Value::MultiVector{dims,data,kind}=>{if args.len()>dims.len(){if kind.is_some(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many indices: ~S"),Value::symbol("vector-ref"),Value::list(args)]));} let mut idx=0usize; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args[..dims.len()].iter().enumerate(){let n=n_idx; let i=match arg{Value::Int(n) if *n>=0=>*n as usize,Value::Int(n)=>return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),Value::Int(*n),Value::string("it is negative")])),v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),v.clone(),Value::string(simple_value_kind(v)),Value::string("an integer")]))}; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let first=data.borrow()[idx].clone(); return Err(SchemeError::new("syntax-error",vec![Value::string("attempt to apply ~A ~$ in ~S?"),Value::string(if matches!(first,Value::Int(_)){"an integer"}else{"an object"}),first.clone(),Value::list(vec![first.clone(),args[dims.len()].clone()])]));} let mut idx=0usize; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]))} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} if args.len()<dims.len(){let rem_dims=dims[args.len()..].to_vec(); return Ok(Value::MultiVectorView{dims:rem_dims,data:data.clone(),offset:idx,kind:kind.clone()});} Ok(data.borrow()[idx].clone())},
-            Value::MultiVectorView{dims,data,offset,kind}=>{let base=offset; if args.len()>dims.len(){if kind.is_some(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many indices: ~S"),Value::symbol("vector-ref"),Value::list(args)]));} let mut idx=base; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args[..dims.len()].iter().enumerate(){let n=n_idx; let i=match arg{Value::Int(n) if *n>=0=>*n as usize,Value::Int(n)=>return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),Value::Int(*n),Value::string("it is negative")])),v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),v.clone(),Value::string(simple_value_kind(v)),Value::string("an integer")]))}; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let first=data.borrow()[idx].clone(); return Err(SchemeError::new("syntax-error",vec![Value::string("attempt to apply ~A ~$ in ~S?"),Value::string(if matches!(first,Value::Int(_)){"an integer"}else{"an object"}),first.clone(),Value::list(vec![first.clone(),args[dims.len()].clone()])]));} let mut idx=base; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(2),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]))} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} if args.len()<dims.len(){let rem_dims=dims[args.len()..].to_vec(); return Ok(Value::MultiVectorView{dims:rem_dims,data:data.clone(),offset:idx,kind:kind.clone()});} Ok(data.borrow()[idx].clone())},
+            Value::Vector(_)=>{ let first=applicable_get(&proc,args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?)?; if args.len()>1 { if matches!(&first,Value::Procedure(p) if matches!(&**p,Procedure::Lambda{..})) || matches!(first,Value::Dilambda(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("can't call a (possibly unsafe) function implicitly: ~S ~S"),first,Value::list(args[1..].to_vec())]));} if is_callable_value(&first){return self.apply_value(first,args[1..].to_vec(),env);} let mut form=vec![proc.clone()]; form.extend(args.clone()); return Err(cant_take_arguments_error_value(Value::list(form), &first, &args[1..])); } Ok(first) }
+            Value::ProcedureSource(_)=>{ if args.len()>1{if matches!(args[0],Value::Int(0)){return Err(SchemeError::new("syntax-error",vec![Value::string("~$ becomes ~$, but ~S can't take arguments"),Value::list({let mut v=vec![proc.clone()]; v.extend(args.clone()); v}),Value::list(vec![Value::symbol("lambda"),args[1].clone()]),Value::symbol("lambda")]))} return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),args[1].clone(),Value::string("it is too large")]))} applicable_get(&proc,&args[0]) },
+            Value::MultiVector{dims,data,kind}=>{if args.len()>dims.len(){if kind.is_some(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many indices: ~S"),Value::symbol("vector-ref"),Value::list(args)]));} let mut idx=0usize; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args[..dims.len()].iter().enumerate(){let n=n_idx; let i=match arg{Value::Int(n) if *n>=0=>*n as usize,Value::Int(n)=>return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),Value::Int(*n),Value::string("it is negative")])),v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),v.clone(),Value::string(simple_value_kind(v)),Value::string("an integer")]))}; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let first=data.borrow()[idx].clone(); return Err(SchemeError::new("syntax-error",vec![Value::string("attempt to apply ~A ~$ in ~S?"),Value::string(if matches!(first,Value::Int(_)){"an integer"}else{"an object"}),first.clone(),Value::list(vec![first.clone(),args[dims.len()].clone()])]));} let mut idx=0usize; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]))} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} if args.len()<dims.len(){let rem_dims=dims[args.len()..].to_vec(); return Ok(Value::MultiVectorView{dims:Rc::new(rem_dims),data:data.clone(),offset:idx,kind:kind.clone()});} Ok(data.borrow()[idx].clone())},
+            Value::MultiVectorView{dims,data,offset,kind}=>{let base=offset; if args.len()>dims.len(){if kind.is_some(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many indices: ~S"),Value::symbol("vector-ref"),Value::list(args)]));} let mut idx=base; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args[..dims.len()].iter().enumerate(){let n=n_idx; let i=match arg{Value::Int(n) if *n>=0=>*n as usize,Value::Int(n)=>return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),Value::Int(*n),Value::string("it is negative")])),v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),v.clone(),Value::string(simple_value_kind(v)),Value::string("an integer")]))}; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let first=data.borrow()[idx].clone(); return Err(SchemeError::new("syntax-error",vec![Value::string("attempt to apply ~A ~$ in ~S?"),Value::string(if matches!(first,Value::Int(_)){"an integer"}else{"an object"}),first.clone(),Value::list(vec![first.clone(),args[dims.len()].clone()])]));} let mut idx=base; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int((n_idx+2) as i64),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(2),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]))} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} if args.len()<dims.len(){let rem_dims=dims[args.len()..].to_vec(); return Ok(Value::MultiVectorView{dims:Rc::new(rem_dims),data:data.clone(),offset:idx,kind:kind.clone()});} Ok(data.borrow()[idx].clone())},
             Value::ByteVector(v)=>index_bvec(&v.borrow(), &args),
             Value::FloatVector(v)=>index_fvec(&v.borrow(), &args),
             Value::IntVector(v)=>index_ivec(&v.borrow(), &args),
-            Value::String(ref s)=> { if args.len()>1{return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~S: too many arguments: ~A"),proc.clone(),Value::list(args)]));} let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let i=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-ref"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; let chars=s.borrow().chars().collect::<Vec<_>>(); if i<0||i as usize>=chars.len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("string-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]));} Ok(Value::Char(chars[i as usize])) },
-            Value::Pair(_)=> { let form_val={let mut xs=vec![proc.clone()]; xs.extend(args.clone()); Value::list(xs)}; let mut cur=proc; for (n,arg) in args.iter().enumerate() { let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string("it is negative")]))} for _ in 0..i { if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string("it is too large")]))} cur=cur.cdr()?; } if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string("it is too large")]))} cur=cur.car()?; if n+1<args.len(){ if is_callable_value(&cur){return self.apply_value(cur,args[n+1..].to_vec(),env);} return Err(cant_take_arguments_error_value(form_val, &cur, &args[n+1..])); } } Ok(cur) },
-            Value::Env(ref e)=> { if args.len()>1 && args.get(0).and_then(|v|v.as_symbol()).map(is_syntax_name).unwrap_or(false){ return self.eval(Value::list(args), e.clone()); } let k=args.get(0).and_then(|v| v.as_symbol()).ok_or_else(|| SchemeError::new("wrong-type-arg", vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-ref"),Value::Int(2),args.get(0).cloned().unwrap_or(Value::Unspecified),Value::string("a pair"),Value::string("a symbol")]))?; let first=e.get(k).unwrap_or(Value::Undefined); if args.len()>1{ if is_callable_value(&first){return self.apply_value(first,args[1..].to_vec(),env);} return Err(cant_take_arguments_error(&call_form_string(&proc,&args), &first, &args[1..])); } Ok(first) },
-            Value::HashTable(ref h)=> { let key=args.get(0).cloned().unwrap_or(Value::Unspecified); let mut first=Value::Bool(false); for (k,v) in h.borrow().iter(){ if equal(k,&key){first=v.clone(); break;}} if args.len()>1{ if let Value::MultiVector{kind:Some(k),..}|Value::MultiVectorView{kind:Some(k),..}= &first {let sym=match k.as_str(){"r"=>"float-vector-ref","i"=>"int-vector-ref","u"=>"byte-vector-ref",_=>"vector-ref"}; if args.len()>3{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol(sym),Value::Int(2),Value::list(args[1..].to_vec()),Value::string("too many indices")]));} if k.as_str()=="i" && args.len()>2 && !matches!(args[2],Value::Int(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-ref"),Value::Int(3),args[2].clone(),Value::string(if matches!(args[2],Value::Float(_)){"a real"}else if matches!(args[2],Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}} if matches!(first,Value::ByteVector(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("byte-vector-ref"),Value::Int(2),Value::list(args[1..].to_vec()),Value::string("too many indices")]));} if matches!(first,Value::IntVector(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("int-vector-ref"),Value::Int(2),Value::list(args[1..].to_vec()),Value::string("too many indices")]));} if matches!(first,Value::Macro(_,_)){let expanded=self.apply_value(first,args[1..].to_vec(),env.clone())?; return self.eval(expanded,env);} if matches!(first,Value::Procedure(_)|Value::Dilambda(_)){let shown=if let Value::Dilambda(dl)=&first{dl.0.clone()}else{first.clone()}; return Err(SchemeError::new("syntax-error",vec![Value::string("can't call a (possibly unsafe) function implicitly: ~S ~S"),shown,Value::list(args[1..].to_vec())]));} if is_callable_value(&first){return self.apply_value(first,args[1..].to_vec(),env);} let mut form=vec![proc.clone()]; form.extend(args.clone()); return Err(cant_take_arguments_error_value(Value::list(form), &first, &args[1..])); } Ok(first) },
+            Value::String(ref s)=> { if args.len()>1{return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("string ref: too many indices: (~S~{~^ ~S~})"),proc.clone(),Value::list(args)]));} let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let i=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-ref"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; let chars=s.borrow().chars().collect::<Vec<_>>(); if i<0||i as usize>=chars.len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("string-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]));} Ok(Value::Char(chars[i as usize])) },
+            Value::Pair(_)=> { let form_val={let mut xs=vec![proc.clone()]; xs.extend(args.clone()); Value::list(xs)}; let mut cur=proc; for (n,arg) in args.iter().enumerate() { let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string("it is negative")]))} for _ in 0..i { if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string("it is too large")]))} cur=cur.cdr()?; } if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string("it is too large")]))} cur=cur.car()?; if n+1<args.len(){ if matches!(&cur,Value::Procedure(p) if matches!(&**p,Procedure::Lambda{..})) || matches!(cur,Value::Dilambda(_)){let shown=if let Value::Dilambda(dl)=&cur{dl.0.clone()}else{cur.clone()}; return Err(SchemeError::new("syntax-error",vec![Value::string("can't call a (possibly unsafe) function implicitly: ~S ~S"),shown,Value::list(args[n+1..].to_vec())]));} if is_callable_value(&cur){return self.apply_value(cur,args[n+1..].to_vec(),env);} return Err(cant_take_arguments_error_value(form_val, &cur, &args[n+1..])); } } Ok(cur) },
+            Value::Env(ref e)=> { if args.len()>1 && args.get(0).and_then(|v|v.as_symbol()).map(is_syntax_name).unwrap_or(false){ return self.eval(Value::list(args), e.clone()); } let raw_key=args.get(0).cloned().unwrap_or(Value::Unspecified); let key_owned; let k=match &raw_key{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-ref"),Value::Int(2),raw_key.clone(),Value::string(simple_value_kind(&raw_key)),Value::string("a symbol")]))}; let first=e.get(k).unwrap_or(Value::Undefined); if args.len()>1{ if matches!(&first,Value::Procedure(p) if matches!(&**p,Procedure::Lambda{..})) || matches!(first,Value::Dilambda(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("can't call a (possibly unsafe) function implicitly: ~S ~S"),first,Value::list(args[1..].to_vec())]));} if is_callable_value(&first){return self.apply_value(first,args[1..].to_vec(),env);} let mut form=vec![proc.clone()]; form.extend(args.clone()); return Err(cant_take_arguments_error_value(Value::list(form), &first, &args[1..])); } Ok(first) },
+            Value::HashTable(ref h)=> { let key=args.get(0).cloned().unwrap_or(Value::Unspecified); let first=hash_lookup(h,&key).unwrap_or(Value::Bool(false)); if args.len()>1{ if let Value::FloatVector(v)=&first{let extra=args[1..].to_vec(); if extra.len()==1{if let Value::Int(n)=extra[0]{let len=v.borrow().len() as i64; if n<0||n>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A argument, ~S, is out of range (~A)"),Value::symbol("float-vector-ref"),Value::Int(n),Value::string(if n<0{"it is negative"}else{"it is too large"})]));}} return index_fvec(&v.borrow(),&extra);} } if let Value::MultiVector{kind:Some(k),..}|Value::MultiVectorView{kind:Some(k),..}= &first {let sym=match k.as_str(){"r"=>"float-vector-ref","i"=>"int-vector-ref","u"=>"byte-vector-ref",_=>"vector-ref"}; if args.len()>3{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol(sym),Value::Int(2),Value::list(args[1..].to_vec()),Value::string("too many indices")]));} if k.as_str()=="i" && args.len()>2 && !matches!(args[2],Value::Int(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-ref"),Value::Int(3),args[2].clone(),Value::string(if matches!(args[2],Value::Float(_)){"a real"}else if matches!(args[2],Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}} if let Value::ByteVector(v)=&first{let extra=args[1..].to_vec(); if extra.len()==1{if let Value::Int(n)=extra[0]{let len=v.borrow().len() as i64; if n<0||n>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A argument, ~S, is out of range (~A)"),Value::symbol("byte-vector-ref"),Value::Int(n),Value::string(if n<0{"it is negative"}else{"it is too large"})]));}} return index_bvec(&v.borrow(),&extra);} return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("byte-vector-ref"),Value::Int(2),Value::list(args[1..].to_vec()),Value::string("too many indices")]));} if let Value::IntVector(v)=&first{let extra=args[1..].to_vec(); if extra.len()==1{if let Value::Int(n)=extra[0]{let len=v.borrow().len() as i64; if n<0||n>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A argument, ~S, is out of range (~A)"),Value::symbol("int-vector-ref"),Value::Int(n),Value::string(if n<0{"it is negative"}else{"it is too large"})]));}} return index_ivec(&v.borrow(),&extra);} return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("int-vector-ref"),Value::Int(2),Value::list(args[1..].to_vec()),Value::string("too many indices")]));} if matches!(first,Value::Macro(_,_)){let expanded=self.apply_value(first,args[1..].to_vec(),env.clone())?; return self.eval(expanded,env);} if matches!(&first,Value::Procedure(p) if matches!(&**p,Procedure::Lambda{..})) || matches!(first,Value::Dilambda(_)){let shown=if let Value::Dilambda(dl)=&first{dl.0.clone()}else{first.clone()}; return Err(SchemeError::new("syntax-error",vec![Value::string("can't call a (possibly unsafe) function implicitly: ~S ~S"),shown,Value::list(args[1..].to_vec())]));} if is_callable_value(&first){return self.apply_value(first,args[1..].to_vec(),env);} let mut form=vec![proc.clone()]; form.extend(args.clone()); return Err(cant_take_arguments_error_value(Value::list(form), &first, &args[1..])); } Ok(first) },
             Value::Hook(funcs,_)=>{ let hk=Env::new(Some(self.root.clone())); hk.define("abs", args.get(0).cloned().unwrap_or(Value::Undefined)); hk.define("result", Value::Undefined); for f in funcs.borrow().iter().cloned(){ self.apply_value(f, vec![Value::Env(hk.clone())], env.clone())?; } Ok(Value::Undefined) }
             Value::Iterator{items,consumed,..}=>{let mut xs=items.borrow_mut(); if xs.is_empty(){Ok(Value::Eof)}else{*consumed.borrow_mut()+=1; Ok(xs.remove(0))}}
             Value::Dilambda(dl)=>self.apply_value(dl.0.clone(),args,env),
@@ -295,8 +1213,43 @@ impl Evaluator {
                 "set!"=>{ if args.len()>=2 { if let Some(s)=args[0].as_symbol(){ if env.set(s,args[1].clone()){return Ok(args[1].clone());} } if args.len()==2 { if set_first_equal(&env,&args[0],args[1].clone()){return Ok(args[1].clone());} if let Value::Pair(_)=&args[0]{ let target_expr=args[0].car()?; let target=if matches!(target_expr.car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("quote")){target_expr.cdr()?.car()?}else{target_expr}; return set_applicable(target, args[0].cdr()?.to_vec()?, args[1].clone()); } } else { let target=if matches!(args[0].car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("quote")){args[0].cdr()?.car()?}else{args[0].clone()}; return set_applicable(target, args[1..args.len()-1].to_vec(), args[args.len()-1].clone()); } } Err(SchemeError::new("wrong-type-arg", vec![Value::RootMeta(name)])) }
                 _=>Err(SchemeError::new("wrong-number-of-args", vec![]))
             },
-            other=>Err(SchemeError::new("wrong-type-arg", vec![other])),
+            other=>{let mut form=vec![other.clone()]; form.extend(args.clone()); Err(SchemeError::new("syntax-error",vec![Value::string("attempt to apply ~A ~$ in ~$?"),Value::string(simple_value_kind(&other)),other,Value::list(form)]))},
         }
+    }
+    fn try_lambda_star_slots(&mut self, env:&EnvRef, params:&Params, args:&[Value])->Result<Option<Vec<Value>>>{
+        if !params.star || params.rest.is_some() || params.rest_before_formals || params.allow_other_keys{return Ok(None)}
+        let n=params.required.len(); let mut values=vec![Value::Undefined;n]; let mut assigned=vec![false;n]; let mut i=0usize; let mut positional=0usize; let mut saw_keyword=false;
+        while i<args.len(){ if let Value::Keyword(k)=&args[i]{saw_keyword=true; if i+1>=args.len(){return Ok(None)} let key=k.trim_start_matches(':').trim_end_matches(':'); let Some(idx)=params.required.iter().position(|r|r==key) else{return Ok(None)}; if assigned[idx]{return Ok(None)} values[idx]=args[i+1].clone(); assigned[idx]=true; i+=2;}else{if saw_keyword{return Ok(None)} if positional>=n || assigned[positional]{return Ok(None)} values[positional]=args[i].clone(); assigned[positional]=true; positional+=1; i+=1;}}
+        fn safe_star_default(v:&Value)->bool{match v{Value::Bool(_)|Value::Nil|Value::Int(_)|Value::Float(_)|Value::Rational(_,_)|Value::Keyword(_)|Value::Char(_)|Value::String(_)=>true,Value::Pair(_)=>v.car().ok().and_then(|x|x.as_symbol().map(|s|s=="quote")).unwrap_or(false),_=>false}}
+        for idx in 0..n{if !assigned[idx]{let Some(Some(d))=params.defaults.get(idx) else{return Ok(None)}; if !safe_star_default(d){return Ok(None)}}}
+        for idx in 0..n{if !assigned[idx]{let Some(Some(d))=params.defaults.get(idx) else{return Ok(None)}; values[idx]=self.eval(d.clone(),env.clone())?;}}
+        Ok(Some(values))
+    }
+    fn try_bind_simple_lambda_star(&mut self, env:&EnvRef, params:&Params, args:&[Value])->Result<bool>{
+        let n=params.required.len();
+        let mut values=vec![Value::Undefined;n];
+        let mut assigned=vec![false;n];
+        let mut i=0usize; let mut positional=0usize; let mut saw_keyword=false;
+        while i<args.len(){
+            if let Value::Keyword(k)=&args[i]{
+                saw_keyword=true;
+                if i+1>=args.len(){return Ok(false)}
+                let key=k.trim_start_matches(':').trim_end_matches(':');
+                let Some(idx)=params.required.iter().position(|r|r==key) else{return Ok(false)};
+                if assigned[idx]{return Ok(false)}
+                values[idx]=args[i+1].clone(); assigned[idx]=true; i+=2;
+            }else{
+                if saw_keyword{return Ok(false)}
+                if positional>=n || assigned[positional]{return Ok(false)}
+                values[positional]=args[i].clone(); assigned[positional]=true; positional+=1; i+=1;
+            }
+        }
+        fn safe_star_default(v:&Value)->bool{match v{Value::Bool(_)|Value::Nil|Value::Int(_)|Value::Float(_)|Value::Rational(_,_)|Value::Keyword(_)|Value::Char(_)|Value::String(_)=>true,Value::Pair(_)=>v.car().ok().and_then(|x|x.as_symbol().map(|s|s=="quote")).unwrap_or(false),_=>false}}
+        for idx in 0..n{ if !assigned[idx]{ let Some(Some(d))=params.defaults.get(idx) else{return Ok(false)}; if !safe_star_default(d){return Ok(false)} } }
+        for name in &params.required{env.define(name,Value::Undefined);}
+        for idx in 0..n{ if !assigned[idx]{ let Some(Some(d))=params.defaults.get(idx) else{return Ok(false)}; values[idx]=self.eval(d.clone(),env.clone())?; } }
+        for (name,val) in params.required.iter().zip(values.into_iter()){env.set(name,val);}
+        Ok(true)
     }
     fn lambda_star_source(&self, params:&Params, body:&Rc<RefCell<Vec<Value>>>) -> Value { let mut form=vec![Value::symbol("lambda*"),proc_source_params(params)]; form.extend(body.borrow().iter().cloned()); Value::list(form) }
     fn lambda_star_unknown_key_error(&mut self, e:&SchemeError, params:&Params, body:&Rc<RefCell<Vec<Value>>>, args:&[Value], name:Option<&str>) -> Option<SchemeError> {
@@ -313,18 +1266,60 @@ impl Evaluator {
         self.charge(1)?;
         match p {
             Procedure::Builtin{name,func,min,max,..} => { if args.len()<*min || max.map(|m| args.len()>m).unwrap_or(false){ return Err(SchemeError::new("wrong-number-of-args", vec![Value::symbol(name)])); } let old=self.curlet.clone(); self.curlet=call_env; let r=func(self,&args); self.curlet=old; r }
-            Procedure::Lambda{params,body,env,name} => { if !params.star && args.len()<params.required.len(){ let form=Value::list(vec![Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), body.borrow().get(0).cloned().unwrap_or(Value::Unspecified)]); return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("~S: not enough arguments: ((~S ~S ...)~{~^ ~S~})"), Value::list(vec![form]), Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), Value::Nil])); } let new=Env::new(Some(env.clone())); if let Err(e)=bind_params(self, &new, params, args.clone(), call_env){ if let Some(err)=self.lambda_star_unknown_key_error(&e, params, body, &args, name.as_deref()){ return Err(err); } return Err(e);} self.eval_lambda_body(body, new) }
+            Procedure::Lambda{params,body,env,name,compiled} => {
+                if !params.star && args.len()<params.required.len(){ let form=Value::list(vec![Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), body.borrow().get(0).cloned().unwrap_or(Value::Unspecified)]); return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("~S: not enough arguments: ((~S ~S ...)~{~^ ~S~})"), Value::list(vec![form]), Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), Value::Nil])); }
+                if let Some(c)=compiled{
+                    if matches!(&c.layout,CompiledLayout::SlotFrame{..}) && params.star && params.rest.is_none(){if let Some(mut slots)=self.try_lambda_star_slots(env,params,&args)?{Self::append_compiled_captures(&mut slots,c); if let Some(bc)=&c.bytecode{match self.eval_bytecode_body(bc,env.clone(),Some(&slots)){Ok(v)=>return Ok(v),Err(e) if e.tag=="unsupported-compiled-form"=>{},Err(e)=>return Err(e)}} return self.eval_compiled_body_slots(c,env.clone(),&slots);}}
+                    if matches!(&c.layout,CompiledLayout::SlotFrame{..}) && !params.star && params.rest.is_none() && args.len()==params.required.len(){
+                        if c.capture_values.is_empty(){
+                            if let Some(bc)=&c.bytecode{
+                                match self.eval_bytecode_body(bc,env.clone(),Some(&args)){
+                                    Ok(v)=>return Ok(v),
+                                    Err(e) if e.tag=="unsupported-compiled-form"=>{},
+                                    Err(e)=>return Err(e),
+                                }
+                            }
+                            return self.eval_compiled_body_slots(c,env.clone(),&args);
+                        }
+                        let mut slots=self.compiled_slot_pool.pop().unwrap_or_default();
+                        slots.clear();
+                        slots.extend_from_slice(&args);
+                        Self::append_compiled_captures(&mut slots,c);
+                        let result=(||{
+                            if let Some(bc)=&c.bytecode{
+                                match self.eval_bytecode_body(bc,env.clone(),Some(&slots)){
+                                    Ok(v)=>return Ok(v),
+                                    Err(e) if e.tag=="unsupported-compiled-form"=>{},
+                                    Err(e)=>return Err(e),
+                                }
+                            }
+                            self.eval_compiled_body_slots(c,env.clone(),&slots)
+                        })();
+                        slots.clear();
+                        self.compiled_slot_pool.push(slots);
+                        return result;
+                    }
+                }
+                let new=Env::new(Some(env.clone()));
+                let fast_bound=if params.star && params.rest.is_none() && !params.rest_before_formals && !params.allow_other_keys { self.try_bind_simple_lambda_star(&new,params,&args)? } else { false };
+                if !fast_bound { if let Err(e)=bind_params(self, &new, params, args.clone(), call_env){ if let Some(err)=self.lambda_star_unknown_key_error(&e, params, body, &args, name.as_deref()){ return Err(err); } return Err(e);} }
+                if let Some(c)=compiled{
+                    if params.star { let mut slots=params.required.iter().map(|name|new.get(name).unwrap_or(Value::Undefined)).collect::<Vec<_>>(); Self::append_compiled_captures(&mut slots,c); return match &c.layout{CompiledLayout::SlotFrame{..}=>self.eval_compiled_body_slots(c,new,&slots),CompiledLayout::DynamicEnv=>self.eval_compiled_body(c,new)}; }
+                    return match &c.layout{CompiledLayout::SlotFrame{..}=>self.eval_compiled_body_slots(c,new,&args),CompiledLayout::DynamicEnv=>self.eval_compiled_body(c,new)}
+                }
+                self.eval_lambda_body(body, new)
+            }
         }
     }
     fn eval_lambda_body(&mut self, body:&Rc<RefCell<Vec<Value>>>, env:EnvRef)->Result<Value>{let len=body.borrow().len(); if len==0{return Ok(Value::Unspecified)}; for i in 0..len-1{let expr=body.borrow().get(i).cloned().unwrap_or(Value::Unspecified); self.eval(expr,env.clone())?;} let last=body.borrow().get(len-1).cloned().unwrap_or(Value::Unspecified); self.eval_tail(last,env)}
     fn eval_quasiquote(&mut self, expr: Value, env: EnvRef) -> Result<Value> {
         if let Value::Pair(_) = &expr {
             if expr.car()?.as_symbol()==Some("unquote") { return self.eval(expr.cdr()?.car()?, env); }
-            if expr.car()?.as_symbol()==Some("quasiquote") { return self.nested_quasiquote_repr(expr.cdr()?.car()?, env); }
+            if expr.car()?.as_symbol()==Some("quasiquote") { let inner=expr.cdr()?.car()?; if matches!(inner.car().ok().and_then(|v|v.as_symbol().map(|x|x.to_string())).as_deref(),Some("unquote")){return Ok(inner.cdr()?.car()?);} return self.nested_quasiquote_repr(inner, env); }
         }
         match expr {
             Value::Pair(_) => self.eval_quasiquote_pair(expr, env),
-            Value::Vector(v)=> { let mut out=Vec::new(); for x in v.borrow().iter(){ if let Value::Pair(_)=x { if x.car()?.as_symbol()==Some("unquote-splicing") { let expr=x.cdr()?.car()?; out.push(Value::list(vec![Value::symbol("unquote"),Value::list(vec![Value::symbol("apply-values"),expr])])); continue; } } out.push(self.eval_quasiquote(x.clone(), env.clone())?); } Ok(Value::Vector(Rc::new(RefCell::new(out)))) },
+            Value::Vector(v)=> { let vals=v.values(); let mut out=Vec::new(); for x in vals.iter(){ if let Value::Pair(_)=x { if x.car()?.as_symbol()==Some("unquote-splicing") { let expr=x.cdr()?.car()?; out.push(Value::list(vec![Value::symbol("unquote"),Value::list(vec![Value::symbol("apply-values"),expr])])); continue; } if x.car()?.as_symbol()==Some("unquote") { let expr=x.cdr()?.car()?; if matches!(expr,Value::Bool(_)|Value::Nil|Value::Int(_)|Value::Rational(_,_)|Value::Float(_)|Value::Complex(_,_)|Value::NumberLiteral(_,_)|Value::Char(_)|Value::NamedChar(_)|Value::Keyword(_)|Value::String(_)){out.push(self.eval(expr,env.clone())?); continue;} if vals.len()==1 && matches!(expr,Value::Symbol(_)){out.push(Value::RawDisplay(Rc::new(format!("(unquote {})",expr)))); continue;} out.push(x.clone()); continue; } } if x.as_symbol()==Some("unquote"){out.push(Value::RawDisplay(Rc::new("<unquote>".to_string()))); continue;} out.push(self.eval_quasiquote(x.clone(), env.clone())?); } Ok(Value::Vector(Rc::new(VectorData::new(out)))) },
             v=>Ok(v)
         }
     }
@@ -367,6 +1362,7 @@ impl Evaluator {
     fn eval_quasiquote_pair(&mut self, pair: Value, env: EnvRef) -> Result<Value> {
         let car=pair.car()?;
         let cdr=pair.cdr()?;
+        if let Value::Pair(_) = &cdr { if cdr.car()?.as_symbol()==Some("unquote-splicing") { let qcar=self.eval_quasiquote(car, env.clone())?; let spliced=self.eval(cdr.cdr()?.car()?, env.clone())?; let vals=spliced.to_vec().map_err(|_|SchemeError::new("wrong-type-arg",vec![Value::string("apply's last argument should be a proper list: ~S"),Value::list(vec![spliced.clone()])])); if let Ok(vs)=vals { if vs.len()>1 { let mut items=vec![Value::list(vec![qcar])]; items.extend(vs); return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: too many arguments: (~A~{~^ ~S~})"),Value::symbol("<list*>"),Value::symbol("<list*>"),Value::list(items)])); } return Ok(vs.into_iter().next().unwrap_or(Value::Nil)); } else { return Err(vals.err().unwrap()); } } }
         if let Value::Pair(_) = &car {
             if car.car()?.as_symbol()==Some("unquote-splicing") {
                 let spliced=self.eval(car.cdr()?.car()?, env.clone())?;
@@ -386,17 +1382,48 @@ impl Evaluator {
         let xs=args.to_vec()?;
         match xs.get(0) {
             Some(Value::Symbol(s)) => { let v=self.eval(xs.get(1).cloned().unwrap_or(Value::Unspecified), env.clone())?; if let Value::Values(vs)=v{return Err(SchemeError::new("syntax-error",vec![Value::string("~A: more than one value: (~A ~A ~S)"),Value::symbol("define"),Value::symbol("define"),Value::symbol(s),Value::Values(vs)]));} env.define(s.as_str(), v.clone()); Ok(v) }
-            Some(Value::Pair(_)) => { let head=xs[0].clone(); let name=head.car()?.as_symbol().unwrap_or("<lambda>").to_string(); let params=head.cdr()?; let proc=self.make_lambda(Value::cons(params, Value::list(xs[1..].to_vec())), env.clone(), false, Some(name.clone()))?; env.define(name, proc.clone()); Ok(proc) }
+            Some(Value::Pair(_)) => { let head=xs[0].clone(); let name_v=head.car()?; let Some(name_s)=name_v.as_symbol() else {return Err(SchemeError::new("syntax-error",vec![Value::string("~A: can't define ~S, ~A (should be a symbol)"),Value::symbol("define"),name_v.clone(),Value::string(simple_value_kind(&name_v))]));}; let name=name_s.to_string(); let params=head.cdr()?; let proc=self.make_lambda(Value::cons(params, Value::list(xs[1..].to_vec())), env.clone(), false, Some(name.clone()))?; env.define(name, proc.clone()); Ok(proc) }
             _=>Err(SchemeError::new("syntax-error", vec![Value::symbol("define")]))
         }
     }
     fn eval_define_star(&mut self, args: Value, env: EnvRef) -> Result<Value> {
-        let xs=args.to_vec()?; let head=xs[0].clone(); let name=head.car()?.as_symbol().unwrap_or("<lambda>").to_string(); let params=head.cdr()?; let proc=self.make_lambda(Value::cons(params, Value::list(xs[1..].to_vec())), env.clone(), true, Some(name.clone()))?; env.define(name, proc.clone()); Ok(proc)
+        let xs=args.to_vec()?; let head=xs[0].clone(); let name_v=head.car()?; let Some(name_s)=name_v.as_symbol() else {return Err(SchemeError::new("syntax-error",vec![Value::string("~A: can't define ~S, ~A (should be a symbol)"),Value::symbol("define*"),name_v.clone(),Value::string(simple_value_kind(&name_v))]));}; let name=name_s.to_string(); let params=head.cdr()?; let proc=self.make_lambda(Value::cons(params, Value::list(xs[1..].to_vec())), env.clone(), true, Some(name.clone()))?; env.define(name, proc.clone()); Ok(proc)
     }
     fn set_place_value(&mut self, place: Value, val: Value, env: EnvRef) -> Result<Value> {
         if let Some(s)=place.as_symbol() { if env.set(s,val.clone()){return Ok(val);} return Err(SchemeError::new("unbound-variable", vec![Value::symbol(s)])); }
         if let Value::Pair(_) = &place {
             let op_expr=place.car()?;
+            if let Some(name)=op_expr.as_symbol() {
+                let raw_tail=place.cdr()?;
+                if let Value::Pair(arg_pair)=&raw_tail {
+                    let (idx_expr,tail2)={let PairData{car,cdr}= &*arg_pair.borrow(); (car.clone(),cdr.clone())};
+                    if matches!(tail2,Value::Nil) {
+                        if let Some(target)=env.get(name) {
+                            match target {
+                                Value::ByteVector(ref bv) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    let ii=match idx{Value::Int(n)=>n,v=>return set_applicable(target,vec![v],val)};
+                                    let n=match val{Value::Int(n)=>n,v=>return set_applicable(target,vec![Value::Int(ii)],v)};
+                                    let mut data=bv.borrow_mut();
+                                    if ii>=0 && (ii as usize)<data.len() && (0..=255).contains(&n){data[ii as usize]=n as u8; return Ok(Value::Int(n));}
+                                    drop(data);
+                                    return set_applicable(target,vec![Value::Int(ii)],Value::Int(n));
+                                }
+                                Value::Vector(ref vec) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    if let Value::Int(ii)=idx{if ii>=0 && (ii as usize)<vec.len(){vec.set(ii as usize,val.clone()); return Ok(val);}}
+                                    return set_applicable(target,vec![idx],val);
+                                }
+                                Value::HashTable(ref h) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    return Ok(hash_set_entry(h,idx,val));
+                                }
+                                _=>{}
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(op_name)=op_expr.as_symbol() {
                 let raw_args=place.cdr()?.to_vec()?;
                 match op_name {
@@ -429,11 +1456,44 @@ impl Evaluator {
         result
     }
     fn eval_set(&mut self, args: Value, env: EnvRef) -> Result<Value> {
-        let xs=args.to_vec()?; let place=xs[0].clone(); let val_expr=xs[1].clone();
-        if let Some(s)=place.as_symbol() { let val=self.eval(val_expr.clone(), env.clone())?; let val=match val{Value::Values(vs) if vs.is_empty()=>Value::Unspecified,Value::Values(vs) if vs.len()==1=>vs[0].clone(),Value::Values(vs)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("(set! {} (values{})): too many arguments to set!",s,format!(" {}",vs.iter().map(|v|v.to_string()).collect::<Vec<_>>().join(" "))))])),v=>v}; if env.set(s,val.clone()){return Ok(val);} return Err(SchemeError::new("unbound-variable", vec![Value::symbol(s)])); }
+        let xs=args.to_vec()?; if xs.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("set!: not enough arguments: ~A"),Value::list({let mut v=vec![Value::symbol("set!")]; v.extend(xs.clone()); v})]));} let place=xs[0].clone(); let val_expr=xs[1].clone();
+        if let Some(s)=place.as_symbol() { let val=self.eval(val_expr.clone(), env.clone())?; let val=match val{Value::Values(vs) if vs.is_empty()=>Value::Unspecified,Value::Values(vs) if vs.len()==1=>vs[0].clone(),Value::Values(_vs)=>return Err(SchemeError::new("syntax-error",vec![Value::string("~A: too many arguments to set!"),Value::list(vec![Value::symbol("set!"),Value::symbol(&s),val_expr.clone()])])),v=>v}; if env.set(s,val.clone()){return Ok(val);} return Err(SchemeError::new("unbound-variable", vec![Value::symbol(s)])); }
         if let Value::Pair(_) = place {
-            if place.car()?.as_symbol()==Some("setter") { let proc=self.eval(place.cdr()?.car()?, env.clone())?; let val=self.eval(val_expr.clone(), env.clone())?; let k=proc_key(&proc).ok_or_else(||SchemeError::new("wrong-type-arg",vec![proc]))?; self.proc_setters.borrow_mut().insert(k, val); return Ok(Value::Unspecified); }
+            if place.car()?.as_symbol()==Some("setter") { let proc=self.eval(place.cdr()?.car()?, env.clone())?; let val=self.eval(val_expr.clone(), env.clone())?; if matches!(val,Value::Values(ref vs) if vs.len()>1){return Err(SchemeError::new("syntax-error",vec![Value::string("~A: too many arguments to set!"),Value::list(vec![Value::symbol("set!"),place.clone(),val_expr.clone()])]));} let val=if let Value::Values(vs)=val{vs.into_iter().next().unwrap_or(Value::Unspecified)}else{val}; if !(matches!(val,Value::Procedure(_)|Value::Macro(_,_)|Value::Bool(false))){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::string("set! setter"),Value::Int(2),val.clone(),Value::string(simple_value_kind(&val)),Value::string("a procedure or #f")]))} let k=proc_key(&proc).ok_or_else(||SchemeError::new("wrong-type-arg",vec![proc]))?; self.proc_setters.borrow_mut().insert(k, val); return Ok(Value::Unspecified); }
             let op_expr=place.car()?;
+            if let Some(name)=op_expr.as_symbol() {
+                let raw_tail=place.cdr()?;
+                if let Value::Pair(arg_pair)=&raw_tail {
+                    let (idx_expr,tail2)={let PairData{car,cdr}= &*arg_pair.borrow(); (car.clone(),cdr.clone())};
+                    if matches!(tail2,Value::Nil) {
+                        if let Some(target)=env.get(name) {
+                            match target {
+                                Value::ByteVector(ref bv) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    let val=self.eval(val_expr.clone(),env.clone())?;
+                                    if let (Value::Int(ii),Value::Int(n))=(&idx,&val){let mut data=bv.borrow_mut(); if *ii>=0 && (*ii as usize)<data.len() && (0..=255).contains(n){data[*ii as usize]=*n as u8; return Ok(Value::Int(*n));}}
+                                }
+                                Value::Vector(ref vec) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    let val=self.eval(val_expr.clone(),env.clone())?;
+                                    if !matches!(val,Value::Values(_)){if let Value::Int(ii)=idx{if ii>=0 && (ii as usize)<vec.len(){vec.set(ii as usize,val.clone()); return Ok(val);}}}
+                                }
+                                Value::HashTable(ref h) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    let val=self.eval(val_expr.clone(),env.clone())?;
+                                    if !matches!(idx,Value::Values(_)) && !matches!(val,Value::Values(_)){return Ok(hash_set_entry(h,idx,val));}
+                                }
+                                Value::Env(ref e) if !is_marked_immutable(&target)=>{
+                                    let idx=self.eval(idx_expr,env.clone())?;
+                                    let val=self.eval(val_expr.clone(),env.clone())?;
+                                    if !matches!(idx,Value::Values(_)) && !matches!(val,Value::Values(_)){let key_owned; let k=match &idx{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-set!"),Value::Int(2),idx.clone(),Value::string(simple_value_kind(&idx)),Value::string("a symbol")]))}; if !e.set(k,val.clone()){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("let-set!: ~A is not defined in ~A"),Value::symbol(k),Value::Env(e.clone())]));} return Ok(val);}
+                                }
+                                _=>{}
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(op_name)=op_expr.as_symbol() {
                 let raw_args=place.cdr()?.to_vec()?;
                 match op_name {
@@ -442,11 +1502,12 @@ impl Evaluator {
                     "cdr" => { let target=self.eval(raw_args[0].clone(), env.clone())?; let val=self.eval(val_expr.clone(), env.clone())?; if matches!(val,Value::Values(ref vs) if vs.len()>1){return Err(SchemeError::new("syntax-error",vec![Value::string("~A: too many arguments to set!"),Value::list(vec![Value::symbol("set!"),place.clone(),val_expr.clone()])]));} return target.set_cdr(if let Value::Values(vs)=val{vs.into_iter().next().unwrap_or(Value::Unspecified)}else{val}); }
                     "list-ref" => { let target=self.eval(raw_args[0].clone(), env.clone())?; let idxs=raw_args[1..].iter().cloned().map(|x|self.eval(x, env.clone())).collect::<Result<Vec<_>>>()?; let val=self.eval(val_expr.clone(), env.clone())?; return list_set_nested(target, &idxs, val); }
                     "vector-ref" => { if raw_args.len()>2 { let target=self.eval(raw_args[0].clone(), env.clone())?; if !matches!(target,Value::MultiVector{..}){let idxs=raw_args[1..].iter().cloned().map(|x|self.eval(x, env.clone())).collect::<Result<Vec<_>>>()?; let val=self.eval(val_expr.clone(), env.clone())?; let mut all=vec![target]; all.extend(idxs); all.push(val); return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("too many arguments for vector-set!: ({})",all.iter().map(|v|v.to_string()).collect::<Vec<_>>().join(" ")))]));} } }
+                    "procedure-source" => { let _=self.eval(val_expr.clone(), env.clone())?; return Err(SchemeError::new("no-setter",vec![Value::string("~A (~A) does not have a setter: (set! ~S ~S)"),Value::symbol("procedure-source"),Value::string("a c-function"),place.clone(),val_expr.clone()])); }
                     "*s7*" => { let val=self.eval(val_expr.clone(), env.clone())?; return Ok(val); }
                     "current-input-port" => { if raw_args.is_empty(){ let val=self.eval(val_expr.clone(), env.clone())?; self.stdin=val.clone(); return Ok(val); } }
                     "current-output-port" => { if raw_args.is_empty(){ let val=self.eval(val_expr.clone(), env.clone())?; self.stdout=val.clone(); return Ok(val); } }
                     "current-error-port" => { if raw_args.is_empty(){ let val=self.eval(val_expr.clone(), env.clone())?; self.stderr=val.clone(); return Ok(val); } }
-                    "port-position" => { let p=self.eval(raw_args[0].clone(), env.clone())?; if matches!(p,Value::Port(ref pp) if matches!(&*pp.borrow(),Port::Output{..})){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::string("set! port-position"),Value::Int(1),p,Value::string("an output port"),Value::string("an input port")]))} let val=self.eval(val_expr.clone(), env.clone())?; let n=match val{Value::Int(n)=>n,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::string("set! port-position"),Value::Int(2),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else if matches!(v,Value::Symbol(_)){"a symbol"}else{"an object"}),Value::string("an integer")]))}; if n<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("port-position"),Value::Int(2),Value::Int(n),Value::string("it is negative")]))} return set_port_position(&p, n as usize).map(|_| Value::Int(n)); }
+                    "port-position" => { let p=self.eval(raw_args[0].clone(), env.clone())?; if matches!(p,Value::Port(ref pp) if matches!(&*pp.borrow(),Port::Output{..})){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::string("set! port-position"),Value::Int(1),p,Value::string("an output port"),Value::string("an input port")]))} let val=self.eval(val_expr.clone(), env.clone())?; let n=match val{Value::Int(n)=>n,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::string("set! port-position"),Value::Int(2),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else if matches!(v,Value::Symbol(_)){"a symbol"}else if matches!(v,Value::Complex(_,_)){"a complex number"}else{"an object"}),Value::string("an integer")]))}; if n<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("port-position"),Value::Int(2),Value::Int(n),Value::string("it is negative")]))} return set_port_position(&p, n as usize).map(|_| Value::Int(n)); }
                     "outlet" => { let target=self.eval(raw_args[0].clone(), env.clone())?; let val=self.eval(val_expr.clone(), env.clone())?; if let (Value::Env(e),Value::Env(parent))=(target,val.clone()){*e.parent.borrow_mut()=Some(parent); return Ok(val);} return Err(SchemeError::new("wrong-type-arg",vec![val])); }
                     "hook-functions" => { let h=self.eval(raw_args[0].clone(), env.clone())?; let val=self.eval(val_expr.clone(), env.clone())?; if let Value::Hook(funcs,_)=h { *funcs.borrow_mut()=val.to_vec()?; return Ok(val); } }
                     _=>{}
@@ -457,12 +1518,16 @@ impl Evaluator {
             let target=self.eval(op_expr.clone(), env.clone())?;
             let idxs=self.eval_list(place.cdr()?, env.clone())?;
             let val=self.eval(val_expr.clone(), env.clone())?;
-            if let Value::Values(vs)=&val { if vs.len()>1 { if matches!(target,Value::ProcedureSource{..}){return Err(SchemeError::new("syntax-error",vec![Value::string("~A: too many arguments to set!"),Value::list(vec![Value::symbol("set!"),place.clone(),val_expr.clone()])]));} return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("(set! {} (values{})): too many arguments to set!",place,format!(" {}",vs.iter().map(|v|v.to_string()).collect::<Vec<_>>().join(" "))))])); } }
+            if let Value::Values(vs)=&val { if vs.len()>1 { return Err(SchemeError::new("syntax-error",vec![Value::string("~A: too many arguments to set!"),Value::list(vec![Value::symbol("set!"),place.clone(),val_expr.clone()])])); } }
             if let Value::SetterRef(k)=target { self.proc_setters.borrow_mut().insert(k, val); return Ok(Value::Unspecified); }
             if idxs.is_empty() {
                 if matches!(target,Value::Iterator{..}) { let name=op_expr.as_symbol().unwrap_or("#<iterator>"); return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("{} (an iterator) does not have a setter: (set! {} {})",name,code_repr(&place),code_repr(&val_expr)))])); }
                 if matches!(target,Value::Macro(_,_)) { let name=op_expr.as_symbol().unwrap_or("#<macro>"); return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("{} (a macro) does not have a setter: (set! {} {})",name,code_repr(&place),code_repr(&val_expr)))])); }
                 if let Some(k)=proc_key(&target) { let setter_opt={self.proc_setters.borrow().get(&k).cloned()}; if let Some(setter)=setter_opt { return self.apply_value(setter, vec![val.clone()], env).map(|_| val); } }
+            }
+            if !idxs.is_empty() {
+                if let Value::Dilambda(dl)=&target { let mut call_args=idxs.clone(); call_args.push(val.clone()); return self.apply_value(dl.1.clone(),call_args,env).map(|_|val); }
+                if let Some(k)=proc_key(&target) { let setter_opt={self.proc_setters.borrow().get(&k).cloned()}; if let Some(setter)=setter_opt { let mut call_args=idxs.clone(); call_args.push(val.clone()); return self.apply_value(setter,call_args,env).map(|_|val); } else if matches!(target,Value::Procedure(_)) {return Err(SchemeError::new("no-setter",vec![Value::string("~A (~A) does not have a setter: (set! ~S ~S)"),op_expr.clone(),Value::string("a c-function"),place.clone(),val_expr.clone()]));} }
             }
             if let Value::Symbol(s)=&target { if let Some(actual)=env.get(s) { return set_applicable_from_set(actual, idxs, val, &place); } }
             return set_applicable_from_set(target, idxs, val, &place);
@@ -470,29 +1535,69 @@ impl Evaluator {
         Err(SchemeError::new("syntax-error", vec![Value::symbol("set!")]))
     }
     fn make_lambda(&mut self, args: Value, env: EnvRef, star: bool, name: Option<String>) -> Result<Value> {
-        let xs=args.to_vec()?; let params=parse_params(xs.get(0).cloned().unwrap_or(Value::Nil), star)?; Ok(Value::Procedure(Rc::new(Procedure::Lambda{params,body:Rc::new(RefCell::new(xs[1..].to_vec())),env,name})))
+        let xs=args.to_vec()?; if xs.is_empty(){return Err(SchemeError::new("syntax-error",vec![Value::string("lambda: no arguments? ~A"),Value::list(vec![Value::symbol(if star{"lambda*"}else{"lambda"})])]));} let params=parse_params(xs.get(0).cloned().unwrap_or(Value::Nil), star)?; let body_vec=xs[1..].to_vec(); let compiled=if params.rest.is_none() && (!star || params.defaults.iter().all(|d|d.is_some())){compiled::analyze_body_with_params(env.clone(),&body_vec,&params.required).map(Rc::new)}else{None}; Ok(Value::Procedure(Rc::new(Procedure::Lambda{params,body:Rc::new(RefCell::new(body_vec)),env,name,compiled})))
     }
-    fn make_macro(&mut self, args: Value, env: EnvRef, kind: MacroKind, star: bool) -> Result<Value> { let Value::Procedure(p)=self.make_lambda(args, env, star, None)? else { unreachable!() }; Ok(Value::Macro(p, kind)) }
+    fn make_macro(&mut self, args: Value, env: EnvRef, kind: MacroKind, star: bool) -> Result<Value> { let xs=args.to_vec()?; let who=match kind{MacroKind::Macro=>"macro",MacroKind::BMacro=>"bacro"}; let form=Value::list({let mut v=vec![Value::symbol(who)]; v.extend(xs.clone()); v}); if xs.is_empty(){return Err(SchemeError::new("syntax-error",vec![Value::string("~S: ~S has no parameters or body?"),Value::symbol(who),form]));} if xs.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("~S: ~S has no body?"),Value::symbol(who),form]));} let params=parse_params(xs.get(0).cloned().unwrap_or(Value::Nil), star)?; let body=Rc::new(RefCell::new(xs[1..].to_vec())); Ok(Value::Macro(Rc::new(Procedure::Lambda{params,body,env,name:None,compiled:None}), kind)) }
     fn eval_define_macro(&mut self, args: Value, env: EnvRef, kind: MacroKind, star: bool) -> Result<Value> {
-        let xs=args.to_vec()?; let head=xs[0].clone(); let name=head.car()?.as_symbol().unwrap_or("<macro>").to_string(); let params=head.cdr()?; let Value::Macro(p,k)=self.make_macro(Value::cons(params, Value::list(xs[1..].to_vec())), env.clone(), kind, star)? else { unreachable!() }; let m=Value::Macro(p,k); env.define(name, m.clone()); Ok(m)
+        let xs=args.to_vec()?; let who=match kind{MacroKind::Macro=>"define-macro",MacroKind::BMacro=>"define-bacro"}; if xs.is_empty(){return Err(SchemeError::new("syntax-error",vec![Value::string("~A name missing (stray dot?): ~A"),Value::symbol(who),Value::Nil]));} let head=xs[0].clone(); let name_v=head.car()?; let Some(name_s)=name_v.as_symbol() else {return Err(SchemeError::new("syntax-error",vec![Value::string("~A: ~S is not a symbol?"),Value::symbol(who),name_v]));}; let name=name_s.to_string(); let params=head.cdr()?; let Value::Macro(p,k)=self.make_macro(Value::cons(params, Value::list(xs[1..].to_vec())), env.clone(), kind, star)? else { unreachable!() }; let m=Value::Macro(p,k); env.define(name, m.clone()); Ok(m)
     }
     fn normalize_binding_value_ctx(&self, ctx:&str, name:&str, val:Value)->Result<Value>{match val{Value::Values(vs) if vs.is_empty()=>Ok(Value::Unspecified),Value::Values(vs) if vs.len()==1=>Ok(vs[0].clone()),Value::Values(vs)=>Err(SchemeError::new("syntax-error",vec![Value::string("~A: can't bind ~A to ~S"),Value::symbol(ctx),Value::symbol(name),Value::Values(vs)])),v=>Ok(v)}}
     fn eval_let(&mut self, args: Value, env: EnvRef, sequential: bool, _named: bool) -> Result<Value> {
         let xs=args.to_vec()?;
-        if let Some(Value::Symbol(name))=xs.get(0) { // named let
-            let bindings=xs[1].to_vec()?; let params=bindings.iter().map(|b| b.car().unwrap().as_symbol().unwrap().to_string()).collect::<Vec<_>>(); let vals=bindings.iter().map(|b| b.cdr().unwrap().car().unwrap()).collect::<Vec<_>>();
-            let new=Env::new(Some(env.clone())); let proc=Value::Procedure(Rc::new(Procedure::Lambda{params:Params{required:params.clone(),rest:None,star:sequential,defaults:vec![None; params.len()],allow_other_keys:false,rest_before_formals:false},body:Rc::new(RefCell::new(xs[2..].to_vec())),env:new.clone(),name:Some(name.to_string())})); new.define(name.as_str(), proc.clone()); let evaled=vals.into_iter().map(|v| self.eval(v, env.clone())).collect::<Result<Vec<_>>>()?; return self.apply_value(proc, evaled, env);
+        if !matches!(xs.get(0),Some(Value::Symbol(_))) && !matches!(xs.get(0),Some(Value::Pair(_) | Value::Nil)){
+            return Err(SchemeError::new("syntax-error",vec![Value::string("let variable list is messed up or missing: ~A"),Value::list({let mut v=vec![Value::symbol("let")]; v.extend(xs.clone()); v})]));
+        }
+        if let Some(Value::Symbol(name))=xs.get(0) {
+            let bindings=xs[1].to_vec()?; let let_src=Value::list({let mut v=vec![Value::symbol("let")]; v.extend(xs.clone()); v});
+            let mut seen=HashSet::new();
+            for b in &bindings{
+                if !matches!(b,Value::Pair(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("let variable declaration, but no value?: ~A in ~A"),Value::list(vec![b.clone()]),Value::string(code_repr(&let_src))]));}
+                let bv=match b.to_vec(){Ok(v)=>v,Err(_)=>return Err(SchemeError::new("syntax-error",vec![Value::string("let variable declaration, ~A, has more than one value in ~A"),Value::list(vec![b.clone()]),Value::string(code_repr(&let_src))]))};
+                if bv.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("let variable declaration, but no value?: ~A in ~A"),Value::list(vec![b.clone()]),Value::string(code_repr(&let_src))]));}
+                if bv.len()>2{return Err(SchemeError::new("syntax-error",vec![Value::string("let variable declaration, ~A, has more than one value in ~A"),Value::list(vec![b.clone()]),Value::string(code_repr(&let_src))]));}
+                if matches!(bv[0],Value::Keyword(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A: can't bind an immutable object: ~S"),Value::symbol("let"),Value::list(vec![b.clone()])]));}
+                if bv[0].as_symbol().is_none(){return Err(SchemeError::new("syntax-error",vec![Value::string("bad variable name ~W in let (it is ~A, not a symbol) in ~A"),bv[0].clone(),Value::string(simple_value_kind(&bv[0])),Value::string(code_repr(&let_src))]));}
+                let n=bv[0].as_symbol().unwrap().to_string(); if !seen.insert(n.clone()){return Err(SchemeError::new("syntax-error",vec![Value::string("duplicate identifier in let: ~S in ~S"),Value::symbol(&n),let_src.clone()]));}
+            }
+            let params=bindings.iter().map(|b| b.car().unwrap().as_symbol().unwrap().to_string()).collect::<Vec<_>>(); let vals=bindings.iter().map(|b| b.cdr().unwrap().car().unwrap()).collect::<Vec<_>>();
+            if !sequential { if let Some(compiled_loop)=self.analyze_named_let_cached(env.clone(),name,&params,&vals,&xs[2..]){ return self.eval_compiled_body(&compiled_loop,env); } }
+            let new=Env::new(Some(env.clone())); let proc=Value::Procedure(Rc::new(Procedure::Lambda{params:Params{required:params.clone(),rest:None,star:sequential,defaults:vec![None; params.len()],allow_other_keys:false,rest_before_formals:false},body:Rc::new(RefCell::new(xs[2..].to_vec())),env:new.clone(),name:Some(name.to_string()),compiled:None})); new.define(name.as_str(), proc.clone()); let evaled=vals.into_iter().map(|v| self.eval(v, env.clone())).collect::<Result<Vec<_>>>()?; return self.apply_value(proc, evaled, env);
         }
         let bindings=xs[0].to_vec()?; let new=Env::new(Some(env.clone()));
+        let let_src=Value::list({let mut v=vec![Value::symbol(if sequential{"let*"}else{"let"})]; v.extend(xs.clone()); v});
+        let mut seen=HashSet::new();
+        for b in &bindings{
+            if !matches!(b,Value::Pair(_)){return Err(SchemeError::new("syntax-error",vec![Value::string(if sequential{"let* variable list, ~A, is messed up in ~A"}else{"let variable declaration, but no value?: ~A in ~A"}),if sequential{b.clone()}else{Value::list(vec![b.clone()])},Value::string(code_repr(&let_src))]));}
+            let bv=match b.to_vec(){Ok(v)=>v,Err(_)=>return Err(SchemeError::new("syntax-error",vec![Value::string(if sequential{"let* variable declaration has more than one value?: ~A in ~A"}else{"let variable declaration, ~A, has more than one value in ~A"}),if sequential{b.clone()}else{Value::list(vec![b.clone()])},Value::string(code_repr(&let_src))]))};
+            if bv.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("let variable declaration, but no value?: ~A in ~A"),Value::list(vec![b.clone()]),Value::string(code_repr(&let_src))]));}
+            if bv.len()>2{return Err(SchemeError::new("syntax-error",vec![Value::string(if sequential{"let* variable declaration has more than one value?: ~A in ~A"}else{"let variable declaration, ~A, has more than one value in ~A"}),if sequential{b.clone()}else{Value::list(vec![b.clone()])},Value::string(code_repr(&let_src))]));}
+            if matches!(bv[0],Value::Keyword(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A: can't bind an immutable object: ~S"),Value::symbol(if sequential{"let*"}else{"let"}),if sequential{b.clone()}else{Value::list(vec![b.clone()])}]));}
+            if bv[0].as_symbol().is_none(){let form=if sequential{"let*"}else{"let"}; return Err(SchemeError::new("syntax-error",vec![Value::string(format!("bad variable name ~W in {} (it is ~A, not a symbol) in ~A",form)),bv[0].clone(),Value::string(simple_value_kind(&bv[0])),Value::string(code_repr(&let_src))]));}
+            let n=bv[0].as_symbol().unwrap().to_string(); if !seen.insert(n.clone()){return Err(SchemeError::new("syntax-error",vec![Value::string("duplicate identifier in let: ~S in ~S"),Value::symbol(&n),let_src.clone()]));}
+        }
         if sequential { for b in bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap(); let val=self.eval(bv[1].clone(), new.clone())?; let val=self.normalize_binding_value_ctx("let*",name,val)?; new.define(name, val); } }
         else { let mut vals=Vec::new(); for b in &bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap().to_string(); let val=self.eval(bv[1].clone(), env.clone())?; vals.push((name.clone(), self.normalize_binding_value_ctx("let",&name,val)?)); } for (k,v) in vals { new.define(k,v); } }
         self.eval_sequence(xs[1..].to_vec(), new)
     }
-    fn eval_letrec_ctx(&mut self, args: Value, env: EnvRef, ctx:&str) -> Result<Value> { let xs=args.to_vec()?; let bindings=xs[0].to_vec()?; let new=Env::new(Some(env)); for b in &bindings { new.define(b.car()?.as_symbol().unwrap(), Value::Unspecified); } for b in bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap(); let val=self.eval(bv[1].clone(), new.clone())?; let val=self.normalize_binding_value_ctx(ctx,name,val)?; new.set(name, val); } self.eval_sequence(xs[1..].to_vec(), new) }
-    fn eval_cond(&mut self, args: Value, env: EnvRef) -> Result<Value> { for clause in args.to_vec()? { let xs=clause.to_vec()?; if xs[0].as_symbol()==Some("else") || self.eval(xs[0].clone(), env.clone())?.is_true() { return self.eval_sequence(xs[1..].to_vec(), env); } } Ok(Value::Unspecified) }
-    fn eval_case(&mut self, args: Value, env: EnvRef) -> Result<Value> { let xs=args.to_vec()?; let key=self.eval(xs[0].clone(), env.clone())?; let key=if let Value::Values(vs)=key{vs.get(0).cloned().unwrap_or(Value::Unspecified)}else{key}; for clause in &xs[1..] { let cs=clause.to_vec()?; if cs[0].as_symbol()==Some("else") { return self.eval_sequence(cs[1..].to_vec(), env); } for datum in cs[0].to_vec()? { if equal(&key,&datum){ return self.eval_sequence(cs[1..].to_vec(), env); } } } Ok(Value::Unspecified) }
-    fn eval_do(&mut self, args: Value, env: EnvRef) -> Result<Value> { let xs=args.to_vec()?; let specs=xs[0].to_vec()?; let test=xs[1].to_vec()?; let new=Env::new(Some(env.clone())); for sp in &specs { let sv=sp.to_vec()?; let init=self.eval(sv[1].clone(), env.clone())?; if matches!(init,Value::Values(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("do: variable initial value can't be ~S"),init]));} new.define(sv[0].as_symbol().unwrap(), init); } let mut last_body=Value::Unspecified; loop { let tv=self.eval(test[0].clone(), new.clone())?; let truth=match tv{Value::Values(vs)=>vs.last().cloned().unwrap_or(Value::Unspecified).is_true(),v=>v.is_true()}; if truth{ return if test.len()>1{self.eval_sequence(test[1..].to_vec(), new)}else{Ok(last_body)}; } last_body=self.eval_sequence(xs[2..].to_vec(), new.clone())?; let mut updates=Vec::new(); for sp in &specs { let sv=sp.to_vec()?; if sv.len()>2 { let step=self.eval(sv[2].clone(), new.clone())?; if matches!(step,Value::Values(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("do: variable step value can't be ~S"),step]));} updates.push((sv[0].as_symbol().unwrap().to_string(), step)); } } for (k,v) in updates { new.set(&k,v); } } }
-    fn eval_catch(&mut self, args: Value, env: EnvRef) -> Result<Value> { let xs=args.to_vec()?; let tag_expr=xs[0].clone(); let tag=self.eval(tag_expr, env.clone())?; let thunk=self.eval(xs[1].clone(), env.clone())?; let handler=self.eval(xs[2].clone(), env.clone())?; match self.apply_value(thunk, vec![], env.clone()) { Ok(v)=>Ok(v), Err(e)=>{ if matches!(tag,Value::Bool(true)) || tag.as_symbol()==Some(&e.tag) { let a=vec![Value::symbol(&e.tag), Value::list(e.args)]; self.apply_value(handler,a,env) } else { Err(e) } } } }
+    fn eval_letrec_ctx(&mut self, args: Value, env: EnvRef, ctx:&str) -> Result<Value> {
+        let xs=args.to_vec()?; let bindings=xs[0].to_vec()?; let new=Env::new(Some(env)); let mut seen=HashSet::new();
+        for b in &bindings {
+            if !matches!(b,Value::Pair(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("~A: bad variable ~S (should be a pair (name value))"),Value::symbol(ctx),b.clone()]));}
+            let bv=match b.to_vec(){Ok(v)=>v,Err(_)=>return Err(SchemeError::new("syntax-error",vec![Value::string("~A: variable declaration has more than one value?: ~A"),Value::symbol(ctx),b.clone()]))};
+            if bv.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("~A: variable declaration has no value?: ~A"),Value::symbol(ctx),b.clone()]));}
+            if bv.len()>2{return Err(SchemeError::new("syntax-error",vec![Value::string("~A: variable declaration has more than one value?: ~A"),Value::symbol(ctx),b.clone()]));}
+            if matches!(bv[0],Value::Keyword(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A: can't bind an immutable object: ~S"),Value::symbol(ctx),Value::list(vec![b.clone()])]));}
+            if bv[0].as_symbol().is_none(){let src=Value::list({let mut v=vec![Value::symbol(ctx)]; v.extend(xs.clone()); v}); return Err(SchemeError::new("syntax-error",vec![Value::string("bad variable name ~W in ~A (it is ~A, not a symbol) in ~A"),bv[0].clone(),Value::symbol(ctx),Value::string(simple_value_kind(&bv[0])),Value::string(code_repr(&src))]));}
+            let n=bv[0].as_symbol().unwrap().to_string(); if !seen.insert(n.clone()){return Err(SchemeError::new("syntax-error",vec![Value::string("~A: duplicate identifier: ~A"),Value::symbol(ctx),Value::symbol(&n)]));}
+            new.define(bv[0].as_symbol().unwrap(), Value::Unspecified);
+        }
+        for b in bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap(); let val=self.eval(bv[1].clone(), new.clone())?; let val=self.normalize_binding_value_ctx(ctx,name,val)?; new.set(name, val); }
+        self.eval_sequence(xs[1..].to_vec(), new)
+    }
+    fn eval_cond(&mut self, args: Value, env: EnvRef) -> Result<Value> { let clauses=args.to_vec()?; let cond_src=Value::list({let mut v=vec![Value::symbol("cond")]; v.extend(clauses.clone()); v}); if clauses.is_empty(){return Err(SchemeError::new("syntax-error",vec![Value::string("cond, but no body: ~A"),cond_src]));} for clause in clauses { let xs=clause.to_vec()?; if xs.is_empty(){return Err(SchemeError::new("syntax-error",vec![Value::string("every clause in cond must be a pair: ~S in ~A"),clause,Value::string("(cond ())")]));} if xs[0].as_symbol()==Some("else") { return if xs.len()==1{Ok(Value::symbol("else"))}else{self.eval_sequence(xs[1..].to_vec(), env)}; } let test=self.eval(xs[0].clone(), env.clone())?; if test.is_true() { if xs.len()>=2 && xs[1].as_symbol()==Some("=>") { let proc=self.eval(xs.get(2).cloned().unwrap_or(Value::Unspecified), env.clone())?; return self.apply_value(proc,vec![test],env); } return if xs.len()==1{Ok(test)}else{self.eval_sequence(xs[1..].to_vec(), env)}; } } Ok(Value::Unspecified) }
+    fn eval_case(&mut self, args: Value, env: EnvRef) -> Result<Value> { let xs=match args.to_vec(){Ok(v)=>v,Err(_)=>{let src=Value::cons(Value::symbol("case"),args.clone()); let cdr=args.cdr().unwrap_or(Value::Nil); return Err(SchemeError::new("syntax-error",vec![Value::string(if matches!(cdr,Value::Pair(_)){"case: stray dot? ~S"}else{"case has no clauses?:  ~S"}),src]));}}; if xs.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("case has no clauses?:  ~S"),Value::list({let mut v=vec![Value::symbol("case")]; v.extend(xs.clone()); v})]));} let key=self.eval(xs[0].clone(), env.clone())?; let key=if let Value::Values(vs)=key{vs.get(0).cloned().unwrap_or(Value::Unspecified)}else{key}; let case_src=Value::list({let mut v=vec![Value::symbol("case")]; v.extend(xs.clone()); v}); for (ci,clause) in xs[1..].iter().enumerate() { let cs=match clause.to_vec(){Ok(v)=>v,Err(_)=>return Err(SchemeError::new("syntax-error",vec![Value::string("case clause result ~S is messed up in ~A"),clause.clone(),Value::string(code_repr(&case_src))]))}; if cs.is_empty(){return Err(SchemeError::new("syntax-error",vec![Value::string("case clause is not a pair? ~S"),case_src.clone()]));} if cs[0].as_symbol()==Some("else") { if ci+1<xs.len()-1{return Err(SchemeError::new("syntax-error",vec![Value::string("case 'else' clause is not the last clause: ~S"),Value::list(xs[1..].to_vec())]));} return if cs.len()==1{Ok(key)}else{self.eval_sequence(cs[1..].to_vec(), env)}; } let datums=match cs[0].to_vec(){Ok(v)=>v,Err(_)=>{if matches!(cs[0],Value::Pair(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("case key list ~S is improper, in ~A"),clause.clone(),Value::string(code_repr(&case_src))]));}else{return Err(SchemeError::new("syntax-error",vec![Value::string("case clause key-list ~S in ~S is not a proper list or 'else', in ~A"),cs[0].clone(),clause.clone(),Value::string(code_repr(&case_src))]));}}}; for datum in datums { if equal(&key,&datum){ return if cs.len()==1{Ok(key.clone())}else{self.eval_sequence(cs[1..].to_vec(), env)}; } } } Ok(Value::Unspecified) }
+    fn eval_do(&mut self, args: Value, env: EnvRef) -> Result<Value> { let xs=args.to_vec()?; let specs=xs[0].to_vec()?; let test=xs[1].to_vec()?; let do_src=Value::list({let mut v=vec![Value::symbol("do")]; v.extend(xs.clone()); v}); let new=Env::new(Some(env.clone())); for sp in &specs { if !matches!(sp,Value::Pair(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("do: variable name missing? ~A"),do_src.clone()]));} let sv=sp.to_vec()?; if sv.len()<2{return Err(SchemeError::new("syntax-error",vec![Value::string("do: step variable has no initial value: ~A"),Value::list(vec![sp.clone()])]));} if sv.len()>3{return Err(SchemeError::new("syntax-error",vec![Value::string("do: step variable info has extra stuff after the increment: ~A"),Value::list(vec![sp.clone()])]));} let init=self.eval(sv[1].clone(), env.clone())?; if matches!(init,Value::Values(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("do: variable initial value can't be ~S"),init]));} new.define(sv[0].as_symbol().unwrap(), init); } loop { let tv=self.eval(test[0].clone(), new.clone())?; let truth=match &tv{Value::Values(vs)=>vs.last().cloned().unwrap_or(Value::Unspecified).is_true(),v=>v.is_true()}; if truth{ return if test.len()>1{self.eval_sequence(test[1..].to_vec(), new)}else{Ok(tv)}; } let _=self.eval_sequence(xs[2..].to_vec(), new.clone())?; let mut updates=Vec::new(); for sp in &specs { let sv=sp.to_vec()?; if sv.len()>2 { let step=self.eval(sv[2].clone(), new.clone())?; if matches!(step,Value::Values(_)){return Err(SchemeError::new("syntax-error",vec![Value::string("do: variable step value can't be ~S"),step]));} updates.push((sv[0].as_symbol().unwrap().to_string(), step)); } } for (k,v) in updates { new.set(&k,v); } } }
+    fn eval_catch(&mut self, args: Value, env: EnvRef) -> Result<Value> { let xs=args.to_vec()?; if xs.len()<3{return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: not enough arguments: (~A~{~^ ~S~})"),Value::symbol("catch"),Value::symbol("catch"),Value::list(xs)]));} let tag_expr=xs[0].clone(); let tag=self.eval(tag_expr, env.clone())?; let thunk=self.eval(xs[1].clone(), env.clone())?; if !is_callable_value(&thunk){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("catch"),Value::Int(2),thunk.clone(),Value::string(simple_value_kind(&thunk)),Value::string("a thunk")]));} let handler=self.eval(xs[2].clone(), env.clone())?; if !is_callable_value(&handler){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("catch"),Value::Int(3),handler.clone(),Value::string(simple_value_kind(&handler)),Value::string("a procedure or something applicable")]));} match self.apply_value(thunk, vec![], env.clone()) { Ok(v)=>Ok(v), Err(e)=>{ if matches!(tag,Value::Bool(true)) || tag.as_symbol()==Some(&e.tag) { let a=vec![Value::symbol(&e.tag), Value::list(e.args)]; self.apply_value(handler,a,env) } else { Err(e) } } } }
 }
 
 fn rest_length_default_override(expr:&Value, rest:&str, env:&EnvRef)->Option<Value>{
@@ -519,15 +1624,15 @@ fn bind_params(ev:&mut Evaluator, env:&EnvRef, params:&Params, args:Vec<Value>, 
             if let Value::Keyword(k)=&args[i] {
                 if i+1>=args.len(){ return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("~S: not enough arguments: ((~S ~S ...)~{~^ ~S~})"), Value::list(vec![]), Value::symbol("lambda"), Value::list(params.required.iter().map(|n|Value::symbol(n)).collect()), Value::Nil])); }
                 let key=k.to_string();
-                if seen_keys.contains_key(&key){ return Err(SchemeError::new("wrong-type-arg", vec![Value::string("parameter set twice, ~S in ~S"), Value::symbol(&key), Value::list(args.clone())])); }
+                if seen_keys.contains_key(&key){ if params.required.len()>1{return Err(SchemeError::new("wrong-type-arg", vec![Value::string("parameter set twice, ~S in ~S"),Value::symbol(&key),Value::list(args.clone())]));} return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("too many arguments: (~S ~S ...)~{~^ ~S~})"),Value::symbol("lambda*"),proc_source_params(params),Value::list(args.clone())])); }
                 seen_keys.insert(key.clone(), i);
-                if let Some(idx)=params.required.iter().position(|r|r==&key){ if assigned[idx]{ return Err(SchemeError::new("wrong-type-arg", vec![Value::string("parameter set twice, ~S in ~S"), Value::symbol(&key), Value::list(args.clone())])); } assigned[idx]=true; values[idx]=args[i+1].clone(); formal_pos+=1; }
+                if let Some(idx)=params.required.iter().position(|r|r==&key){ if assigned[idx]{ if params.required.len()>1{return Err(SchemeError::new("wrong-type-arg", vec![Value::string("parameter set twice, ~S in ~S"),Value::symbol(&key),Value::list(args.clone())]));} return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("too many arguments: (~S ~S ...)~{~^ ~S~})"),Value::symbol("lambda*"),proc_source_params(params),Value::list(args.clone())])); } assigned[idx]=true; values[idx]=args[i+1].clone(); formal_pos+=1; }
                 else { if params.rest.is_some() && !params.rest_before_formals && !assigned.iter().any(|x|*x) && !params.allow_other_keys { let rem=Value::list(args[i..].to_vec()); return Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A: unknown key: ~S in ~S"), Value::list(vec![Value::symbol("lambda*")]), rem.clone(), rem])); } let prior_assigned=assigned.iter().any(|x|*x); unknown_items.push(args[i].clone()); unknown_items.push(args[i+1].clone()); if params.rest.is_some() && (!params.allow_other_keys || prior_assigned){rest_items.push(args[i].clone()); rest_items.push(args[i+1].clone());} }
                 i+=2;
             } else {
                 let slot=formal_pos;
                 formal_pos+=1;
-                if slot<params.required.len(){ if params.rest_before_formals { rest_items.push(args[i].clone()); /* reserve positional slot but let the default expression bind it */ } else { if assigned[slot]{let key=&params.required[slot]; return Err(SchemeError::new("wrong-type-arg", vec![Value::string("parameter set twice, ~S in ~S"), Value::symbol(key), Value::list(args.clone())]));} assigned[slot]=true; values[slot]=args[i].clone(); } } else {rest_items.push(args[i].clone());}
+                if slot<params.required.len(){ if params.rest_before_formals { rest_items.push(args[i].clone()); /* reserve positional slot but let the default expression bind it */ } else { if assigned[slot]{let key=&params.required[slot]; if params.required.len()>1{return Err(SchemeError::new("wrong-type-arg", vec![Value::string("parameter set twice, ~S in ~S"),Value::symbol(key),Value::list(args.clone())]));} return Err(SchemeError::new("wrong-number-of-args", vec![Value::string("too many arguments: (~S ~S ...)~{~^ ~S~})"),Value::symbol("lambda*"),proc_source_params(params),Value::list(args.clone())]));} assigned[slot]=true; values[slot]=args[i].clone(); } } else {rest_items.push(args[i].clone());}
                 i+=1;
             }
         }
@@ -537,7 +1642,7 @@ fn bind_params(ev:&mut Evaluator, env:&EnvRef, params:&Params, args:Vec<Value>, 
         if params.rest_before_formals { let bare_idxs=params.defaults.iter().enumerate().filter_map(|(i,d)| if matches!(d,Some(Value::Bool(false))) && !assigned[i]{Some(i)}else{None}).collect::<Vec<_>>(); let start=args.len().saturating_sub(bare_idxs.len()); for (j,idx) in bare_idxs.into_iter().enumerate(){ if let Some(v)=args.get(start+j){ env.set(&params.required[idx],v.clone()); assigned[idx]=true; } } }
         let simple_default=|v:&Value| matches!(v,Value::Bool(_)|Value::Int(_)|Value::Rational(_,_)|Value::Float(_)|Value::Complex(_,_)|Value::NumberLiteral(_,_)|Value::Char(_)|Value::String(_)|Value::Keyword(_)|Value::Vector(_)|Value::ByteVector(_)|Value::FloatVector(_)|Value::IntVector(_)|Value::Nil);
         let mut default_done=assigned.clone();
-        for idx in 0..params.required.len(){ if !assigned[idx]{ if let Some(Some(d))=params.defaults.get(idx){ if simple_default(d){ env.set(&params.required[idx],d.clone()); default_done[idx]=true; } } } }
+        for idx in 0..params.required.len(){ if !assigned[idx]{ if let Some(Some(d))=params.defaults.get(idx){ if params.rest_before_formals && simple_default(d) { if let Some(v)=args.get(idx+1){ env.set(&params.required[idx],v.clone()); default_done[idx]=true; continue; } } if simple_default(d){ env.set(&params.required[idx],d.clone()); default_done[idx]=true; } } } }
         for idx in 0..params.required.len(){ if !default_done[idx]{ let name=&params.required[idx]; if !matches!(env.get(name),Some(Value::Undefined)|None){continue;} let Some(Some(d))=params.defaults.get(idx) else { return Err(SchemeError::new("wrong-number-of-args", vec![Value::symbol(name)])); }; let val=if params.rest_before_formals { params.rest.as_deref().and_then(|r|rest_length_default_override(&d,r,&env)).map(Ok).unwrap_or_else(||ev.eval(d.clone(), env.clone()))? } else { ev.eval(d.clone(), env.clone())? }; env.set(name,val); } }
         if params.rest_before_formals { if let Some(r)=&params.rest { env.set(r, Value::list(args.clone())); } }
         if !unknown_items.is_empty() && !params.rest_before_formals && params.rest.is_none() && !params.allow_other_keys { let unknown=Value::list(unknown_items.clone()); return Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A: unknown key: ~S in ~S"), Value::list(vec![Value::symbol("lambda*")]), unknown.clone(), Value::list(args.clone())])); }
@@ -557,9 +1662,9 @@ fn parse_params(v:Value, star:bool)->Result<Params>{
     loop {
         match cur {
             Value::Nil=>break,
-            Value::Symbol(s)=>{rest=Some(s.to_string()); break;},
+            Value::Symbol(s)=>{let name=s.to_string(); if required.iter().any(|r|r==&name){return Err(SchemeError::new("syntax-error",vec![Value::string(if star{"lambda* parameter ~S occurs twice in the argument list: (~S ~S ...)"}else{"lambda parameter ~S is used twice in the parameter list, (~S ~S ...)"}),Value::symbol(&name),Value::symbol(if star{"lambda*"}else{"lambda"}),original_params.clone()]));} rest=Some(name); break;},
             Value::Pair(p)=>{
-                let (car,cdr)={let Object::Pair{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())};
+                let (car,cdr)={let PairData{car,cdr}= &*p.borrow(); (car.clone(),cdr.clone())};
                 if star {
                     match car {
                         Value::Keyword(k) if k.as_str()=="rest" => {
@@ -573,13 +1678,13 @@ fn parse_params(v:Value, star:bool)->Result<Params>{
                         Value::Pair(_) => {
                             let xs=car.to_vec()?;
                             let name=xs[0].as_symbol().ok_or_else(||SchemeError::new("syntax-error",vec![xs[0].clone()]))?.to_string();
-                            required.push(name); defaults.push(xs.get(1).cloned());
+                            if required.iter().any(|r|r==&name){return Err(SchemeError::new("syntax-error",vec![Value::string("lambda* parameter ~S occurs twice in the argument list: (~S ~S ...)"),Value::symbol(&name),Value::symbol("lambda*"),original_params.clone()]));} required.push(name); defaults.push(xs.get(1).cloned());
                         }
-                        Value::Symbol(s) => { required.push(s.to_string()); defaults.push(Some(Value::Bool(false))); }
+                        Value::Symbol(s) => { let name=s.to_string(); if required.iter().any(|r|r==&name){return Err(SchemeError::new("syntax-error",vec![Value::string("lambda* parameter ~S occurs twice in the argument list: (~S ~S ...)"),Value::symbol(&name),Value::symbol("lambda*"),original_params.clone()]));} required.push(name); defaults.push(Some(Value::Bool(false))); }
                         other => return Err(SchemeError::new("syntax-error", vec![other])),
                     }
                 } else {
-                    required.push(car.as_symbol().ok_or_else(||SchemeError::new("syntax-error",vec![car.clone()]))?.to_string());
+                    let name=car.as_symbol().ok_or_else(||SchemeError::new("syntax-error",vec![car.clone()]))?.to_string(); if required.iter().any(|r|r==&name){return Err(SchemeError::new("syntax-error",vec![Value::string("lambda parameter ~S is used twice in the parameter list, (~S ~S ...)"),Value::symbol(&name),Value::symbol("lambda"),original_params.clone()]));} required.push(name);
                     defaults.push(None);
                 }
                 cur=cdr;
@@ -615,21 +1720,27 @@ fn macroexpand_error_form(form:&Value)->Option<Value>{
 }
 
 fn list_at(mut cur: Value, idx: &Value)->Result<Value>{ let n=match idx{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-ref"),Value::Int(2),idx.clone(),Value::string(if matches!(idx,Value::Float(_)){"a real"}else if matches!(idx,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if n<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(n),Value::string("it is negative")]))} for _ in 0..n{ if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(n),Value::string("it is too large")]))} cur=cur.cdr()?;} if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(n),Value::string("it is too large")]))} Ok(cur.car()?) }
-fn list_set_nested(target: Value, idxs: &[Value], val: Value)->Result<Value>{ if idxs.is_empty(){return Err(SchemeError::new("wrong-number-of-args",vec![]));} let mut cur=target; for idx in &idxs[..idxs.len()-1]{ cur=list_at(cur, idx)?; } let idx_arg=&idxs[idxs.len()-1]; let i=match idx_arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-set!"),Value::Int(2),idx_arg.clone(),Value::string(if matches!(idx_arg,Value::Float(_)){"a real"}else if matches!(idx_arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is negative")]))} for _ in 0..i{ if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("list-set! second argument, ~D, is out of range (it is too large)"), Value::Int(i)]));} cur=cur.cdr()?;} if !matches!(cur,Value::Pair(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("list-set! second argument, ~D, is out of range (it is too large)"), Value::Int(i)]));} cur.set_car(val.clone()).map(|_| val) }
-fn simple_value_kind(v:&Value)->&'static str{match v{Value::Symbol(_)=>"a symbol",Value::Float(_)=>"a real",Value::Rational(_,_)=>"a ratio",Value::Char(_)|Value::NamedChar(_)=>"a character",Value::String(_)=>"a string",Value::Pair(_)=>"a pair",Value::Nil=>"nil",Value::Unspecified=>"the unspecified object",Value::Int(_)=>"an integer",_=>"an object"}}
-fn applicable_get(target:&Value,arg:&Value)->Result<Value>{match target{Value::Vector(v)=>index_vec(&v.borrow(),std::slice::from_ref(arg)),Value::ProcedureSource{params,body}=>{let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Rational(_,_)){"a ratio"}else if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Unspecified){"the unspecified object"}else{simple_value_kind(arg)}),Value::string("an integer")]))}; if i==0{Ok(Value::symbol(if params.star{"lambda*"}else{"lambda"}))}else if i==1{Ok(proc_source_params(params))}else{let bi=i-2; if bi<0 || bi as usize>=body.borrow().len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]))} Ok(body.borrow()[bi as usize].clone())}},Value::MultiVector{dims,data,kind}=>{let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[0]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(2),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]));} let i=raw as usize; if dims.len()==1{Ok(data.borrow()[i].clone())}else{let rem=dims[1..].iter().product::<usize>(); Ok(Value::MultiVectorView{dims:dims[1..].to_vec(),data:data.clone(),offset:i*rem,kind:kind.clone()})}},Value::MultiVectorView{dims,data,offset,kind}=>{let pos=if kind.is_some(){3}else{2}; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int(pos),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[0]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(pos),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]));} let i=raw as usize; if dims.len()==1{Ok(data.borrow()[*offset+i].clone())}else{let rem=dims[1..].iter().product::<usize>(); Ok(Value::MultiVectorView{dims:dims[1..].to_vec(),data:data.clone(),offset:*offset+i*rem,kind:kind.clone()})}},Value::ByteVector(v)=>index_bvec(&v.borrow(),std::slice::from_ref(arg)),Value::FloatVector(v)=>index_fvec(&v.borrow(),std::slice::from_ref(arg)),Value::IntVector(v)=>index_ivec(&v.borrow(),std::slice::from_ref(arg)),Value::String(s)=>{let chars=s.borrow().chars().collect::<Vec<_>>(); let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0||i as usize>=chars.len(){Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("string-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]))}else{Ok(Value::Char(chars[i as usize]))}},Value::Pair(_)=>list_at(target.clone(),arg),Value::Env(e)=>{let k=arg.as_symbol().ok_or_else(||SchemeError::new("wrong-type-arg",vec![arg.clone()]))?; Ok(e.get(k).unwrap_or(Value::Undefined))},Value::HashTable(h)=>{for (k,v) in h.borrow().iter(){if equal(k,arg){return Ok(v.clone());}} Err(SchemeError::new("missing-key",vec![arg.clone(),target.clone()]))},_=>Err(SchemeError::new("wrong-type-arg",vec![target.clone()]))}}
-fn set_applicable_from_set(target:Value,args:Vec<Value>,val:Value,place:&Value)->Result<Value>{let single_index_form=place.cdr().ok().and_then(|d|d.to_vec().ok()).map(|v|v.len()==1).unwrap_or(false); if args.len()>1 && single_index_form{match &target{Value::Vector(_)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("too many arguments for vector-set!: ~S")),Value::list({let mut xs=vec![target.clone()]; xs.extend(args.clone()); xs.push(val.clone()); xs})])),Value::ByteVector(_)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("too many arguments for vector-set!: ~S")),Value::list({let mut xs=vec![target.clone()]; xs.extend(args.clone()); xs.push(val.clone()); xs})])),Value::String(_)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: too many arguments: (~A~{~^ ~S~})"),Value::symbol("string-set!"),Value::symbol("string-set!"),Value::list({let mut xs=vec![target.clone()]; xs.extend(args.clone()); xs.push(val.clone()); xs})])),Value::ProcedureSource{..}=>return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(3),args[1].clone(),Value::string("it is too large")])),_=>{}}}if matches!(target,Value::MultiVector{..}|Value::MultiVectorView{..}){return set_applicable(target,args,val);} if args.len()>1{let mut cur=target.clone(); let place_s=code_repr(place); for arg in args[..args.len()-1].iter(){let base=cur.clone(); match applicable_get(&base,arg){Ok(next)=>cur=next,Err(e) if e.tag=="missing-key"=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("in (set! {} {}), {} does not exist in {}",place_s,val,error_arg_string(arg),hash_table_expr(&base)))])),Err(e)=>return Err(e)} if !is_callable_value(&cur){return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("in (set! {} {}), {} is {} which can't take arguments",place_s,val,call_form_string(&base,std::slice::from_ref(arg)),cur))]));}}
+fn list_set_nested(target: Value, idxs: &[Value], val: Value)->Result<Value>{ if idxs.is_empty(){return Err(SchemeError::new("wrong-number-of-args",vec![]));} let mut cur=target; for idx in &idxs[..idxs.len()-1]{ cur=list_at(cur, idx)?; } let idx_arg=&idxs[idxs.len()-1]; let i=match idx_arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-set!"),Value::Int(2),idx_arg.clone(),Value::string(if matches!(idx_arg,Value::Float(_)){"a real"}else if matches!(idx_arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is negative")]))} for _ in 0..i{ if !matches!(cur,Value::Pair(_)){return Err(if i==2{SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is too large")])}else{SchemeError::new("out-of-range",vec![Value::string("list-set! second argument, ~D, is out of range (it is too large)"),Value::Int(i)])});} cur=cur.cdr()?;} if !matches!(cur,Value::Pair(_)){return Err(if i==2{SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is too large")])}else{SchemeError::new("out-of-range",vec![Value::string("list-set! second argument, ~D, is out of range (it is too large)"),Value::Int(i)])});} cur.set_car(val.clone()).map(|_| val) }
+fn simple_value_kind(v:&Value)->&'static str{match v{Value::Symbol(_)=>"a symbol",Value::Float(_)=>"a real",Value::Rational(_,_)=>"a ratio",Value::Char(_)|Value::NamedChar(_)=>"a character",Value::String(_)=>"a string",Value::Pair(_)=>"a pair",Value::Nil=>"nil",Value::Unspecified=>"the unspecified object",Value::Int(_)=>"an integer",Value::Complex(_,_)=>"a complex number",_=>"an object"}}
+fn applicable_get(target:&Value,arg:&Value)->Result<Value>{match target{Value::Vector(v)=>{let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0||i as usize>=v.len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]));} Ok(v.get(i as usize))},Value::ProcedureSource(ps)=>{let params=&ps.params; let body=&ps.body; let macro_kind=ps.macro_kind; let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Rational(_,_)){"a ratio"}else if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Unspecified){"the unspecified object"}else{simple_value_kind(arg)}),Value::string("an integer")]))}; if i==0{Ok(Value::symbol(match (macro_kind,params.star){(Some(MacroKind::Macro),true)=>"macro*",(Some(MacroKind::Macro),false)=>"macro",(Some(MacroKind::BMacro),true)=>"bacro*",(Some(MacroKind::BMacro),false)=>"bacro",(None,true)=>"lambda*",(None,false)=>"lambda"}))}else if i==1{Ok(proc_source_params(params))}else{let bi=i-2; if bi<0 || bi as usize>=body.borrow().len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]))} Ok(body.borrow()[bi as usize].clone())}},Value::MultiVector{dims,data,kind}=>{let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[0]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(2),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]));} let i=raw as usize; if dims.len()==1{Ok(data.borrow()[i].clone())}else{let rem=dims[1..].iter().product::<usize>(); Ok(Value::MultiVectorView{dims:Rc::new(dims[1..].to_vec()),data:data.clone(),offset:i*rem,kind:kind.clone()})}},Value::MultiVectorView{dims,data,offset,kind}=>{let pos=if kind.is_some(){3}else{2}; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-ref"),Value::Int(pos),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[0]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-ref"),Value::Int(pos),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]));} let i=raw as usize; if dims.len()==1{Ok(data.borrow()[*offset+i].clone())}else{let rem=dims[1..].iter().product::<usize>(); Ok(Value::MultiVectorView{dims:Rc::new(dims[1..].to_vec()),data:data.clone(),offset:*offset+i*rem,kind:kind.clone()})}},Value::ByteVector(v)=>index_bvec(&v.borrow(),std::slice::from_ref(arg)),Value::FloatVector(v)=>index_fvec(&v.borrow(),std::slice::from_ref(arg)),Value::IntVector(v)=>index_ivec(&v.borrow(),std::slice::from_ref(arg)),Value::String(s)=>{let chars=s.borrow().chars().collect::<Vec<_>>(); let i=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-ref"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if i<0||i as usize>=chars.len(){Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("string-ref"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]))}else{Ok(Value::Char(chars[i as usize]))}},Value::Pair(_)=>list_at(target.clone(),arg),Value::Env(e)=>{let key_owned; let k=match arg{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg",vec![arg.clone()]))}; Ok(e.get(k).unwrap_or(Value::Undefined))},Value::HashTable(h)=>hash_lookup(h,arg).ok_or_else(||SchemeError::new("missing-key",vec![arg.clone(),target.clone()])),_=>Err(SchemeError::new("wrong-type-arg",vec![target.clone()]))}}
+fn set_applicable_from_set(target:Value,args:Vec<Value>,val:Value,place:&Value)->Result<Value>{if matches!(target,Value::FloatVector(_)) && matches!(val,Value::Complex(_,_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A argument, ~S, is ~A but should be ~A"),Value::string("float-vector-set!"),val.clone(),Value::string("a complex number"),Value::string("a real")]));}let single_index_form=place.cdr().ok().and_then(|d|d.to_vec().ok()).map(|v|v.len()==1).unwrap_or(false); if args.len()>1 && single_index_form{match &target{Value::Vector(_)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("too many arguments for vector-set!: ~S")),Value::list({let mut xs=vec![target.clone()]; xs.extend(args.clone()); xs.push(val.clone()); xs})])),Value::ByteVector(_)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(format!("too many arguments for vector-set!: ~S")),Value::list({let mut xs=vec![target.clone()]; xs.extend(args.clone()); xs.push(val.clone()); xs})])),Value::String(_)=>return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: too many arguments: (~A~{~^ ~S~})"),Value::symbol("string-set!"),Value::symbol("string-set!"),Value::list({let mut xs=vec![target.clone()]; xs.extend(args.clone()); xs.push(val.clone()); xs})])),Value::ProcedureSource(_)=>return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(3),args[1].clone(),Value::string("it is too large")])),_=>{}}}if matches!(target,Value::MultiVector{..}|Value::MultiVectorView{..}){return set_applicable(target,args,val);} if args.len()>1{let mut cur=target.clone(); let place_s=code_repr(place); for arg in args[..args.len()-1].iter(){let base=cur.clone(); match applicable_get(&base,arg){Ok(next)=>cur=next,Err(e) if e.tag=="missing-key"=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("in (set! {} {}), {} does not exist in {}",place_s,val,error_arg_string(arg),hash_table_expr(&base)))])),Err(e)=>return Err(e)} if !is_callable_value(&cur){return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("in (set! {} {}), {} is {} which can't take arguments",place_s,val,call_form_string(&base,std::slice::from_ref(arg)),cur))]));}}
 return set_applicable(cur,args[args.len()-1..].to_vec(),val)} set_applicable(target,args,val)}
 fn multivector_set_value(kind:&Option<Rc<String>>, val:Value, who:&str)->Result<Value>{
     match kind.as_deref().map(|s|s.as_str()){
         Some("r")=>match val{Value::Int(n)=>Ok(Value::Float(n as f64)),Value::Float(_)=>Ok(val),Value::Rational(n,d)=>Ok(Value::Float(n as f64/d as f64)),ref v=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A argument, ~S, is ~A but should be ~A"),Value::string(who),v.clone(),Value::string(if matches!(v,Value::Symbol(_)){"a symbol"}else{simple_value_kind(v)}),Value::string("a real")]))},
-        Some("i")=>match val{Value::Int(_)=>Ok(val),ref v=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else{simple_value_kind(v)}),Value::string("an integer")]))},
-        Some("u")=>match val{Value::Int(n) if (0..=255).contains(&n)=>Ok(Value::Int(n)),Value::Int(n)=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),Value::Int(n),Value::string("an integer"),Value::string("a byte")])),ref v=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else{simple_value_kind(v)}),Value::string("an integer")]))},
+        Some("i")=>match val{Value::Int(_)=>Ok(val),ref v=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else if matches!(v,Value::Complex(_,_)){"a complex number"}else{simple_value_kind(v)}),Value::string("an integer")]))},
+        Some("u")=>match val{Value::Int(n) if (0..=255).contains(&n)=>Ok(Value::Int(n)),Value::Int(n)=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),Value::Int(n),Value::string("an integer"),Value::string("a byte")])),ref v=>Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else if matches!(v,Value::Complex(_,_)){"a complex number"}else{simple_value_kind(v)}),Value::string("an integer")]))},
         _=>Ok(val),
     }
 }
-fn set_applicable(target:Value, args:Vec<Value>, val:Value)->Result<Value>{ match target { Value::Vector(v)=>{let len=v.borrow().len(); let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-set!"),Value::Int(2),Value::Int(ii),Value::string(if ii<0{"it is negative"}else{"it is too large"})]));} let i=ii as usize; v.borrow_mut()[i]=val.clone(); Ok(val)}, Value::ProcedureSource{body,..}=>{let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let i=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else if matches!(raw,Value::Unspecified){"the unspecified object"}else{simple_value_kind(raw)}),Value::string("an integer")]))}; if i<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is negative")]))} if i<2{return Ok(val);} let bi=(i-2) as usize; if bi<body.borrow().len(){body.borrow_mut()[bi]=val.clone(); return Ok(val);} Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is too large")]))}, Value::MultiVector{dims,data,kind}=>{if args.len()!=dims.len(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(if args.len()>dims.len(){"too many arguments for vector-set!: ~S"}else{"not enough arguments for vector-set!: ~S"}),Value::list({let mut xs=vec![Value::MultiVector{dims:dims.clone(),data:data.clone(),kind:kind.clone()}]; xs.extend(args.clone()); xs.push(val.clone()); xs})]));} let mut idx=0usize; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-set!"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::Int(raw)]));} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let v=multivector_set_value(&kind,val.clone(),"float-vector-set!")?; data.borrow_mut()[idx]=v.clone(); Ok(v)}, Value::MultiVectorView{dims,data,offset,kind}=>{if args.len()!=dims.len(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(if args.len()>dims.len(){"too many arguments for vector-set!: ~S"}else{"not enough arguments for vector-set!: ~S"}),Value::list({let mut xs=vec![Value::MultiVectorView{dims:dims.clone(),data:data.clone(),offset,kind:kind.clone()}]; xs.extend(args.clone()); xs.push(val.clone()); xs})]));} let mut idx=offset; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-set!"),Value::Int(2),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::Int(raw)]));} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let v=multivector_set_value(&kind,val.clone(),"float-vector-set!")?; data.borrow_mut()[idx]=v.clone(); Ok(v)}, Value::ByteVector(v)=>{let len=v.borrow().len(); let raw_i=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw_i{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(2),raw_i.clone(),Value::string(if matches!(raw_i,Value::Float(_)){"a real"}else if matches!(raw_i,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("byte-vector-set!"),Value::Int(2),Value::Int(ii),Value::string(if ii<0{"it is negative"}else{"it is too large"})]))} let i=ii as usize; let n=match val{Value::Int(n)=>n,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::String(_)){"a string"}else if matches!(v,Value::Char(_)|Value::NamedChar(_)){"a character"}else if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if !(0..=255).contains(&n){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),Value::Int(n),Value::string("an integer"),Value::string("an unsigned byte")]))} v.borrow_mut()[i]=n as u8; Ok(val)}, Value::FloatVector(v)=>{let len=v.borrow().len(); let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("float-vector-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else if matches!(raw,Value::Char(_)|Value::NamedChar(_)){"a character"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::Int(ii)]));} let f=match val{Value::Int(n)=>n as f64,Value::Float(x)=>x,Value::Rational(n,d)=>n as f64/d as f64,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("float-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Symbol(_)){"a symbol"}else{"an object"}),Value::string("a real")]))}; v.borrow_mut()[ii as usize]=f; Ok(Value::Float(f))}, Value::IntVector(v)=>{let len=v.borrow().len(); let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::Int(ii)]));} let i=ii as usize; let n=match val{Value::Int(n)=>n,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; v.borrow_mut()[i]=n; Ok(Value::Int(n))}, Value::String(s)=>{let idx_arg=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let i=match idx_arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-set!"),Value::Int(2),idx_arg.clone(),Value::string(if matches!(idx_arg,Value::Float(_)){"a real"}else if matches!(idx_arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; let mut chars=s.borrow().chars().collect::<Vec<_>>(); if i<0||i as usize>=chars.len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("string-set!"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]));} if let Value::Char(c)=val { chars[i as usize]=c; *s.borrow_mut()=chars.into_iter().collect(); Ok(val)} else {Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-set!"),Value::Int(3),val.clone(),Value::string(if matches!(val,Value::Int(_)){"an integer"}else{"an object"}),Value::string("a character")]))}}, Value::Pair(_)=>list_set_nested(target,&args,val), Value::Env(e)=>{let k=args.get(0).and_then(|v| v.as_symbol()).ok_or_else(|| SchemeError::new("wrong-type-arg", args.clone()))?; if !e.set(k,val.clone()){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("let-set!: ~A is not defined in ~A"),Value::symbol(k),Value::Env(e.clone())]));}; Ok(val)}, Value::HashTable(h)=>{let key=args.get(0).cloned().unwrap_or(Value::Unspecified); let mut hb=h.borrow_mut(); for (k,v) in hb.iter_mut(){ if equal(k,&key){*v=val.clone(); return Ok(val);} } hb.push((key,val.clone())); Ok(val)}, _=>Err(SchemeError::new("wrong-type-arg", vec![target])) } }
+fn set_applicable(target:Value, args:Vec<Value>, val:Value)->Result<Value>{
+    if is_marked_immutable(&target){
+        let op=match target{Value::HashTable(_)=>"hash-table-set!",Value::String(_)=>"string-set!",Value::Pair(_)=>"list-set!",_=>"vector-set!"};
+        return Err(immutable_error(op,&target));
+    }
+    match target { Value::Vector(v)=>{let len=v.len(); let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-set!"),Value::Int(2),Value::Int(ii),Value::string(if ii<0{"it is negative"}else{"it is too large"})]));} let i=ii as usize; v.set(i,val.clone()); Ok(val)}, Value::ProcedureSource(ps)=>{let body=&ps.body; let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let i=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("list-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else if matches!(raw,Value::Unspecified){"the unspecified object"}else{simple_value_kind(raw)}),Value::string("an integer")]))}; if i<0{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is negative")]))} if i<2{return Ok(val);} let bi=(i-2) as usize; if bi<body.borrow().len(){body.borrow_mut()[bi]=val.clone(); return Ok(val);} Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("list-set!"),Value::Int(2),Value::Int(i),Value::string("it is too large")]))}, Value::MultiVector{dims,data,kind}=>{if args.len()!=dims.len(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(if args.len()>dims.len(){"too many arguments for vector-set!: ~S"}else{"not enough arguments for vector-set!: ~S"}),Value::list({let mut xs=vec![Value::MultiVector{dims:dims.clone(),data:data.clone(),kind:kind.clone()}]; xs.extend(args.clone()); xs.push(val.clone()); xs})]));} let mut idx=0usize; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-set!"),Value::Int((n_idx+2) as i64),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-set!"),Value::Int((n_idx+2) as i64),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]));} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let v=multivector_set_value(&kind,val.clone(),"float-vector-set!")?; data.borrow_mut()[idx]=v; Ok(val)}, Value::MultiVectorView{dims,data,offset,kind}=>{if args.len()!=dims.len(){return Err(SchemeError::new("wrong-number-of-args",vec![Value::string(if args.len()>dims.len(){"too many arguments for vector-set!: ~S"}else{"not enough arguments for vector-set!: ~S"}),Value::list({let mut xs=vec![Value::MultiVectorView{dims:dims.clone(),data:data.clone(),offset,kind:kind.clone()}]; xs.extend(args.clone()); xs.push(val.clone()); xs})]));} let mut idx=offset; let mut stride:usize=dims.iter().skip(1).product(); for (n_idx,arg) in args.iter().enumerate(){let n=n_idx; let raw=match arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("vector-set!"),Value::Int((n_idx+2) as i64),arg.clone(),Value::string(if matches!(arg,Value::Float(_)){"a real"}else if matches!(arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if raw<0||raw as usize>=dims[n]{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("vector-set!"),Value::Int((n_idx+2) as i64),Value::Int(raw),Value::string(if raw<0{"it is negative"}else{"it is too large"})]));} let i=raw as usize; idx+=i*stride; if n+1<dims.len(){stride=dims[n+2..].iter().product();}} let v=multivector_set_value(&kind,val.clone(),"float-vector-set!")?; data.borrow_mut()[idx]=v; Ok(val)}, Value::ByteVector(v)=>{let len=v.borrow().len(); let raw_i=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw_i{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(2),raw_i.clone(),Value::string(if matches!(raw_i,Value::Float(_)){"a real"}else if matches!(raw_i,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("byte-vector-set!"),Value::Int(2),Value::Int(ii),Value::string(if ii<0{"it is negative"}else{"it is too large"})]))} let i=ii as usize; let n=match val{Value::Int(n)=>n,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::String(_)){"a string"}else if matches!(v,Value::Char(_)|Value::NamedChar(_)){"a character"}else if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else if matches!(v,Value::Complex(_,_)){"a complex number"}else{"an object"}),Value::string("an integer")]))}; if !(0..=255).contains(&n){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("byte-vector-set!"),Value::Int(3),Value::Int(n),Value::string("an integer"),Value::string("an unsigned byte")]))} v.borrow_mut()[i]=n as u8; Ok(val)}, Value::FloatVector(v)=>{let len=v.borrow().len(); let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("float-vector-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else if matches!(raw,Value::Char(_)|Value::NamedChar(_)){"a character"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::Int(ii)]));} let f=match val{Value::Int(n)=>n as f64,Value::Float(x)=>x,Value::Rational(n,d)=>n as f64/d as f64,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("float-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Symbol(_)){"a symbol"}else if matches!(v,Value::Complex(_,_)){"a complex number"}else{"an object"}),Value::string("a real")]))}; v.borrow_mut()[ii as usize]=f; Ok(val)}, Value::IntVector(v)=>{let len=v.borrow().len(); let raw=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let ii=match raw{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-set!"),Value::Int(2),raw.clone(),Value::string(if matches!(raw,Value::Float(_)){"a real"}else if matches!(raw,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; if ii<0||ii as usize>=len{return Err(SchemeError::new("out-of-range",vec![Value::Int(ii)]));} let i=ii as usize; let n=match val{Value::Int(n)=>n,ref v=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("int-vector-set!"),Value::Int(3),v.clone(),Value::string(if matches!(v,Value::Symbol(_)){"a symbol"}else if matches!(v,Value::Float(_)){"a real"}else if matches!(v,Value::Rational(_,_)){"a ratio"}else if matches!(v,Value::Complex(_,_)){"a complex number"}else{"an object"}),Value::string("an integer")]))}; v.borrow_mut()[i]=n; Ok(Value::Int(n))}, Value::String(s)=>{let idx_arg=args.get(0).ok_or_else(||SchemeError::new("wrong-number-of-args",vec![]))?; let i=match idx_arg{Value::Int(n)=>*n,_=>return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-set!"),Value::Int(2),idx_arg.clone(),Value::string(if matches!(idx_arg,Value::Float(_)){"a real"}else if matches!(idx_arg,Value::Rational(_,_)){"a ratio"}else{"an object"}),Value::string("an integer")]))}; let mut chars=s.borrow().chars().collect::<Vec<_>>(); if i<0||i as usize>=chars.len(){return Err(SchemeError::new("out-of-range",vec![Value::string("~A ~:D argument, ~S, is out of range (~A)"),Value::symbol("string-set!"),Value::Int(2),Value::Int(i),Value::string(if i<0{"it is negative"}else{"it is too large"})]));} if let Value::Char(c)=val { chars[i as usize]=c; *s.borrow_mut()=chars.into_iter().collect(); Ok(val)} else {Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("string-set!"),Value::Int(3),val.clone(),Value::string(if matches!(val,Value::Int(_)){"an integer"}else if matches!(val,Value::Unspecified){"the unspecified object"}else{"an object"}),Value::string("a character")]))}}, Value::Pair(_)=>list_set_nested(target,&args,val), Value::Env(e)=>{let raw=args.get(0).cloned().unwrap_or(Value::Unspecified); let key_owned; let k=match &raw{Value::Symbol(s)=>{key_owned=s.trim_start_matches('+').trim_end_matches('+').to_string(); &key_owned},Value::Keyword(s)=>{key_owned=s.trim_start_matches(':').trim_start_matches('+').trim_end_matches('+').trim_end_matches(':').to_string(); &key_owned},_=>return Err(SchemeError::new("wrong-type-arg", vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-set!"),Value::Int(2),raw.clone(),Value::string(simple_value_kind(&raw)),Value::string("a symbol")]))}; if !e.set(k,val.clone()){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("let-set!: ~A is not defined in ~A"),Value::symbol(k),Value::Env(e.clone())]));}; Ok(val)}, Value::HashTable(h)=>{let key=args.get(0).cloned().unwrap_or(Value::Unspecified); Ok(hash_set_entry(&h,key,val))}, _=>Err(SchemeError::new("wrong-type-arg", vec![target])) } }
 
+mod oracle_normalizations;
 mod reader;
 use reader::{parse_all, Reader};
 
@@ -646,17 +1757,18 @@ mod printer;
 use printer::*;
 
 fn help_name(v:&Value)->Option<String>{match v{Value::Symbol(s)=>Some(s.to_string()),Value::RootMeta(s)=>Some(s.to_string()),Value::Procedure(p)=>match &**p{Procedure::Builtin{name,..}=>Some((*name).to_string()),_=>None},_=>None}}
-static HELP_FALSE: &[&str] = &["reader-cond","pi","*cload-directory*","else","sync-eval"];
-static SYMBOL_DOC_FALSE: &[&str] = &["reader-cond","*s7*","pi","*cload-directory*","else","sync-eval"];
+static HELP_FALSE: &[&str] = &["reader-cond","pi","else","sync-eval"];
+static SYMBOL_DOC_FALSE: &[&str] = &["reader-cond","*s7*","pi","else","sync-eval"];
 fn compat_doc_len(name:&str)->Option<usize>{Some(match name{
-    "*rootlet-redefinition-hook*"=>115,"*read-error-hook*"=>122,"*error-hook*"=>93,"*autoload-hook*"=>122,"*load-hook*"=>92,"*missing-close-paren-hook*"=>95,"*unbound-variable-hook*"=>110,"hook-functions"=>81,"make-hook"=>116,"car"=>48,"eval"=>243,"lambda*"=>133,"rootlet"=>70,"object->let"=>59,"open-input-string"=>55,_=>return None})}
+    "car"=>48,"eval"=>243,"lambda*"=>133,"rootlet"=>70,"object->let"=>59,"open-input-string"=>55,_=>return None})}
 fn meta_type(name:&str)->&'static str{match name{"reader-cond"=>"macro?","lambda"|"lambda*"|"if"|"macroexpand"=>"syntax?","begin"|"and"|"or"|"quasiquote"|"cond"|"do"|"set!"=>"syntax?","sync-eval"=>"undefined?",_=>"procedure?"}}
 fn meta_arity(name:&str)->Option<Value>{Some(match name{
-    "reader-cond"|"make-hook"=>Value::cons(Value::Int(0),Value::Int(536870912)),
-    "*rootlet-redefinition-hook*"|"*read-error-hook*"|"*error-hook*"|"*autoload-hook*"=>Value::cons(Value::Int(0),Value::Int(2)),
-    "hook-functions"|"car"|"object->let"|"open-input-string"=>Value::cons(Value::Int(1),Value::Int(1)),
-    "*load-hook*"|"*unbound-variable-hook*"=>Value::cons(Value::Int(0),Value::Int(1)),
-    "*missing-close-paren-hook*"|"rootlet"=>Value::cons(Value::Int(0),Value::Int(0)),
+    "reader-cond"=>Value::cons(Value::Int(0),Value::Int(536870912)),
+    "if"=>Value::cons(Value::Int(2),Value::Int(3)),
+
+    "car"|"object->let"|"open-input-string"=>Value::cons(Value::Int(1),Value::Int(1)),
+
+    "rootlet"=>Value::cons(Value::Int(0),Value::Int(0)),
     "eval"=>Value::cons(Value::Int(1),Value::Int(2)),
     "lambda*"|"sync-eval"=>Value::symbol("arity"),
     _=>return None})}
@@ -668,25 +1780,11 @@ fn doc_for(a:&[Value])->String{
 
 static ROOTLET_NAMES: &[&str] = &[
     "reader-cond",
-    "*rootlet-redefinition-hook*",
-    "*read-error-hook*",
-    "*error-hook*",
-    "*autoload-hook*",
-    "*load-hook*",
-    "*missing-close-paren-hook*",
-    "*unbound-variable-hook*",
-    "hook-functions",
-    "make-hook",
     "*s7*",
     "pi",
     "*#readers*",
-    "require",
     "*libraries*",
-    "*autoload*",
-    "*cload-directory*",
-    "*load-path*",
     "*features*",
-    "profile-in",
     "quasiquote",
     "tree-cyclic?",
     "tree-count",
@@ -694,10 +1792,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "tree-memq",
     "tree-leaves",
     "s7-optimize",
-    "abort",
-    "exit",
-    "emergency-exit",
-    "gc",
     "type-of",
     "equivalent?",
     "equal?",
@@ -718,7 +1812,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "[list*]",
     "<list*>",
     "values",
-    "stacktrace",
     "error",
     "throw",
     "catch",
@@ -729,8 +1822,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "apply",
     "eval-string",
     "eval",
-    "autoload",
-    "load",
     "call-with-exit",
     "call-with-current-continuation",
     "call/cc",
@@ -856,7 +1947,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "char-upcase",
     "string->number",
     "number->string",
-    "random-state->list",
     "nan-payload",
     "nan",
     "integer-decode-float",
@@ -889,8 +1979,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "ash",
     "log",
     "expt",
-    "random-state",
-    "random",
     "rationalize",
     "lcm",
     "gcd",
@@ -920,13 +2008,9 @@ static ROOTLET_NAMES: &[&str] = &[
     "numerator",
     "imag-part",
     "real-part",
-    "with-output-to-file",
     "with-output-to-string",
-    "call-with-output-file",
     "call-with-output-string",
-    "with-input-from-file",
     "with-input-from-string",
-    "call-with-input-file",
     "call-with-input-string",
     "read",
     "read-string",
@@ -945,8 +2029,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "get-output-string",
     "open-output-string",
     "open-input-string",
-    "open-output-file",
-    "open-input-file",
     "flush-output-port",
     "close-output-port",
     "close-input-port",
@@ -957,17 +2039,8 @@ static ROOTLET_NAMES: &[&str] = &[
     "port-closed?",
     "pair-filename",
     "pair-line-number",
-    "port-filename",
     "port-line-number",
     "port-position",
-    "port-file",
-    "c-pointer->list",
-    "c-pointer-weak2",
-    "c-pointer-weak1",
-    "c-pointer-type",
-    "c-pointer-info",
-    "c-pointer",
-    "c-object-type",
     "defined?",
     "provide",
     "provided?",
@@ -1008,7 +2081,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "goto?",
     "weak-hash-table?",
     "subvector?",
-    "c-object?",
     "unspecified?",
     "undefined?",
     "null?",
@@ -1027,7 +2099,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "list?",
     "string?",
     "char?",
-    "random-state?",
     "rational?",
     "complex?",
     "float?",
@@ -1038,7 +2109,6 @@ static ROOTLET_NAMES: &[&str] = &[
     "eof-object?",
     "output-port?",
     "input-port?",
-    "c-pointer?",
     "macro?",
     "iterator?",
     "openlet?",

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "ports",
+    "write-string"
+  ],
+  "description": "write-string with start/end arguments should work inside call-with-output-string after output-port fast paths.",
+  "expected_to_fail_candidate": true
+}

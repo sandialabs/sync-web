@@ -1,0 +1,1 @@
+(write-byte 65)

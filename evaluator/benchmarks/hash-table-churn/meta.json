@@ -1,7 +1,7 @@
 {
   "category": "hash-table",
   "description": "Hash-table insertion and lookup churn.",
-  "scale": "25000 inserts + 25000 lookups",
+  "scale": "6000 inserts + 6000 lookups",
   "tags": [
     "benchmark"
   ]

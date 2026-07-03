@@ -1,0 +1,6 @@
+{
+  "category": "closure",
+  "description": "Closure-captured pipeline stages mutating environment-backed items.",
+  "scale": "4300 four-stage pipeline items",
+  "tags": ["benchmark", "mixed", "closure", "environment", "mutation"]
+}

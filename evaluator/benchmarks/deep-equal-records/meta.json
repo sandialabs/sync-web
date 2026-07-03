@@ -1,0 +1,11 @@
+{
+  "category": "equality",
+  "description": "Structural equality over nested vectors, hash-tables, environments, and lists.",
+  "scale": "25000 comparisons",
+  "tags": [
+    "benchmark",
+    "equal?",
+    "hash-table",
+    "environment"
+  ]
+}

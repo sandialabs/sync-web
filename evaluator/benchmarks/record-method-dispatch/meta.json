@@ -1,0 +1,11 @@
+{
+  "category": "dispatch",
+  "description": "Hash-table backed method lookup and closure invocation over small record-like objects.",
+  "scale": "50000 method calls",
+  "tags": [
+    "benchmark",
+    "closure",
+    "hash-table",
+    "object-pattern"
+  ]
+}

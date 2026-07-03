@@ -1,0 +1,12 @@
+{
+  "category": "mutation",
+  "description": "Generalized set! through nested vectors, hash-tables, environments, byte-vectors, and lists.",
+  "scale": "40000 nested mutations",
+  "tags": [
+    "benchmark",
+    "set!",
+    "hash-table",
+    "environment",
+    "vector"
+  ]
+}

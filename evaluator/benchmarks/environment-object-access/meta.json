@@ -1,0 +1,10 @@
+{
+  "category": "environment",
+  "description": "Environment-as-object access, mutation, and nested environment lookup.",
+  "scale": "50000 env operations",
+  "tags": [
+    "benchmark",
+    "environment",
+    "object-pattern"
+  ]
+}

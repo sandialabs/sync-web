@@ -1,0 +1,1 @@
+(lambda* (:rest) 1)

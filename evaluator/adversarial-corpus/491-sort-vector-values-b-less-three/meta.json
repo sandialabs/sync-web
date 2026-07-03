@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector"
+  ],
+  "description": "b<3 multiple-value comparator variant.",
+  "expected_to_fail_candidate": true
+}

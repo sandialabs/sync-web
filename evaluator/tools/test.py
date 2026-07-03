@@ -11,7 +11,8 @@ Default behavior is intentionally end-to-end:
 6. run corpus validation against the candidate;
 7. run imported upstream corpus validation against the candidate;
 8. run Rust-only metering tests against the candidate;
-9. run Rust-only tail-call tests against the candidate.
+9. run Rust-only tail-call tests against the candidate;
+10. run the system-authority guard against the candidate.
 
 Use `--oracle-only` when you only want the C oracle/corpus sanity checks.
 """
@@ -150,6 +151,18 @@ def main() -> int:
             str(args.tail_iterations),
             "--timeout",
             str(args.tail_timeout),
+            "--failures",
+            str(args.failures),
+        ],
+    ) and candidate_ok
+    candidate_ok = run(
+        "run candidate system authority guard",
+        [
+            "tools/check-system-authority.py",
+            "--candidate",
+            str(candidate),
+            "--timeout",
+            str(args.timeout),
             "--failures",
             str(args.failures),
         ],

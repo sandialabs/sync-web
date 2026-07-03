@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "hash",
+    "applicable",
+    "diagnostic",
+    "float-vector"
+  ],
+  "description": "hash-table applicable implicit float-vector negative diagnostic should match hash-table-ref.",
+  "expected_to_fail_candidate": true
+}

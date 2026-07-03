@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "bytecode",
+    "named-let",
+    "multiple-values",
+    "diagnostics"
+  ],
+  "description": "bytecode named-let arity diagnostics should report only the first over-expanded argument group like s7.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior",
+    "diagnostic-payload"
+  ],
+  "description": "list-set! on immutable list should error.",
+  "expected_to_fail_candidate": true
+}

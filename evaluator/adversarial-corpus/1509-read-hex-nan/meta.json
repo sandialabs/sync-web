@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior"
+  ],
+  "description": "reader radix-prefixed NaN behavior should match s7.",
+  "expected_to_fail_candidate": true
+}

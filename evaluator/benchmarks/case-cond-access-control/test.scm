@@ -1,0 +1,22 @@
+(define (allowed? role action path)
+  (case role
+    ((admin) #t)
+    ((owner) (or (eq? action 'read) (eq? action 'write)))
+    ((reader) (and (eq? action 'read) (not (eq? path 'private))))
+    (else #f)))
+
+(define (decision role action path attrs)
+  (cond ((not (allowed? role action path)) '(deny))
+        ((and (attrs 'locked) (not (eq? role 'admin))) '(deny locked))
+        ((attrs 'missing) '(miss))
+        (else (list 'allow role action path))))
+
+(let loop ((i 0) (acc 0) (last '()))
+  (if (= i 9000)
+      (list acc last)
+      (let* ((role (case (modulo i 5) ((0) 'admin) ((1) 'owner) ((2) 'reader) ((3) 'guest) (else 'owner)))
+             (action (case (modulo i 3) ((0) 'read) ((1) 'write) (else 'delete)))
+             (path (if (= (modulo i 4) 0) 'private 'public))
+             (attrs (hash-table 'locked (= (modulo i 13) 0) 'missing (= (modulo i 17) 0)))
+             (d (decision role action path attrs)))
+        (loop (+ i 1) (+ acc (length d)) d))))

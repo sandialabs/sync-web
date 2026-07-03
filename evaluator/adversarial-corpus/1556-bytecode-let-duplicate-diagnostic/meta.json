@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "bytecode",
+    "let",
+    "diagnostics"
+  ],
+  "description": "bytecode-compiled let should preserve duplicate binding diagnostics inside named-let loops.",
+  "expected_to_fail_candidate": true
+}

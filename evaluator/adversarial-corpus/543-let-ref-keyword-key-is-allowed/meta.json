@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag"
+  ],
+  "description": "s7 treats keyword keys as acceptable env lookup keys returning undefined when absent; Rust rejects them.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "diagnostics",
+    "vector",
+    "typed-vector"
+  ],
+  "description": "symbol mutation diagnostics under values comparator vary with heap comparison path and length.",
+  "expected_to_fail_candidate": true
+}

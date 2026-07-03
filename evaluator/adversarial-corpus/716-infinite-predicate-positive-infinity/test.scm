@@ -1,0 +1,1 @@
+(infinite? +inf.0)

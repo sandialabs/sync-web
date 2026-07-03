@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector",
+    "mutation"
+  ],
+  "description": "multiple-value sort comparator behavior should not depend on a reverse input pattern.",
+  "expected_to_fail_candidate": true
+}

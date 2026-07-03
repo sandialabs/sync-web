@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "diagnostic",
+    "string"
+  ],
+  "description": "applicable string with too many indices should use s7 string-ref diagnostic.",
+  "expected_to_fail_candidate": true
+}

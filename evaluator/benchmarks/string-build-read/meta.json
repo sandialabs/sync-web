@@ -6,5 +6,5 @@
     "allocation"
   ],
   "description": "Repeated string append and symbol conversion pressure.",
-  "scale": "5000 appends"
+  "scale": "12000 appends + scan/port/symbol roundtrip"
 }

@@ -1,0 +1,6 @@
+{
+  "category": "hash-table",
+  "description": "Hash-table defaulting and merge workload with missing keys and mutable state.",
+  "scale": "6500 default merges across 8 keys",
+  "tags": ["benchmark", "mixed", "hash-table", "state"]
+}

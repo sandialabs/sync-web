@@ -1,0 +1,6 @@
+{
+  "category": "control-flow",
+  "description": "Access-control decision workload with case, cond, and/or/not, and hash-backed attributes.",
+  "scale": "9000 authorization decisions",
+  "tags": ["benchmark", "mixed", "control-flow", "authorization", "hash-table"]
+}

@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag"
+  ],
+  "description": "atan with non-real first argument should be wrong-type-arg, not a raw wrong-number-of-args output.",
+  "expected_to_fail_candidate": true
+}

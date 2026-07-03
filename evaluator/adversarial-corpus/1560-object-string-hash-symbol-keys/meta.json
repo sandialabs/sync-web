@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "printer",
+    "hash-table",
+    "symbols"
+  ],
+  "description": "hash-table object strings should preserve quoted symbol-key printing after streaming printer optimizations.",
+  "expected_to_fail_candidate": true
+}

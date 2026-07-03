@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "pre-optimization-freeze",
+    "semantic-error-behavior",
+    "diagnostic-payload",
+    "termination"
+  ],
+  "description": "append on lasso-shaped cyclic list should terminate with proper-list error.",
+  "expected_to_fail_candidate": true
+}

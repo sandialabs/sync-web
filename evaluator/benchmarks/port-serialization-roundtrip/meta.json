@@ -1,0 +1,6 @@
+{
+  "category": "ports",
+  "description": "Record serialization through output strings followed by input-string readback and object stringification.",
+  "scale": "2600 serialized records",
+  "tags": ["benchmark", "mixed", "ports", "reader", "printer"]
+}

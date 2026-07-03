@@ -1,0 +1,10 @@
+{
+  "category": "macro",
+  "description": "Macro-expanded record builders and field access in a loop.",
+  "scale": "40000 macro-built records",
+  "tags": [
+    "benchmark",
+    "macro",
+    "record"
+  ]
+}

@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mimalloc = { version = "0.1", default-features = false }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+opt-level = 2

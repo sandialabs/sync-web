@@ -1,0 +1,11 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "applicable"
+  ],
+  "description": "applicable list should not implicitly call an unsafe lambda value selected from the list.",
+  "expected_to_fail_candidate": true
+}

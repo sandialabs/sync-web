@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "applicable",
+    "environment"
+  ],
+  "description": "environment applicable access should not implicitly call an unsafe lambda binding.",
+  "expected_to_fail_candidate": true
+}

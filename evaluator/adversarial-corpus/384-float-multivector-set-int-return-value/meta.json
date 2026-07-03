@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "vector",
+    "multivector"
+  ],
+  "description": "float multivector vector-set! should return original integer value while storing float.",
+  "expected_to_fail_candidate": true
+}

@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector",
+    "mutation"
+  ],
+  "description": "multiple-value sort comparator behavior should handle non-equality conditions operationally.",
+  "expected_to_fail_candidate": true
+}

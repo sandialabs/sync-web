@@ -1,0 +1,11 @@
+{
+  "category": "list",
+  "description": "Repeated list membership and alist lookup over small access-control-like structures.",
+  "scale": "50000 checks",
+  "tags": [
+    "benchmark",
+    "list",
+    "assoc",
+    "member"
+  ]
+}

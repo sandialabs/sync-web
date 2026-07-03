@@ -1,0 +1,11 @@
+{
+  "category": "sequence",
+  "description": "Copy/fill aliasing across vectors, strings, byte-vectors, and lists.",
+  "scale": "20000 rounds",
+  "tags": [
+    "benchmark",
+    "copy",
+    "fill!",
+    "sequence"
+  ]
+}

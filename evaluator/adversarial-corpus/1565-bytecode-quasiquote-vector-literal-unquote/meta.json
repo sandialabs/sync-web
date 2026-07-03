@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "optimization-regression", "bytecode", "quasiquote", "vector"],
+  "description": "bytecode quasiquote templates should preserve s7 vector quasiquote behavior where unquote forms remain literal.",
+  "expected_to_fail_candidate": true
+}

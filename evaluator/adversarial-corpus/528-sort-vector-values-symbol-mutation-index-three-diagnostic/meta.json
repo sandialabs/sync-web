@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "mutation",
+    "diagnostics",
+    "vector",
+    "typed-vector"
+  ],
+  "description": "symbol mutation at vector index three under values comparator should normalize to oracle = first-arg diagnostic.",
+  "expected_to_fail_candidate": true
+}

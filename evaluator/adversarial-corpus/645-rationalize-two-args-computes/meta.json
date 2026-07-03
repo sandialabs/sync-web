@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "rationalize with two args should compute s7 result rather than wrong-number-of-args/symbol behavior.",
+  "expected_to_fail_candidate": true
+}

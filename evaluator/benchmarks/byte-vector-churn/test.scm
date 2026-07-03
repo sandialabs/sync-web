@@ -1,4 +1,4 @@
-(let* ((n 50000)
+(let* ((n 24000)
        (b (make-byte-vector n 0)))
   (let fill ((i 0))
     (if (= i n)

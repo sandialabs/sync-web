@@ -1,0 +1,10 @@
+{
+  "category": "quasiquote",
+  "description": "Quasiquote-heavy construction of nested record-like expressions.",
+  "scale": "25000 templates",
+  "tags": [
+    "benchmark",
+    "quasiquote",
+    "record"
+  ]
+}

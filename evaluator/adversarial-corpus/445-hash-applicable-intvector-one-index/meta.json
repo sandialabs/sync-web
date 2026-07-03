@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "hash",
+    "applicable",
+    "int-vector"
+  ],
+  "description": "hash-table applicable implicit int-vector single index should return element.",
+  "expected_to_fail_candidate": true
+}

@@ -1,5 +1,5 @@
 (let* ((rows (let loop ((i 0) (acc '()))
-               (if (= i 3000)
+               (if (= i 18000)
                    acc
                    (loop (+ i 1) (cons (list i (+ i 1) (+ i 2)) acc)))))
        (s (format #f "~{.~{+~A+~}.~}" rows)))

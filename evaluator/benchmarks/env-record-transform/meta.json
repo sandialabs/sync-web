@@ -1,0 +1,6 @@
+{
+  "category": "environment",
+  "description": "Environment-backed record transforms with vector fields, permissions, and mutable metadata.",
+  "scale": "5200 record touches",
+  "tags": ["benchmark", "mixed", "environment", "vector", "authorization"]
+}

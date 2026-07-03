@@ -1,0 +1,22 @@
+(define (response status user path body meta)
+  `(response (status ,status)
+             (user ,user)
+             (path ,@path)
+             (body ,body)
+             (meta ,@meta)))
+
+(define (summarize resp)
+  (+ (length resp)
+     (length (object->string resp))))
+
+(let loop ((i 0) (acc 0) (last '()))
+  (if (= i 4300)
+      (list acc last)
+      (let* ((path (list 'root (if (= (modulo i 2) 0) 'public 'private) (modulo i 17)))
+             (meta (list (list 'etag i) (list 'cache (modulo i 5)) (list 'proof (modulo i 13))))
+             (resp (response (if (= (modulo i 7) 0) 'accepted 'ok)
+                             (if (= (modulo i 3) 0) 'admin 'guest)
+                             path
+                             (list 'value (+ i acc))
+                             meta)))
+        (loop (+ i 1) (+ acc (summarize resp)) resp))))

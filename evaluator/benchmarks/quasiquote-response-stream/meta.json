@@ -1,0 +1,6 @@
+{
+  "category": "quasiquote",
+  "description": "Quasiquote-heavy response construction with path and metadata splicing.",
+  "scale": "4300 response objects",
+  "tags": ["benchmark", "mixed", "quasiquote", "serialization"]
+}

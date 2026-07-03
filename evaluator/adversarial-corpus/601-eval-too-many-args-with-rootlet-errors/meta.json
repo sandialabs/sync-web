@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "eval with explicit env and extra arg should wrong-number-of-args, not ignore extra arg.",
+  "expected_to_fail_candidate": true
+}

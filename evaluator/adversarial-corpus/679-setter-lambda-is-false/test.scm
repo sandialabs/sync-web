@@ -1,0 +1,1 @@
+(setter (lambda (x) x))

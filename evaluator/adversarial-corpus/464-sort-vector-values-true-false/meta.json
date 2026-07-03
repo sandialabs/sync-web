@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "vector",
+    "multiple-values"
+  ],
+  "description": "vector sort comparator returning mixed multiple values #t #f has s7-specific ordering behavior.",
+  "expected_to_fail_candidate": true
+}

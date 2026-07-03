@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "set",
+    "values",
+    "string"
+  ],
+  "description": "string set! with zero values should report unspecified object kind.",
+  "expected_to_fail_candidate": true
+}

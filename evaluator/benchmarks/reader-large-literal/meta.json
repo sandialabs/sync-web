@@ -7,5 +7,5 @@
     "literal"
   ],
   "description": "Large numeric list literal read and basic traversal.",
-  "scale": "12000 literal integers"
+  "scale": "60000 literal integers"
 }

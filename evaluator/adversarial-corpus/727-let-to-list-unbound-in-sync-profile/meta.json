@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "sync-profile oracle has no public let->list; Rust should not expose extra surface without approval.",
+  "expected_to_fail_candidate": true
+}

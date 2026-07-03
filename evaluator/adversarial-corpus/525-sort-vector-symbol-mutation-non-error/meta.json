@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "mutation",
+    "diagnostics",
+    "vector"
+  ],
+  "description": "symbol mutation during vector sort can be observable without becoming an error; diagnostics should not be over-normalized.",
+  "expected_to_fail_candidate": true
+}

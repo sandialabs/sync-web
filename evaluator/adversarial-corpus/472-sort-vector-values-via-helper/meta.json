@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "multiple-values",
+    "vector",
+    "mutation"
+  ],
+  "description": "multiple-value sort comparator behavior should work when values are returned by a helper closure.",
+  "expected_to_fail_candidate": true
+}

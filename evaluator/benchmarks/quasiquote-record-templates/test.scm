@@ -1,0 +1,7 @@
+(let loop ((i 0) (acc '()))
+  (if (= i 25000)
+      (let sum ((xs acc) (n 0))
+        (if (null? xs) n (sum (cdr xs) (+ n (cadar xs)))))
+      (let ((path (list 'users (remainder i 97) 'docs (remainder i 31)))
+            (meta (list (cons 'rev i) (cons 'flag (if (= (remainder i 2) 0) 'even 'odd)))))
+        (loop (+ i 1) (cons `(record ,i (path ,@path) (meta ,@meta) (value ,(+ i 1))) acc)))))

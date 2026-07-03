@@ -7,5 +7,5 @@
     "procedure"
   ],
   "description": "Multiple values splicing through apply/list and procedure calls.",
-  "scale": "100000 iterations"
+  "scale": "70000 iterations"
 }

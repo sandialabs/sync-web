@@ -1,0 +1,14 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "sort",
+    "mutation",
+    "vector",
+    "applicable"
+  ],
+  "description": "vector sort! comparator side effect through generalized set! should preserve mutation.",
+  "expected_to_fail_candidate": true
+}

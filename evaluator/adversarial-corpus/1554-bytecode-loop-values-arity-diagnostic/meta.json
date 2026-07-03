@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "optimization-regression",
+    "bytecode",
+    "named-let",
+    "multiple-values",
+    "diagnostics"
+  ],
+  "description": "bytecode named-let recur should preserve s7 loop arity diagnostic when multiple values expand to too many arguments.",
+  "expected_to_fail_candidate": true
+}

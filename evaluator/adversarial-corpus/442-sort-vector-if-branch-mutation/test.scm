@@ -1,0 +1,1 @@
+(let ((x (vector 3 2 1))) (sort! x (lambda (a b) (if (< a b) (vector-set! x 0 9) (vector-set! x 1 8)) (< a b))) x)

@@ -1,0 +1,5 @@
+(let ((f (lambda () (values #f #t))))
+  (let loop ((i 0))
+    (if (= i 1)
+        (or (f) 'no)
+        (loop 1))))

@@ -23,9 +23,8 @@ fn main() -> ExitCode {
     let output = std::thread::Builder::new()
         .name("s7-rust-main".to_string())
         .stack_size(64 * 1024 * 1024)
-        .spawn(move || match s7_rust::run_source(&source) {
-            Ok(value) => value.to_string(),
-            Err(err) => if err.args.is_empty() { err.tag } else { err.to_scheme() },
+        .spawn(move || match s7_rust::run_source_output(&source) {
+            Ok(output) | Err(output) => output,
         })
         .expect("failed to start evaluator thread")
         .join()

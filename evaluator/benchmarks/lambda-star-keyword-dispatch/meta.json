@@ -1,0 +1,11 @@
+{
+  "category": "dispatch",
+  "description": "lambda* optional/keyword dispatch in a tight object-constructor style loop.",
+  "scale": "70000 lambda* calls",
+  "tags": [
+    "benchmark",
+    "lambda*",
+    "keyword",
+    "dispatch"
+  ]
+}

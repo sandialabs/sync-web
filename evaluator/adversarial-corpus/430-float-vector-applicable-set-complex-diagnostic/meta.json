@@ -1,0 +1,15 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "vector",
+    "applicable",
+    "diagnostic",
+    "complex",
+    "float-vector"
+  ],
+  "description": "generalized set! into float-vector complex value uses distinct s7 diagnostic shape.",
+  "expected_to_fail_candidate": true
+}

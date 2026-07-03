@@ -7,5 +7,5 @@
     "non-tail"
   ],
   "description": "Classic non-tail recursive procedure-call workload.",
-  "scale": "fib 24"
+  "scale": "fib 22"
 }

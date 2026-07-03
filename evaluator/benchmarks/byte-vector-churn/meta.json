@@ -7,5 +7,5 @@
     "numeric"
   ],
   "description": "Byte-vector indexed writes and reads.",
-  "scale": "50000 writes + 50000 reads"
+  "scale": "24000 writes + 24000 reads"
 }

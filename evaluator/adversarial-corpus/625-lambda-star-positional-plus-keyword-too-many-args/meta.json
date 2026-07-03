@@ -1,0 +1,12 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "broad-coverage"
+  ],
+  "description": "lambda* positional plus keyword duplicate assignment should match s7 wrong-number-of-args behavior.",
+  "expected_to_fail_candidate": true
+}

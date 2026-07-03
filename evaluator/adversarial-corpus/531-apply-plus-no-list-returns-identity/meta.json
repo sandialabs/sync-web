@@ -1,0 +1,13 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "known-rust-mismatch",
+    "semantic-error-behavior",
+    "error-tag",
+    "diagnostics"
+  ],
+  "description": "s7 treats (apply +) as applying + to an empty argument list, returning 0; Rust currently errors.",
+  "expected_to_fail_candidate": true
+}

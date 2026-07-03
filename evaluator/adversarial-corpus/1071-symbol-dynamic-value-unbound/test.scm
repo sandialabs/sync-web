@@ -1,0 +1,1 @@
+(symbol->dynamic-value 'x)
