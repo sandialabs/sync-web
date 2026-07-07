@@ -152,21 +152,6 @@ IsWithinWindow(path) == \* simplified, currently checks if path is in sliding wi
         /\ index >= windowPosition - config.window \* index in sliding window (windowPosition - config.window = window lower bound)
         /\ ~IsEmptyLedger(temp[index])  \* checks ledger at index isn't empty
 
-windowMove ==
-    /\ windowPosition' = windowPosition + 1
-    /\ windowPosition < MaxIndex
-    /\ IF windowPosition' > config.window \* checks if window is past configured size
-       THEN
-         /\ perm' = [perm EXCEPT ![windowPosition - config.window] = temp[windowPosition - config.window]] \* commit oldest state to perm 
-         /\ temp' = [i \in IndexSet |-> \* and removes from temp
-              IF i <= (windowPosition - config.window)
-              THEN [p \in Paths |-> EmptyValue]
-              ELSE temp[i]]
-       ELSE \* else just advance
-        /\ temp' = temp
-        /\ perm' = perm
-    /\ UNCHANGED <<ledger, stage, pins, bridges, config, timeCounter, committed, stepIndex>>
-
 
 
 \* ledger and stage operations
@@ -273,7 +258,7 @@ synchronize(index) ==
         /\ bridges[name].valid
         /\ \/ (bridges[name].pushAllowed /\ bridgePush(name)) \* if push allowed, push
            \/ (bridges[name].pullAllowed /\ bridgePull(name))
-    /\ UNCHANGED <<ledger, stage, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm>>
+    /\ UNCHANGED <<stage, pins, config, timeCounter, committed, stepIndex, windowPosition, temp, perm>>
 
 Next ==
     \/ \E path \in Paths, pinnedOnly \in BOOLEAN, includeProof \in BOOLEAN: resolve(path, pinnedOnly, includeProof)
@@ -285,7 +270,6 @@ Next ==
     \/ \E index \in IndexSet: synchronize(index)
     \/ time
     \/ step
-    \/ windowMove
     \/ \E name \in BridgeNames, mode \in {"push", "pull"}: bridgeSetMode(name, mode)
     \/ \E name \in BridgeNames: bridgePush(name)
     \/ \E name \in BridgeNames: bridgePull(name)
@@ -350,9 +334,6 @@ ErrorRecovery ==
 wfstep ==
     WF_vars(step)
 
-wfwindowMove ==
-    WF_vars(windowMove)
-
 \* Values must eventually be committable
 wfset ==
     WF_vars(\E path \in Paths, value \in Values: stage_set(path, value))
@@ -391,11 +372,9 @@ Fairness ==
     /\ wftime
     /\ wfunpin
     /\ wfstep
-    /\ wfwindowMove
     /\ wfbridgePush
     /\ wfbridgePull
     /\ sfbridgeSynchronize
-
 
 
 Spec ==
