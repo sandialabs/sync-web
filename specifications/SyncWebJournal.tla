@@ -11,8 +11,6 @@ if an action is enabled, it will eventually happen (wf). if it isn't permanently
 
 To use model checking: java -cp tla2tools.jar tlc2.TLC -config SyncWebJournal.cfg SyncWebJournal.tla 
         To check full temporal spec: java -cp tla2tools.jar tlc2.TLC SyncWebJournal.tla    
-    
-
 *)
 
 EXTENDS Integers, Sequences, FiniteSets, TLC, Naturals
@@ -80,7 +78,7 @@ time ==
 
 IsPinned(path) == path \in pins
 
-TypeInvariant ==
+TypeInvariant == 
     /\ ledger \in [Paths -> Values] \* Ledger maps paths to values
     /\ stage \in [Paths -> Values]
     /\ \A path \in Paths: stage[path] \in Values  \*all stage values must be in values set
@@ -89,7 +87,7 @@ TypeInvariant ==
     /\ bridges \in [BridgeNames -> [
         interface : Values,
         valid : BOOLEAN,
-        mode : {"push", "pull", "bidirectional"},  \* Bridge operation mode; both in ledger.scm:16
+        mode : {"push", "pull"}, 
         lastSyncIndex : Nat, \* Track last time synchronized
         pushAllowed : BOOLEAN, \* push to bridge
         pullAllowed : BOOLEAN,
@@ -148,8 +146,7 @@ step ==
     /\ stepIndex' = stepIndex + 1
     /\ timeCounter' = timeCounter + 1
     /\ UNCHANGED <<pins, bridges, config>>
-
-
+    
 IsWithinWindow(path) == \* simplified, currently checks if path is in sliding window
     \E index \in IndexSet:
         /\ index >= windowPosition - config.window \* index in sliding window (windowPosition - config.window = window lower bound)
@@ -172,7 +169,7 @@ windowMove ==
 
 
 
-\* ledger operations
+\* ledger and stage operations
 
 resolve(path, pinnedOnly, includeProof) ==
     /\ path \in Paths \* Path must be valid
@@ -187,10 +184,9 @@ stage_get(path) ==
     /\ stage[path] # EmptyValue
     /\ UNCHANGED <<ledger, stage, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm>>
 
-stage_set(path, value) ==
+stage_set(path, value) == 
     /\ path \in Paths
     /\ value \in Values
-    /\ ledger[path] = EmptyValue \* not in ledger
     /\ stage' = [stage EXCEPT ![path] = value] \* path updated with value in stage
     /\ UNCHANGED <<ledger, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm>>
 
@@ -206,15 +202,7 @@ ledger_unpin(path) ==
     /\ pins' = pins \ {path} \* remove pinned
     /\ UNCHANGED <<ledger, stage, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm>>
 
-\* move staged changes to ledger
-commit == 
-    /\ \E path \in Paths: stage[path] # EmptyValue \* commit if stage has changes
-    /\ ledger' = [p \in Paths |-> IF stage[p] # EmptyValue THEN stage[p] ELSE ledger[p]] 
-    /\ stage' = [p \in Paths |-> EmptyValue] \* clear stage after commit
-    /\ committed' = ledger' \* update committed state
-    /\ temp' = [temp EXCEPT ![windowPosition] = ledger']
-    /\ perm' = perm  \* perm isnt modified
-    /\ UNCHANGED <<pins, bridges, config, timeCounter, stepIndex, windowPosition>>
+
 
 \* register/update bridge connections
 bridge(name, interface, info) ==
@@ -234,7 +222,7 @@ bridge(name, interface, info) ==
 \* set bridge mode
 bridgeSetMode(name, mode) ==
     /\ name \in BridgeNames
-    /\ mode \in {"push", "pull", "bidirectional"}
+    /\ mode \in {"push", "pull"}
     /\ bridges[name].valid \* Bridge must be valid to change mode
     /\ bridges' = [bridges EXCEPT ![name] = [
         @ EXCEPT
@@ -296,10 +284,9 @@ Next ==
     \/ \E name \in BridgeNames, interface \in Values, info \in Values: bridge(name, interface, info)
     \/ \E index \in IndexSet: synchronize(index)
     \/ time
-    \/ commit
     \/ step
     \/ windowMove
-    \/ \E name \in BridgeNames, mode \in {"push", "pull", "bidirectional"}: bridgeSetMode(name, mode)
+    \/ \E name \in BridgeNames, mode \in {"push", "pull"}: bridgeSetMode(name, mode)
     \/ \E name \in BridgeNames: bridgePush(name)
     \/ \E name \in BridgeNames: bridgePull(name)
 
@@ -319,15 +306,6 @@ WindowConstraints ==
          (NonEmptyTemp = {} \/ ((windowPosition - Min(NonEmptyTemp)) <= config.window))) \* either temp chain is empty, or the oldest non-empty state is within the window
     /\ windowPosition >= 0 \* non neg window position
 
-StagePinningForbidden == \* Pinned paths cannot be in stage
-    \A path \in Paths:
-        path \in pins => stage[path] = EmptyValue  
-
-
-LedgerSettingForbidden ==  \* Ledger paths cannot be in stage
-    \A path \in Paths:
-        ledger[path] # EmptyValue => stage[path] = EmptyValue 
-
 stepIndexInvariant ==
     /\ stepIndex \in Nat \* must be natural
     /\ stepIndex <= timeCounter \* less steps than time
@@ -337,14 +315,11 @@ BridgeConsistency ==
         /\ ~bridges[name].valid => ~bridges[name].pushAllowed /\ ~bridges[name].pullAllowed  \* Invalid bridges cannot push or pull
         /\ bridges[name].valid => (bridges[name].pushAllowed <=> (bridges[name].mode # "pull")) \* don't push unless it is push, etc.
         /\ bridges[name].valid => (bridges[name].pullAllowed <=> (bridges[name].mode # "push"))
-        /\ bridges[name].valid => ((bridges[name].mode = "bidirectional") => (bridges[name].pushAllowed /\ bridges[name].pullAllowed))
         /\ \A path \in Paths: bridges[name].remoteLedger[path] \in Values \* all paths in remote ledger must have value
 
 
 SafetyInvariant ==
     /\ stepIndexInvariant
-    /\ LedgerSettingForbidden
-    /\ StagePinningForbidden
     /\ WindowConstraints
     /\ TypeInvariant
     /\ BridgeConsistency
@@ -371,9 +346,6 @@ ErrorRecovery ==
 
 
 \* Fairness operations: Weak fairness
-
-wfcommit ==
-    WF_vars(commit)
 
 wfstep ==
     WF_vars(step)
@@ -418,7 +390,6 @@ Fairness ==
     /\ wfresolve
     /\ wftime
     /\ wfunpin
-    /\ wfcommit
     /\ wfstep
     /\ wfwindowMove
     /\ wfbridgePush
@@ -449,7 +420,7 @@ SingleJournalAvailability ==
 SingleJournalImmutability ==
     \A path \in Paths:
         []<> (committed[path] # EmptyValue) => \* if eventually committed
-        [] (committed[path] = ledger[path]) \* value never changes  
+        [] (committed[path] = ledger[path]) \* value never changes 
         
 \* any path this is resolvable on a single journal and reachable across bridged journals is also resolvable  
 MultiJournalAvailability == 
@@ -479,7 +450,7 @@ StepProgression ==
     []<> (stepIndex > 0)  \* Steps eventually occur
 
 
-CommitConsistency == \* whenever a path has a value, that value must be the same as what's in the committed state
+StepConsistency == \* whenever a path has a value, that value must be the same as what's in the committed state
     [] (\A path \in Paths:
         ledger[path] # EmptyValue => committed[path] = ledger[path])
 
@@ -499,7 +470,7 @@ PinnedPersistence == \* simplified, pinned path is always in temp or perm chain
 
 
 THEOREM Spec => StepProgression
-THEOREM Spec => CommitConsistency
+THEOREM Spec => StepConsistency
 THEOREM Spec => WindowProgression
 THEOREM Spec => WindowRetention
 THEOREM Spec => PinnedPersistence
