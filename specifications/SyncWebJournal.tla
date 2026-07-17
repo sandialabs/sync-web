@@ -38,7 +38,7 @@ VARIABLES
     stepIndex,
     windowPosition,
     temp,   \* Temporary chain for recent states (within window)
-    perm,    \* Permanent chain for all committed states
+    perm    \* Permanent chain for all committed states
 
 
 \* StateConstraint: bounds the two unbounded Nat counters so TLC terminates.
