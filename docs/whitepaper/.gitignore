@@ -1,0 +1,14 @@
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.loa
+*.lof
+*.lot
+*.out
+*.pdf
+*.toc
+
+!sand_report_template/*.pdf

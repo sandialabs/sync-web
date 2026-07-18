@@ -1,0 +1,22 @@
+% Public route establishment precedes a direct private final-mile invocation.
+% Intermediate journals see proof/control material, not application arguments.
+\begin{sequencediagram}
+  \tikzset{every node/.append style={font=\small}}
+  \tikzstyle{inststyle}+=[draw=swblue,fill=swlightblue,drop shadow={opacity=0}]
+
+  \newthread{origin}{Origin journal}
+  \newinst[2.15]{route}{Public bridge route}
+  \newinst[2.15]{terminal}{Terminal journal}
+
+  \begin{call}[2]{origin}{target proof from origin head}{route}
+    {extend via reverse checkpoints}
+    \begin{call}[2]{route}{extend via stored checkpoints}{terminal}
+      {source proof from terminal head}
+    \end{call}
+  \end{call}
+
+  \begin{call}[2]{origin}{source proof + signed invocation}{terminal}
+    {request-bound result (WIP)}
+  \end{call}
+
+\end{sequencediagram}

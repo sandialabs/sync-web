@@ -1,0 +1,79 @@
+\chapter{History and Entanglement}
+\label{sec:history-entanglement}
+\label{sec:historical-structure}
+\label{sec:bridges}
+
+\section{From Mutation to History}
+
+A journal separates proposed state from committed history. Applications may accumulate staged mutations, inspect their effects, and abandon or replace them before a step selects the next historically resolvable state. The step is therefore a semantic boundary, not merely a storage flush. It records transition context, advances the history, signs the resulting head, and applies retention policy as one controlled operation.
+
+Environmental values do not enter durable behavior implicitly. Time, remote responses, randomness, and operator choices are prepared as explicit inputs before the step. If those inputs and the proposed application state do not produce a meaningful change, the mechanism need not append an empty historical entry. When it does append, altering prior material later either creates another branch or breaks verification; it cannot retroactively change the state formerly identified. Linked cryptographic timestamping established this distinction between detectable rewriting and physically immutable media~\cite{Haber1991timestamp}.
+
+\section{Committed Steps}
+
+Committed states are index-addressable within a persistent chain, following persistent integrity-verifiable dictionaries and tamper-evident histories~\cite{Anagnostopoulos2001persistent,Crosby2009efficient}. Each chain entry points to a tree that contains application state, declared transition information, retained foreign heads, and signing material. All of these components ultimately reduce to the persisted forms described in \cref{fig:dag-stump}.
+
+Transition records describe the journal's declared operation and explicit inputs. They provide a durable place for provenance without imposing one universal application vocabulary. A supply-chain event, document edit, and agent observation may all require different semantic descriptions even though they share one historical structure. Likewise, a head signature authenticates control of a signing key over that commitment but does not by itself make the key a meaningful principal. Identity depends on how the key is resolved through history and interpreted by local policy.
+
+\Cref{fig:step-anatomy} separates the logical chain from the contents of one step. The corresponding procedure in Algorithm~\ref{alg:commit-step} compares staged and prior state, records explicit transition context, incorporates eligible retained material, signs the successor, and advances the durable root only after successful construction.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{0.96\textwidth}{!}{\input{figures/step-anatomy}}
+  \caption{Committed Step Anatomy}
+  \label{fig:step-anatomy}
+\end{figure}
+
+\input{algorithms/commit-step}
+
+\section{Retention and Pinning}
+
+Structural commitment and material retention are independent decisions. A journal may keep recent heads in complete form while permanent history retains only chain continuity, signatures, selected proofs, and explicitly pinned resources. The discarded material remains part of the logical state even when the local journal now holds only its digest.
+
+Pinning merges a compatible slice into the evidence retained for history. Unpinning releases that local retention obligation; it does not delete the historical commitment or affect copies held by other journals. Retention policy therefore governs local availability rather than global survival. Replication, media renewal, and institutional preservation remain separate operational commitments.
+
+Historical resolution follows directly from this model. The same resource coordinate can be evaluated against different committed heads, and each result can carry only the evidence needed for that particular path. A client may know that a resource existed at one index even when most unrelated state from that index has been pruned.
+
+\section{Reciprocal Bridges}
+
+\WIP A bridge is a reciprocal, cryptographically verified relationship in which each journal retains a verified head and public descriptor for the other. Reciprocity makes history and public identity reachable in both directions, but it grants no authority over application data. The relationship is a public control-plane connection, not a replication permission.
+
+The journal that creates a bridge becomes its ongoing synchronization initiator unless administrators explicitly renegotiate the role. The initial design has no alternating or dual-initiator mode. This asymmetry in scheduling does not imply authority: one exchange still carries both heads. It allows private or intermittently reachable journals to maintain reciprocal relationships using outbound connectivity alone.
+
+Establishment exchanges root-signed heads and descriptors in both directions. Those signed objects authenticate bridge creation independently of the later federated-invocation envelope. An acceptor may admit a valid request automatically when the creator retains initiation responsibility, or a locked-down deployment may require prior approval of the creator's stable root key. Invalid or unmatched requests are rejected without creating durable pending state. Because even an accepted public relationship consumes storage and verification work, automatic admission still requires rate and resource bounds.
+
+\section{Reciprocal Synchronization}
+
+\WIP One replay-safe request and response synchronize both current heads, as shown in \cref{fig:bridge-reciprocal}. The initiator sends its root-signed head and continuity context. The acceptor verifies that evidence, stages the head, and returns its own root-signed head. The initiator then performs the same verification and staging locally. Every path must check the stable root signature, predecessor continuity, expected peer identity, disclosure scope, freshness conditions, and resource limits.
+
+Repeating an already accepted exchange is idempotent. Acceptance itself is not yet historical incorporation: each journal commits the staged foreign head only in a later local step. Neither party can force the other's step cadence, which avoids turning remote traffic into control over local serialization or an inexpensive denial-of-service mechanism. \WIP The exact acknowledgement, incorporation-proof retrieval, and failure-recovery protocol remains unsettled.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/bridge-reciprocal-sequence}}
+  \caption{Bidirectional Head Exchange}
+  \label{fig:bridge-reciprocal}
+\end{figure}
+
+\section{Cross-Timeline Ordering}
+
+Suppose journal B accepts a signed head from journal A and later includes it in B's own committed state. A's past has then become an input to B's future: the included A head must predate B's incorporating head. B's later head together with an inclusion proof is an incorporation receipt. The earlier staging acknowledgement is not, because it proves no committed cross-timeline ordering.
+
+Repeated incorporation can weave independent histories together without producing one consensus sequence. This is the central result of timeline entanglement: temporal mappings and receipts can remain verifiable after an originating service disappears or refuses further cooperation~\cite{Maniatis2002timeline}. The mapping is necessarily coarse. Because synchronization and commit cadences differ, an event in A generally maps to an interval in B rather than to one exact shared instant.
+
+\WIP The reciprocal protocol must represent accepted, incorporated, and acknowledged heads distinctly. Collapsing these states would overstate the meaning of an exchange and obscure recovery after partial failure. \Cref{fig:entangled-state} contrasts the two relationships involved: deterministic computation transforms explicit local state and arguments, while entanglement persists a foreign commitment within another journal's later state.
+
+\section{Recursive History and Forks}
+
+A retained foreign head may itself include other heads, allowing historical reachability to compose recursively while every journal preserves its own ordering and viewpoint. This transitivity is structural, not political. A journal may verify that a distant history is connected through intermediate commitments without trusting those intermediaries, endorsing the distant journal, or granting it application authority.
+
+A signature and continuity proof establish one valid branch, not uniqueness. A dishonest journal can present distinct signed branches to isolated peers. Cross-inclusions can preserve contradictory evidence once the branches meet, but detection requires independent witnesses or transparency overlays to compare signed views~\cite{Maniatis2002timeline,Chase2016transparency}. Fork evidence is therefore different from fork prevention.
+
+Timeline entanglement supplies the established cross-history mechanism. The larger Synchronic Web setting adds executable, partially retained, path-addressable state around it~\cite{dinh2023composable}. Histories can consequently carry ordinary resources and durable interpretation, not only timeline authenticators.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{0.94\textwidth}{!}{\input{figures/entangled-state}}
+  \caption{Computation and Entangled State}
+  \label{fig:entangled-state}
+\end{figure}

@@ -1,0 +1,54 @@
+\chapter{Introduction and Motivation}
+\label{sec:introduction}
+\label{sec:requirements}
+
+\section{People, Agency, and Memory}
+
+The motivating purpose of the Synchronic Web is human. People need durable relationships to their data, histories, and social contexts if they are to exercise meaningful agency through networked systems. Access to an account or service is not enough: the operator can alter the interface, reinterpret the data, withdraw access, or disappear. Reputation has the same dependence. Evidence that exists only in one platform's current presentation cannot readily outlast that platform or be interpreted from another institutional viewpoint.
+
+Verifiable integrity does not determine truth. A faithfully preserved false assertion remains false, and a valid signature may identify only the controller of a key. Durable evidence nevertheless changes what people and institutions can contest, corroborate, and remember. It can preserve the statement that was made, the state against which a decision was taken, and the later corrections or disagreements. These are prerequisites for accountable collective memory even when they are not substitutes for judgment.
+
+A decentralized Web should therefore permit people and communities to retain their own points of reference while remaining meaningfully connected to state held by others. Local-first ownership, user-controlled data, and linked local namespaces establish important parts of this direction~\cite{Kleppmann2019local,Sambra2016solid,Rivest1996sdsi}. Yet independent administration without shared structural rules yields isolated stores, while shared structure without independent authority recreates platform dependence. The architectural problem is to preserve both local authority and durable composition.
+
+\section{The Architectural Problem}
+
+The conventional Web primarily identifies representations returned by services. A stable URL may conceal changes in content, operator, policy, and semantics, while the database behind it usually retains no independently verifiable identity that a recipient can carry elsewhere. Archives improve persistence, but preserved bytes alone may omit the behavior, history, and relationship context that made those bytes meaningful. Temporal Web systems such as Memento demonstrate how prior representations can remain addressable~\cite{Sompel2009memento}; the broader problem is to make independently operated state mutually intelligible across both time and institutional boundaries.
+
+The objective is not a permanent global database. Such a database would require common administration, naming, ordering, and governance at precisely the scale where plural authority matters most. The objective is instead durable composition among roots that may agree, disagree, overlap, or remain only partially visible. Each participant should be able to preserve its own history and evaluate evidence from others without converting those histories into one consensus sequence.
+
+AI agents make this requirement especially visible. They retrieve, combine, and act on more historical context than a person can inspect directly, and current work already treats retrieved evidence, episodic state, and knowledge-graph memory as central to agent behavior~\cite{Lewis2020retrieval,Park2023generative,Anokhin2024arigraph,Gu2024hipporag}. An agent supplied with opaque or retrospectively altered context can amplify error at machine speed. Agents are therefore a demanding use case, but they are not the final beneficiaries. The end remains greater human agency in a decentralized information environment.
+
+\section{Design Requirements}
+
+The architecture follows six requirements. \textbf{Independent administration} means that each entity chooses what to retain, expose, execute, and accept without a mandatory global operator or serialized history. \textbf{Stable and historical identity} separates the digest that identifies one state from the root-relative path that gives a resource continuity across states; earlier observations remain resolvable rather than being overwritten. \textbf{Partial possession} permits selected evidence to be verified without possessing the complete structure and keeps unknown, absent, unavailable, and undisclosed material distinct.
+
+\textbf{Self-encoding structure} carries durable definitions with the state they interpret instead of depending entirely on undocumented external software. \textbf{Controlled evolution} confines externally supplied behavior, separates deterministic durable mutation from environmental inputs, and preserves historical context through migration. Finally, \textbf{network plurality} composes independently rooted viewpoints through explicit relationships without assuming a universal namespace, trust root, or consensus history.
+
+\section{Central Tensions}
+
+These requirements do not eliminate the tensions of a decentralized information system; they organize them. Expressive portable behavior creates a need for confinement. Selective possession reduces disclosure and storage but requires proof construction and explicit treatment of missing material. Local authority protects independence but complicates discovery and cross-history coordination. Semantic evolution keeps the system adaptable while making historical interpretation and migration harder. Integrity can make alteration detectable without making data available, and transparent client behavior can hide cryptographic machinery only by placing trust in the client itself.
+
+Each architectural choice therefore displaces rather than abolishes burdens. Local roots move work into discovery and route maintenance. Self-encoding semantics move work into sandboxing, metering, documentation, and migration. Partial possession moves work into retention policy and evidence assembly. A design claim is incomplete unless it states both the property gained and the burden moved elsewhere.
+
+\section{Technical Thesis}
+
+The Synchronic Web consists of \emph{self-encoding, partially knowable, historically composable state with verifiable integrity}. Self-encoding names the deeper relation: durable definitions travel within the integrity-protected structure they interpret. Executability is one mechanism for realizing that relation, not its final purpose. Partial knowability allows a state to retain one identity even when different observers possess different integrity-verifiable portions of it. Historical composition follows the cross-history principle established by timeline entanglement~\cite{Maniatis2002timeline}; this paper makes no novelty claim for entanglement itself.
+
+The proposed contribution lies in the interaction among integrity-protected partial state, self-encoding interpretation, entangled history, root-relative resources, and plural local authority. \Cref{fig:journal-relative-web} gives this high-level form. Every journal advances its own history of integrity-protected state. Sparse reciprocal bridges retain selected foreign heads and thereby connect histories without creating a global root or universal order. The highlighted journal illustrates that every traversal begins from a chosen viewpoint rather than from an enclosing hierarchy.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/journal-relative-web}}
+  \caption{The Synchronic Web}
+  \label{fig:journal-relative-web}
+\end{figure}
+
+\section{Orientation and Scope}
+
+A \emph{journal} is the software an entity runs together with all data persisted on it. It supplies that entity's root and operational viewpoint, not a foundational global authority. A \emph{resource} is a leaf interpreted through the objects and paths that lead to it. A \emph{path} addresses a resource from a selected root, and a \emph{bridge} relates independently maintained journal histories.
+
+The intended interaction remains ordinary. People and applications should read and write resources, invoke objects, follow links, and resolve history; specialized clients should construct, fetch, verify, merge, and retain integrity evidence beneath those operations. Users continue to trust their local client and computing environment, but they need not place the same trust in every remote storage or application operator.
+
+This paper is a declarative architectural specification and rationale, not an API guide or release-status report. The marker \WIP identifies mechanisms that require renewed implementation inspection and evaluation before the draft can become a final specification. The earlier Synchronic Web proposal shared the broad social purpose but used a technically different global synchronization architecture~\cite{dinh2023synchronic}. The present treatment of bridge history instead has a direct intellectual lineage in secure timelines and timeline entanglement~\cite{Maniatis2002timeline}.
+
+Chapters~2 through~5 develop the architecture from integrity-protected structure through journal-relative federation. Chapter~6 tests the model against representative applications. Chapter~7 locates its components and proposed synthesis in prior work. Chapter~8 states the resulting guarantees, non-properties, costs, and conditions under which the architecture is warranted.

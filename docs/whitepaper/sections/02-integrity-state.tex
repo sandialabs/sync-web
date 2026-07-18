@@ -1,0 +1,63 @@
+\chapter{Integrity-Protected State}
+\label{sec:integrity-state}
+\label{sec:substrate}
+\label{sec:partial-knowledge}
+
+\section{Minimal Structural Model}
+
+The native substrate is an integrity-verifiable binary data-structure DAG, following the general search-DAG model of authenticated structures~\cite{Martel2004general,Miller2014authenticated}. Leaves contain bytes, branches relate two children, and immutable substructure may be shared by many parents. At this layer there are no documents, users, histories, or bridges. Those concepts are constructed above a deliberately narrow vocabulary of roots, branches, leaves, stumps, and null.
+
+The model distinguishes a \emph{logical digest} from a \emph{local handle}. The digest identifies recursively defined content or structure and is used for comparison and proof. The handle retrieves the representation available in one local store. Conflating the two would make storage placement part of logical identity and would prevent the same state from being represented under different persistence layouts.
+
+\Cref{fig:dag-stump} shows the persisted forms. Roots map stable local names to node handles. Branches store child handles and the digest implied by their children. Leaves use a double hash so that their stored handle and logical content identity remain domain-separated from branch construction. A stump is unary persisted data that retains a logical digest when the corresponding structure is unavailable. Null is the all-zero word and denotes empty structure. These small forms are sufficient to construct all higher layers.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/dag-stump}}
+  \caption{Persisted DAG Node Forms}
+  \label{fig:dag-stump}
+\end{figure}
+
+\section{Commitment and Reachability}
+
+A digest commits to the complete logical structure recursively defined beneath it. Replacing a leaf changes every dependent ancestor digest, so modification produces a new state rather than altering the identity of the old one. A durable root is consequently a mutable local reference to immutable identified structure: advancing a root selects a successor state while leaving its predecessor independently identifiable.
+
+Verification must still begin from a commitment that the verifier has accepted through authentication, prior observation, or local policy. The structure can prove that available material is consistent with that commitment. It cannot prove who created the commitment, whether the signer is meaningful to the verifier, or whether the state is true. Those are separate identity and policy questions.
+
+Logical reachability and material possession are also distinct. Data may be fully available, represented only by stubs, persisted locally but no longer reachable from a root, or absent from the local store. Garbage collection can change local possession without changing a commitment retained by another observer. No integrity mechanism can reconstruct bytes that no one retains; availability ultimately depends on replication and operational preservation.
+
+\section{Partial Knowledge}
+
+Different observers need not possess the same portions of an identified state. The architecture distinguishes known content, semantic absence, unresolved content without a commitment, and identified structure whose contents are unavailable or intentionally undisclosed. False, empty, missing, unknown, and pruned values therefore cannot be treated as interchangeable sentinels.
+
+A stub retains the logical digest of missing structure, while a stump is the corresponding persisted low-level representation. The stub states exactly what structure belongs at a position, but says nothing about why it is missing or whether it can be recovered. Traversal stops at that point until the observer obtains replacement evidence with the same digest. Null, by contrast, denotes actual empty structure rather than unavailable content.
+
+Making stubs first-class permits integrity to survive selective disclosure and local pruning. An observer can know where unavailable material belongs in a larger state and can later verify a compatible replacement without having learned the material in the meantime. Partial knowledge is thus a property of possession, not a different logical state.
+
+\section{Slice, Prune, and Merge}
+
+Slicing retains evidence along selected paths and replaces unrelated material with digest-preserving stubs. The result has the same root digest as the complete source and is therefore a partial representation of that state, not a newly computed summary. Compact Merkle multiproofs likewise remove redundant evidence~\cite{Ramabaja2020compact}; object-aware slicing additionally crosses documented semantic boundaries rather than traversing only physical branch positions.
+
+\input{algorithms/deep-slice}
+
+Pruning performs the complementary local operation. It intentionally replaces available material with a stub of the same digest, reducing possession while preserving the old logical identity. This differs from deletion, which changes the state. Controlled deletion in tamper-evident logs provides a related retention precedent~\cite{Crosby2009efficient}; structural pruning applies the distinction throughout a composable DAG.
+
+\input{algorithms/deep-prune}
+
+Merge combines complementary partial representations only when their commitments agree. Available material may replace a stub with the same digest, and two available branches may be merged recursively. A disagreement in digest fails immediately rather than selecting a preferred source, because the inputs then describe different logical states. Merge can therefore increase possession without changing state identity; it is not an application-level conflict-resolution policy.
+
+\input{algorithms/merge-partial}
+
+\section{Transport and Incremental Evidence}
+
+Serialization records node kinds, byte contents, and retained digests so that deserialization reconstructs the same logical root before any merge or evaluation occurs. The transport framing and compression are replaceable as long as this round trip remains exact. A query-shaped traversal may therefore send only the structure touched by a read, while a later request supplies another compatible slice from the same committed state.
+
+This incremental model supports ordinary resource access. A client can accept a root, obtain proof for one resource, verify and retain the partial representation, and later merge additional evidence. A valid slice or successful merge still proves only consistency. It does not establish that the root is authoritative, that omitted content is harmless, or that missing material will remain obtainable. Specialized clients should hide proof construction and merging beneath normal reads while preserving these distinctions in their error reporting.
+
+Resource limits remain necessary at the transport boundary. Structurally valid evidence can be adversarially deep, broad, or expensive to decode. Verification therefore requires bounds on encoded size, node count, recursion, allocation, and traversal work in addition to cryptographic checks.
+
+\section{Why the Substrate Is Small}
+
+A narrow trusted base fixes construction, hashing, persistence, and controlled evaluation while leaving maps, histories, objects, and policy inspectable and replaceable above it. Rich native record types would improve immediate convenience, but each would make semantic evolution a privileged runtime change. At the other extreme, a content-addressed blob store can identify complete values but cannot independently slice and merge their internal structure.
+
+Conventional serialization similarly preserves bytes without making arbitrary partial representations verifiable against one identity. Operations therefore belong in the native substrate only when higher layers cannot express them safely or efficiently. This minimality is a boundary discipline rather than an aesthetic end: the foundation should be small enough to audit while still supporting the structural proofs and controlled evaluation on which every higher abstraction depends.

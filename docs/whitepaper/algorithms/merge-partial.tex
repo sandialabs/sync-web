@@ -1,0 +1,28 @@
+\begin{algorithm}[htbp]
+\caption{Merge Compatible Partial Structures}
+\label{alg:merge-partial}
+\begin{algorithmic}[1]
+\Require Partial structures $a$ and $b$
+\Ensure The result contains the union of available evidence and retains the common digest
+\Function{MergePartial}{$a,b$}
+  \If{$\Call{Digest}{a} \ne \Call{Digest}{b}$}
+    \State \Call{Fail}{``cannot merge different digests''}
+  \EndIf
+  \If{$a$ is null}
+    \State \Return $a$
+  \ElsIf{$a$ is a byte-vector leaf}
+    \State \Return $a$
+  \ElsIf{$a$ is a stub}
+    \State \Return $b$
+  \ElsIf{$b$ is a stub}
+    \State \Return $a$
+  \Else
+    \State $a_L \gets \Call{Left}{a}$; $b_L \gets \Call{Left}{b}$
+    \State $a_R \gets \Call{Right}{a}$; $b_R \gets \Call{Right}{b}$
+    \State $l \gets \Call{MergePartial}{a_L,b_L}$
+    \State $r \gets \Call{MergePartial}{a_R,b_R}$
+    \State \Return $\Call{Pair}{l,r}$
+  \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}

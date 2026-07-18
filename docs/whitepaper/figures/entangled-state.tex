@@ -1,0 +1,66 @@
+% Three journal-relative views.  The highlighted heads from journals A and B
+% reappear as retained foreign commitments inside a later state of journal C.
+\begin{tikzpicture}[
+  view/.style={circle, draw=swgray!55, thick, fill=white,
+               minimum size=43mm, inner sep=2mm},
+  inode/.style={draw=swgray, rounded corners=1pt, fill=swlightgray,
+                minimum width=5mm, minimum height=3.5mm, inner sep=0pt},
+  branch/.style={draw=swgray, thin},
+  entangle a/.style={-{Latex[length=2.2mm]}, thick, dashed, draw=swgreen},
+  entangle b/.style={-{Latex[length=2.2mm]}, thick, dashed, draw=swblue},
+  compute/.style={{Latex[length=2.4mm]}-{Latex[length=2.4mm]}, very thick, draw=swgray},
+  note/.style={font=\scriptsize, align=center, text=swgray},
+]
+  % Journal A ---------------------------------------------------------------
+  \node[view] (aview) at (-4.2,-2.0) {};
+  \node[inode, draw=swgreen, thick, fill=swlightgreen] (aroot) at (-4.2,-0.9) {};
+  \node[inode] (a1) at (-4.8,-1.55) {};
+  \node[inode] (a2) at (-3.6,-1.55) {};
+  \node[inode] (a3) at (-5.15,-2.25) {};
+  \node[inode] (a4) at (-4.45,-2.25) {};
+  \node[inode] (a5) at (-3.95,-2.25) {};
+  \node[inode] (a6) at (-3.25,-2.25) {};
+  \draw[branch] (aroot)--(a1) (aroot)--(a2);
+  \draw[branch] (a1)--(a3) (a1)--(a4) (a2)--(a5) (a2)--(a6);
+  \node[font=\small\bfseries, below=1mm of aview.south] {Journal A};
+
+  % Journal B ---------------------------------------------------------------
+  \node[view] (bview) at (4.2,-2.0) {};
+  \node[inode, draw=swblue, thick, fill=swlightblue] (broot) at (4.2,-0.9) {};
+  \node[inode] (b1) at (3.6,-1.55) {};
+  \node[inode] (b2) at (4.8,-1.55) {};
+  \node[inode] (b3) at (3.25,-2.25) {};
+  \node[inode] (b4) at (3.95,-2.25) {};
+  \node[inode] (b5) at (4.45,-2.25) {};
+  \node[inode] (b6) at (5.15,-2.25) {};
+  \draw[branch] (broot)--(b1) (broot)--(b2);
+  \draw[branch] (b1)--(b3) (b1)--(b4) (b2)--(b5) (b2)--(b6);
+  \node[font=\small\bfseries, below=1mm of bview.south] {Journal B};
+
+  % Journal C, containing retained heads from A and B -----------------------
+  \node[view, minimum size=48mm] (cview) at (0,2.2) {};
+  \node[inode] (croot) at (0,3.45) {};
+  \node[inode] (c1) at (-0.8,2.85) {};
+  \node[inode] (c2) at (0.8,2.85) {};
+  \node[inode] (c3) at (-1.15,2.15) {};
+  \node[inode] (c4) at (-0.45,2.15) {};
+  \node[inode] (c5) at (0.45,2.15) {};
+  \node[inode] (c6) at (1.15,2.15) {};
+  \node[inode, draw=swgreen, thick, fill=swlightgreen] (ca) at (-1.15,1.35) {};
+  \node[inode] (c7) at (-0.45,1.35) {};
+  \node[inode] (c8) at (0.45,1.35) {};
+  \node[inode, draw=swblue, thick, fill=swlightblue] (cb) at (1.15,1.35) {};
+  \draw[branch] (croot)--(c1) (croot)--(c2);
+  \draw[branch] (c1)--(c3) (c1)--(c4) (c2)--(c5) (c2)--(c6);
+  \draw[branch] (c3)--(ca) (c4)--(c7) (c5)--(c8) (c6)--(cb);
+  \node[font=\small\bfseries, below=1mm of cview.south] {Journal C};
+
+  % Cross-view relations ----------------------------------------------------
+  \draw[entangle a] (aroot.north east) to[bend left=13]
+    node[sloped, above, note, text=swgreen!80!black] {entangled head A} (ca.west);
+  \draw[entangle b] (broot.north west) to[bend right=13]
+    node[sloped, above, note, text=swblue] {entangled head B} (cb.east);
+  \draw[compute] (aview.east) -- node[above=2mm, font=\small\bfseries, text=swgray]
+    {Deterministic computations}
+    node[below=2mm, note] {explicit state and arguments} (bview.west);
+\end{tikzpicture}

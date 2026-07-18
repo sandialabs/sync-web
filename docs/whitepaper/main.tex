@@ -1,0 +1,137 @@
+\makeatletter
+\def\input@path{{./sand_report_template/}}
+\makeatother
+
+\documentclass[12pt,report,justified,relaxed]{SANDreport}
+
+% Drafts flow continuously; do not insert open-right filler pages.
+\let\cleardoublepage\clearpage
+\let\cleardoubleoddpage\clearpage
+\let\cleardoubleevenpage\clearpage
+\let\cleardoublestandardpage\clearpage
+\KOMAoptions{listof=nochaptergap}
+
+% Fedora's split TeX Live packages do not always refresh the system font map
+% when newtx is installed; load the class font map for this document directly.
+\pdfmapfile{+newtx.map}
+
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tocloft}
+\usepackage{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,matrix,positioning,shapes.multipart}
+\usepackage[underline=false,rounded corners=true]{pgf-umlsd}
+\usepackage{eso-pic}
+
+\input{figures/styles}
+
+% Let the contents and all three lists flow continuously. Algorithms uses the
+% same tocloft title and entry machinery as figures rather than float's
+% chapter-level list heading.
+\setlength{\cftbeforeloftitleskip}{0.65\baselineskip}
+\setlength{\cftafterloftitleskip}{0.1\baselineskip}
+\setlength{\cftbeforelottitleskip}{0.65\baselineskip}
+\setlength{\cftafterlottitleskip}{0.1\baselineskip}
+\renewcommand{\cftloftitlefont}{\usekomafont{chapterentry}\color{SANDblue}}
+\renewcommand{\cftlottitlefont}{\usekomafont{chapterentry}\color{SANDblue}}
+\renewcommand{\cftchapdotsep}{\cftdotsep}
+\makeatletter
+\renewcommand{\listofalgorithms}{%
+  \par\begingroup
+    \parindent\z@ \parskip\cftparskip
+    \renewcommand{\listfigurename}{\listalgorithmname}%
+    \@cftmakeloftitle
+    \let\l@algorithm\l@figure
+    \@starttoc{loa}%
+  \endgroup}
+\makeatother
+
+% Match figure and table numbering: chapter-local identifiers such as 2-1.
+% Include the algorithm number in line anchors so multiple algorithms remain unique.
+\makeatletter
+\@addtoreset{algorithm}{chapter}
+\renewcommand{\thealgorithm}{\thechapter-\arabic{algorithm}}
+\renewcommand{\theHALG@line}{\thealgorithm.\arabic{ALG@line}}
+\makeatother
+
+\newcommand{\WIP}{\textcolor{swred}{\textbf{WIP---}}}
+\AddToShipoutPictureBG{%
+  \AtPageCenter{%
+    \makebox[0pt]{\rotatebox{45}{%
+      \textcolor{black!7}{\fontsize{92}{92}\selectfont\bfseries DRAFT}}}}%
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=SANDblue,
+  citecolor=SANDblue,
+  urlcolor=SANDblue
+}
+
+\title{The Synchronic Web}
+\author{%
+  \begin{tabular*}{6.5in}{@{\extracolsep{\fill}}lll@{}}
+    \begin{tabular}[t]{@{}l@{}}
+      Thien-Nam Dinh\\
+      \textit{Sandia National Labs}\\
+      \href{mailto:thidinh@sandia.gov}{thidinh@sandia.gov}
+    \end{tabular}
+    &
+    \begin{tabular}[t]{@{}l@{}}
+      Nicholas Pattengale\\
+      \textit{Sandia National Labs}\\
+      \href{mailto:ndpatte@sandia.gov}{ndpatte@sandia.gov}
+    \end{tabular}
+    &
+    \begin{tabular}[t]{@{}l@{}}
+      Mitch Negus\\
+      \textit{Sandia National Labs}\\
+      \href{mailto:mnegus@sandia.gov}{mnegus@sandia.gov}
+    \end{tabular}
+  \end{tabular*}%
+}
+\SANDauthorsize{\small}
+\date{}
+
+% Replace these draft values with release-review metadata before publication.
+\SANDnum{DRAFT---SAND number pending}
+\SANDprintDate{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\clearpage
+\tableofcontents
+\listoffigures
+\listoftables
+\listofalgorithms
+\clearpage
+\SANDmain
+
+\input{sections/01-introduction}
+\input{sections/02-integrity-state}
+\input{sections/03-history-entanglement}
+\input{sections/04-self-encoding}
+\input{sections/05-journal-web}
+\input{sections/06-applications}
+\input{sections/07-related-work}
+\input{sections/08-assessment}
+
+\input{sections/glossary}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

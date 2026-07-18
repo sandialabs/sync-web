@@ -1,0 +1,80 @@
+\chapter{Self-Encoding Structure}
+\label{sec:self-encoding}
+\label{sec:objects}
+\label{sec:sandbox}
+\label{sec:semantic-bootstrapping}
+
+\section{Interpretation Within Structure}
+
+A self-encoding structure carries durable definitions needed to interpret and transform its own state, extending ideas from persistent programming and distributed objects~\cite{Atkinson1983approach,Raj1991emerald,Liskov1988distributed}. In the implemented object form, executable definition and durable state occupy one integrity-protected structure. The object's digest commits not only to each component but to their association.
+
+Interpretation therefore travels with state instead of being inferred solely from an external content type, schema registry, or application version. This does not make the object self-sufficient. Its definition must be available, the object protocol must be understood, and a compatible controlled evaluator must exist. Integrity identifies the definition and state supplied to that evaluator; it cannot make their behavior safe, authorized, useful, terminating, or correct.
+
+\Cref{fig:self-encoding-transition} shows the complete relation. One commitment binds definition $D_0$ and state $S_0$. Explicit arguments and prepared environmental values enter a controlled runtime, and only an explicitly accepted result becomes the next durable object. The object may inspect and replace its own definition, so $D_1$ need not equal $D_0$. The guarantee is deterministic derivation of the complete result from the complete starting object, explicit inputs, and runtime semantics---not persistence of one definition across transitions.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/self-encoding-transition}}
+  \caption{Self-Encoding Object Transition}
+  \label{fig:self-encoding-transition}
+\end{figure}
+
+\section{The Object Protocol}
+
+Loading an object produces a transient callable value from its stored representation. The portable protocol distinguishes three operations: obtaining the object's current node representation, dispatching a documented method, and performing object-specific state access. This boundary allows generic code to use an object without depending on its physical pair layout or the class compiler that produced it.
+
+Mutation makes the distinction between the live value and stored node important. A method may change the live object's current state, but the original node and every parent that still refers to it remain unchanged. Persistence requires explicitly extracting the resulting representation and storing it into the containing object or root. A mutated child that is not stored back remains a transient computation.
+
+Compatibility consequently rests on public methods and durable state contracts. Private helpers, lexical machinery, and incidental layouts are implementation details. Arbitrary objects need not originate from one standard compiler, so portable orchestration assumes only behavior that the object itself documents.
+
+\section{Structural Composition}
+
+Objects compose by retaining other object nodes and invoking their public protocols. A path may therefore cross several semantic boundaries even though all underlying material is represented by the same integrity substrate. Deep reads descend through those objects without rebuilding ancestors. Deep mutations reconstruct each containing object on the return path so that the changed descendant becomes part of a new top-level representation.
+
+Slice, prune, and merge follow the same rule. Each object delegates through the compatible public behavior of its children, preserving their encapsulation and digest invariants. Callback operations distinguish observation, which need not rebuild a parent, from durable mutation, which must. \Cref{tab:deep-operations} summarizes the standard compositional family and makes explicit which operations mutate, rebuild, or merely observe.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \input{tables/deep-operations}
+  \caption{Deep Object Operations}
+  \label{tab:deep-operations}
+\end{table}
+
+\section{Controlled Evaluation}
+
+Portable definitions are useful precisely because a recipient did not necessarily install or author them. Running such definitions with ambient host authority would turn every resource read into arbitrary remote code execution. Evaluation must instead occur inside a deliberately reduced environment.
+
+The implemented s7 Scheme environment removes filesystem access, process control, unrestricted input and output, dynamic native loading, and other ambient host capabilities. Strict evaluation loads code from an integrity-identified node into that environment and controls the primitives it can see, the temporary persistence and cache available during evaluation, and the form of result allowed to escape. Capability absence is stronger than asking external code not to exercise a capability that remains present.
+
+Effects that the computation legitimately requires are prepared by a privileged boundary and passed in as ordinary data. Only a result explicitly accepted and persisted by that boundary becomes durable. Loading or evaluating an object does not by itself advance journal state. This distinction limits the authority of portable behavior while keeping the behavior itself inspectable and historically identifiable.
+
+\section{Deterministic Effects}
+
+A durable transition is determined by the starting structure, its definitions, explicit arguments, evaluator semantics, and the behavior of the controlled primitives. Time, randomness, network responses, and operator choices must therefore be obtained before mutation and supplied explicitly. Remote input is fetched before durable state changes begin so that transport failure or retry cannot leave a half-applied object update.
+
+Explicit input makes the computation reproducible, but it does not attest to the truth of the input. Replaying a transition can show that a claimed timestamp produced a particular result without proving that the timestamp was accurate. The same limitation applies to remote assertions and random values. Determinism also says nothing about termination, bounded resource use, or semantic correctness. Those properties require separate controls and evidence.
+
+\section{Lisp and Semantic Bootstrapping}
+
+Lisp makes definitions ordinary structured data. The same forms can be hashed, stored, sliced, transmitted, inspected, and historically identified. One medium can express object behavior, data-structure implementation, query, transition, orchestration, and controlled policy, extending the tier-unifying intuition of single-language Web systems~\cite{Cooper2007links}.
+
+The semantic stack grows from native construction, hashing, persistence, and evaluation through Scheme objects, maps, chains, journals, and policy. Each layer should depend on documented behavior beneath it rather than reaching through abstractions to privileged layouts. The bootstrap eventually terminates in native evaluator and storage semantics; self-encoding cannot eliminate that irreducible trusted base. Its purpose is to keep the base small and to move changeable interpretation into identifiable structure above it.
+
+A common language does not imply common authority. Two objects may use the same evaluator while receiving different capabilities, resource limits, and authorization. Semantic portability and policy remain separate dimensions.
+
+\section{Durable Evolution}
+
+Definitions persisted beneath a root identify the exact class, handler, or policy associated with a historical state. Replacing a definition produces a new identifiable object while the prior state remains associated with the semantics under which it was created. Historical interpretation can therefore recover not only old bytes but the durable definition that governed them.
+
+Public method signatures, return shapes, sentinels, and durable layouts form compatibility contracts. When a layout changes, migration must explicitly relate old code and state to their replacements rather than silently reinterpreting existing data. Software-update transparency similarly places code evolution inside verifiable history~\cite{Nikitin2017chainiac}; here the definitions also interpret the durable state directly.
+
+\WIP A complete migration mechanism must address atomic rollback, partially retained historical state, nested objects, authority to transform data, and behavioral validation. Keeping application meaning outside the native runtime preserves flexibility, but it moves substantial work into documentation, debugging, migration, and long-term interpreter compatibility.
+
+\section{Open Semantic Surfaces}
+
+The substrate can represent application-defined objects without teaching generic tree or history layers their concepts. This is essential if journals are to carry evolving scientific, institutional, and social structures rather than one privileged document schema. \WIP A safe public mechanism for installing and invoking such objects must still pass commit, historical resolution, proof, bridge, authorization, metering, update, and migration tests.
+
+Lisp code-as-data also permits inspectable programmable queries instead of a permanently fixed endpoint catalog. \WIP An initial public facility should be read-only and should operate against a constrained historical capability: the head or index is fixed, every dynamic read is authorized, time and allocation are budgeted, the query itself has a digest, and the touched-data evidence can be returned for verification.
+
+Removing ambient capabilities blocks broad classes of effects but does not prevent computational exhaustion. Evaluation still needs limits on time, allocation, recursion, reads, result size, and durable mutation, with atomic failure when a bound is exceeded. This sandboxing follows the safe-interpreter tradition~\cite{Levy1995safe}; it is distinct from proof of termination or proof-carrying code~\cite{Necula1997proof}, and it is distinct from authorization. Globally fixed smart-contract systems offer another model of deterministic execution~\cite{Wood2014ethereum,Androulaki2018hyperledger}. Self-encoding structure instead accepts local semantic evolution and therefore accepts the associated migration burden.

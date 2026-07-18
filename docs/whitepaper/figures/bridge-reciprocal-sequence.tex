@@ -1,0 +1,21 @@
+\begin{sequencediagram}
+  \tikzset{every node/.append style={font=\small}}
+  \tikzstyle{inststyle}+=[draw=swblue,fill=swlightblue,drop shadow={opacity=0}]
+
+  \newthread{schedule}{Initiator scheduler}
+  \newinst[1.25]{ijournal}{Initiator journal}
+  \newinst[1.55]{ainterface}{Acceptor interface}
+  \newinst[1.25]{ajournal}{Acceptor journal}
+
+  \begin{call}[2]{schedule}{prepare root-signed head $A$}{ijournal}{head $A$; continuity context}
+  \end{call}
+
+  \begin{call}[3]{schedule}{reciprocal head exchange}{ainterface}{root-signed head $B$; acceptance}
+    \begin{call}[2]{ainterface}{verify root signature and stage $A$}{ajournal}{root-signed head $B$}
+    \end{call}
+  \end{call}
+
+  \begin{call}[2]{schedule}{verify root signature and stage $B$}{ijournal}{accepted context}
+  \end{call}
+
+\end{sequencediagram}

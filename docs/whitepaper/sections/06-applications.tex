@@ -1,0 +1,43 @@
+\chapter{Application Sketches}
+\label{sec:applications}
+\label{sec:worked-example}
+
+The following sketches test the architecture against domains with different institutions, retention horizons, and consequences. They are not claims of completed applications. Each illustrates how independent histories, selected projection, and local policy can supply value without requiring one shared operational database.
+
+\section{Supply Chain Traceability}
+
+Manufacturers, carriers, inspectors, and buyers can retain their own operational histories while linking selected records across changes of custody. A recipient can preserve the component record it received, associated certificates and inspection evidence, and the exact state against which its decision was made. The evidence remains interpretable even if the originating organization's current database later changes.
+
+This arrangement parallels the NCCoE manufacturing traceability model~\cite{Stouffer2022traceability}. Secure-provenance research likewise treats integrity and controlled disclosure as essential when records cross organizational boundaries~\cite{Hasan2009provenance}. The journal-relative form adds independently retained history and explicit cross-history relationships without forcing every participant into one application database.
+
+The result is evidence of recorded pedigree, not proof of physical reality. Binding a record to a physical component still requires sensors, identifiers, inspections, procedures, and institutional accountability. The system can preserve disagreements among those sources; it cannot decide which physical-world assertion is true.
+
+\section{Persistent Web Archives}
+
+Web resources can be projected into independently operated journals as durable, historically versioned state. Multiple archives may preserve overlapping portions of a site's history and entangle their own histories rather than depend on one archival operator. Root-relative links can identify both the continuing resource lineage and a particular captured state while the ordinary source system continues serving current traffic.
+
+This model separates operational publication from long-term evidence. An existing static site, content-management system, or database may remain load-bearing while an asynchronous projection adds integrity-verifiable history. If native clients later mature, selected projected resources may assume a larger operational role without requiring an all-at-once migration.
+
+Long-term storage research warns that unlikely failures and cryptographic aging become ordinary over decades~\cite{Chun2009tiered}. Archives therefore still need capture-fidelity, privacy, legal-erasure, malicious-content, media-renewal, retention, and migration policies. Historical integrity makes alteration detectable relative to retained commitments; it does not operate the archive indefinitely.
+
+\section{Portable Identity Anchors}
+
+A person can establish a stable path beneath a selected well-known root and use it to identify a current profile hosted by a replaceable journal. Moving the profile then becomes a historical transition rather than the abandonment of every established reference. Observers can resolve the old relationship, inspect the later redirecting state, and decide whether the transition satisfies their own trust policy.
+
+Historic name trails provide a close precedent: obsolete provider-controlled names can lead to later user-directed identifiers while preserving the evidence of transition~\cite{Maniatis2003hints}. Journal-relative history extends this pattern to richer state and reciprocal relationships.
+
+Portability reduces dependence on one host, but it does not remove the need for anchor governance, key recovery, impersonation defenses, endpoint discovery, privacy, or continued availability. A stable path is useful only to observers who accept its root and can obtain enough history to verify the transition.
+
+\section{Agent Reputation Discovery}
+
+A user can choose journals or communities as starting roots and discover reporting agents through explicit relationships instead of accepting one platform ranking. An agent's reports, cited sources, corrections, and later outcomes become locally resolvable evidence for reputation judgments. Different communities can retain different evidence and reach different conclusions without collapsing those judgments into a universal score.
+
+Secure per-node logs and deterministic replay offer a related model for observable accountability~\cite{Haeberlen2007peerreview}. The Synchronic Web adds partially retained resource history and relationship-relative discovery, allowing the evidence used by one evaluation to remain identifiable after the ranking or agent changes.
+
+Durable history cannot eliminate Sybil identities, collusion, compromised keys, selective reporting, or repeated falsehoods. It can make the basis of local judgment inspectable and make later correction distinguishable from retrospective rewriting. Institutions and users still decide which roots, witnesses, and evaluation rules deserve weight.
+
+\section{Common Pattern}
+
+Each sketch begins with independently administered operational state. Selected resources receive stable root-relative coordinates, local commitments preserve successive states, and explicit relationships connect histories across institutions. Partial evidence permits selective retention, self-encoding structure keeps durable interpretation associated with the state, and local policy decides which remote identities and operations carry authority.
+
+The recurring value is not universal agreement. It is the ability to retain and compare evidence across institutions and time without requiring those institutions to share one operator, schema, or global sequence. The same architecture also preserves the limits of that evidence: availability, physical binding, social trust, and policy remain external obligations.

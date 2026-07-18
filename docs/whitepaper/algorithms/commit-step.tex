@@ -1,0 +1,38 @@
+\begin{algorithm}[htbp]
+\caption{Commit Journal Step}
+\label{alg:commit-step}
+\small
+\begin{algorithmic}[1]
+\Require Ledger $L$, Unix time $t$, signing public key $p_k$, signing secret key $s_k$
+\Ensure Either no step is needed or a signed step is appended and retention is updated
+\Function{CommitStep}{$L,t,p_k,s_k$}
+  \Statex \Comment{Comparable state omits transition and cryptographic metadata.}
+  \State $(S,P,T) \gets \Call{EvaluateLedgerFields}{L}$
+  \State $d_{cur} \gets \Call{ComparableStateDigest}{S}$
+  \If{$\Call{Size}{P}=0$}
+    \State $d_{prev} \gets \Call{Digest}{\mathit{null}}$
+  \Else
+    \State $h \gets \Call{Get}{P,-1}$
+    \State $d_{prev} \gets \Call{ComparableStateDigest}{h}$
+  \EndIf
+  \If{$d_{cur}=d_{prev}$}
+    \State \Return $\Call{Size}{P}$
+  \EndIf
+  \State $u \gets \Call{UTC}{t}$
+  \State $S.\Call{RecordTransition}{[\texttt{*state*},\texttt{*time*}],u}$
+  \State $P.\Call{Push}{\operatorname{Node}(S)}$
+  \State $S.\Call{Delete}{\texttt{*transition*}}$
+  \State $P.\Call{SignHead}{p_k,s_k}$
+  \State $T.\Call{Push}{P[-1]}$
+  \State $q_t \gets \Call{DeepSlice}{\operatorname{Node}(T),[-1,\texttt{*state*/*time*}]}$
+  \If{$L.\mathit{window}$ is set and $\Call{Size}{T}>L.\mathit{window}$}
+    \State $T.\Call{Prune}{-(L.\mathit{window}+1)}$
+  \EndIf
+  \State $q_p \gets \Call{DeepPrune}{\operatorname{Node}(P),[-1,\texttt{*state*}]}$
+  \State $L.\mathit{stage} \gets \operatorname{Node}(S)$
+  \State $L.\mathit{permanent} \gets \Call{MergePartial}{q_t,q_p}$
+  \State $L.\mathit{temporary} \gets \operatorname{Node}(T)$
+  \State \Return $\Call{Size}{P}$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
