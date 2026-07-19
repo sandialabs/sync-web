@@ -20,11 +20,12 @@
 
   % Root --------------------------------------------------------------------
   \node[word] (roothandle) at (5.2,0.45) {root handle $h$};
-  \node[record, below=6mm of roothandle, minimum width=31mm] (rootrecord) {$w_{root}$ \quad persistent?};
-  \node[dag node, below=6mm of rootrecord] (rootbranch) {B};
+  \node[record, below=6mm of roothandle, minimum width=31mm] (rootrecord)
+    {node handle $w$\\persistent flag $p$};
+  \node[dag node, below=6mm of rootrecord] (rootnode) {N};
   \draw[lookup] (roothandle) -- node[right,note] {roots lookup} (rootrecord);
-  \draw[lookup] (rootrecord) -- node[right,note] {node handle} (rootbranch);
-  \node[panel, fit=(roothandle)(rootrecord)(rootbranch),
+  \draw[lookup] (rootrecord) -- node[right,note] {referenced node} (rootnode);
+  \node[panel, fit=(roothandle)(rootrecord)(rootnode),
         label={[font=\small\bfseries]above:Root}] (rootpanel) {};
 
   % Leaf --------------------------------------------------------------------
@@ -60,7 +61,7 @@
   \draw[hash] (stumpdigest) -- node[above,note] {$H$} (stumphandle);
   \draw[lookup] (stumphandle) -- node[right,note] {stumps lookup} (stumprecord);
   \node[note, below=4mm of stumprecord] (stumpnote)
-    {stumps$[s]=d$\\\texttt{sync-digest}$=d$\\no child records};
+    {stumps$[s]=d$\\\texttt{sync-digest}$=d$\\no child references retained};
   \node[panel, fit=(stumpdigest)(stumphandle)(stumprecord)(stumpnote),
         label={[font=\small\bfseries]above:Stump (stored stub)}] (stumppanel) {};
 \end{tikzpicture}

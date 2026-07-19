@@ -26,8 +26,8 @@
   % Controlled runtime and explicit input.
   \node[runtime] (eval) at (0,0) {\textbf{controlled runtime}\\[1mm]
                                   apply $D_0$ to the complete\\object, $a$, and $e$};
-  \node[input, above=6mm of eval.north] (args) {explicit arguments $a$};
-  \node[input, below=6mm of eval.south] (effects) {prepared external values $e$};
+  \node[input, above=8mm of eval.north] (args) {explicit arguments $a$};
+  \node[input, below=9mm of eval.south] (effects) {prepared external values $e$};
   \draw[arrow] (args) -- (eval);
   \draw[arrow] (effects) -- (eval);
   \draw[arrow] (old.east) -- node[above,note] {interpret} (eval.west);
@@ -40,9 +40,4 @@
   \node[note, below=2mm of new.south] {$D_1$ may differ from $D_0$; durable only after acceptance};
   \draw[arrow] (eval.east) -- node[above,note] {result} (new.west);
 
-  % Conceptual boundary note.
-  \draw[swgold!85!black, dashed, rounded corners=4pt]
-    ($(eval.north west)+(-3mm,8mm)$) rectangle ($(eval.south east)+(3mm,-8mm)$);
-  \node[note, text=swgold!60!black, below=12mm of eval.south]
-    {self-encoding does not mean self-sufficient};
 \end{tikzpicture}

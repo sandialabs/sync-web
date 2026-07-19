@@ -7,15 +7,15 @@
 
 A journal separates proposed state from committed history. Applications may accumulate staged mutations, inspect their effects, and abandon or replace them before a step selects the next historically resolvable state. The step is therefore a semantic boundary, not merely a storage flush. It records transition context, advances the history, signs the resulting head, and applies retention policy as one controlled operation.
 
-Environmental values do not enter durable behavior implicitly. Time, remote responses, randomness, and operator choices are prepared as explicit inputs before the step. If those inputs and the proposed application state do not produce a meaningful change, the mechanism need not append an empty historical entry. When it does append, altering prior material later either creates another branch or breaks verification; it cannot retroactively change the state formerly identified. Linked cryptographic timestamping established this distinction between detectable rewriting and physically immutable media~\cite{Haber1991timestamp}.
+The normative commit discipline prepares time, remote responses, randomness, and operator choices as explicit inputs before a step. The current strict evaluator still exposes ambient system time, as Chapter~4 details, so arbitrary portable code does not yet satisfy that discipline automatically. If explicit inputs and proposed application state produce no meaningful change, the mechanism need not append an empty historical entry. When it does append, altering prior material later either creates another branch or breaks verification; it cannot retroactively change the state formerly identified. Linked cryptographic timestamping established this distinction between detectable rewriting and physically immutable media~\cite{Haber1991timestamp}.
 
 \section{Committed Steps}
 
 Committed states are index-addressable within a persistent chain, following persistent integrity-verifiable dictionaries and tamper-evident histories~\cite{Anagnostopoulos2001persistent,Crosby2009efficient}. Each chain entry points to a tree that contains application state, declared transition information, retained foreign heads, and signing material. All of these components ultimately reduce to the persisted forms described in \cref{fig:dag-stump}.
 
-Transition records describe the journal's declared operation and explicit inputs. They provide a durable place for provenance without imposing one universal application vocabulary. A supply-chain event, document edit, and agent observation may all require different semantic descriptions even though they share one historical structure. Likewise, a head signature authenticates control of a signing key over that commitment but does not by itself make the key a meaningful principal. Identity depends on how the key is resolved through history and interpreted by local policy.
+Transition fields hold declared metadata about the operation and explicit inputs associated with a step. They are not automatically a complete mutation provenance record: in the current implementation, successive staged mutations can replace the recorded operation rather than append an exhaustive list. Applications requiring complete provenance must provide a durable event object or batch description of their own. A supply-chain event, document edit, and agent observation may all require different semantic descriptions even though they share one historical structure. Likewise, a head signature authenticates control of a signing key over that commitment but does not by itself make the key a meaningful principal. Identity depends on how the key is resolved through history and interpreted by local policy.
 
-\Cref{fig:step-anatomy} separates the logical chain from the contents of one step. The corresponding procedure in Algorithm~\ref{alg:commit-step} compares staged and prior state, records explicit transition context, incorporates eligible retained material, signs the successor, and advances the durable root only after successful construction.
+\Cref{fig:step-anatomy} shows the logical committed structure of one step. Local permanent possession is commonly partial: application state may be represented by stubs while time evidence, signatures, continuity, pins, and selected slices remain available. Algorithm~\ref{alg:commit-step} compares staged and prior state, records declared transition context, incorporates eligible retained material, signs the successor, and advances the durable root only after successful construction. Signing uses a canonical pre-signature view: embedded key and signature fields are blanked before hashing, the resulting digest is signed, and the signing material is then inserted. Verification reconstructs the same blanked view.
 
 \begin{figure}[htbp]
   \centering
@@ -44,9 +44,9 @@ Establishment exchanges root-signed heads and descriptors in both directions. Th
 
 \section{Reciprocal Synchronization}
 
-\WIP One replay-safe request and response synchronize both current heads, as shown in \cref{fig:bridge-reciprocal}. The initiator sends its root-signed head and continuity context. The acceptor verifies that evidence, stages the head, and returns its own root-signed head. The initiator then performs the same verification and staging locally. Every path must check the stable root signature, predecessor continuity, expected peer identity, disclosure scope, freshness conditions, and resource limits.
+\WIP One replay-safe request and response should synchronize both current heads, as shown in \cref{fig:bridge-reciprocal}. The initiator sends its root-signed head and continuity context. The acceptor verifies that evidence, stages the head, and returns its own root-signed head. The initiator then performs the same verification and staging locally. The normative protocol requires stable-root signatures, predecessor continuity from the retained peer head, expected peer identity, disclosure scope, freshness conditions, and resource limits. The current latest-head synchronization path verifies signatures but does not yet enforce predecessor continuity from the previously retained head; a valid replacement branch can therefore be accepted. Closing that gap is required before the exchange provides the continuity described here.
 
-Repeating an already accepted exchange is idempotent. Acceptance itself is not yet historical incorporation: each journal commits the staged foreign head only in a later local step. Neither party can force the other's step cadence, which avoids turning remote traffic into control over local serialization or an inexpensive denial-of-service mechanism. \WIP The exact acknowledgement, incorporation-proof retrieval, and failure-recovery protocol remains unsettled.
+Repeating an already accepted exchange is intended to be idempotent. Acceptance itself is not yet historical incorporation: each journal commits the staged foreign head only in a later local step. Neither party can force the other's step cadence, which avoids turning remote traffic into control over local serialization or an inexpensive denial-of-service mechanism. \WIP The exact acknowledgement, incorporation-proof retrieval, continuity enforcement, and failure-recovery protocol remains unsettled.
 
 \begin{figure}[htbp]
   \centering
@@ -73,7 +73,7 @@ Timeline entanglement supplies the established cross-history mechanism. The larg
 
 \begin{figure}[htbp]
   \centering
-  \resizebox{0.94\textwidth}{!}{\input{figures/entangled-state}}
+  \resizebox{\textwidth}{!}{\input{figures/entangled-state}}
   \caption{Computation and Entangled State}
   \label{fig:entangled-state}
 \end{figure}

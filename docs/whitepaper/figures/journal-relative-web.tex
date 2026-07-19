@@ -1,6 +1,6 @@
 % A high-level view of the Synchronic Web.  Each glyph is an independently
 % advancing journal history whose states are integrity-protected DAGs.  Sparse
-% reciprocal bridges entangle selected histories without a global root.
+% reciprocal bridges exchange heads; later committed incorporation entangles histories.
 \begin{tikzpicture}[
   current/.style={circle, draw=swgray!60, thick, fill=white,
                   minimum size=15mm, inner sep=0pt},
@@ -18,17 +18,12 @@
   \newcommand{\journalhistory}[6]{%
     \begin{scope}[shift={(#2,#3)}, scale=#5, transform shape]
       \node[#6] (#1) at (0,0) {};
-      % Current state DAG.
-      \node[dag node] (#1-r) at (0,0.28) {};
-      \node[dag node] (#1-l) at (-0.27,0.02) {};
-      \node[dag node] (#1-q) at (0.27,0.02) {};
-      \node[dag node] at (-0.40,-0.26) {};
-      \node[dag node] at (-0.13,-0.26) {};
-      \node[dag node] at (0.13,-0.26) {};
-      \node[dag node] at (0.40,-0.26) {};
+      % Simplified current-state DAG glyph: enough to show structure without
+      % implying that its tiny internal layout carries semantic detail.
+      \node[dag node] (#1-r) at (0,0.22) {};
+      \node[dag node] (#1-l) at (-0.24,-0.18) {};
+      \node[dag node] (#1-q) at (0.24,-0.18) {};
       \draw[history strand] (#1-r)--(#1-l) (#1-r)--(#1-q);
-      \draw[history strand] (#1-l)--(-0.40,-0.26) (#1-l)--(-0.13,-0.26);
-      \draw[history strand] (#1-q)--(0.13,-0.26) (#1-q)--(0.40,-0.26);
 
       % Bundled structural continuity through local history.
       \foreach \x in {-0.34,-0.17,0,0.17,0.34} {
@@ -77,7 +72,7 @@
   \draw[history strand, thick] (0.15,-3.50) -- (0.15,-3.00);
   \node[note, right=2mm] at (0.15,-3.25) {independent local history};
   \draw[bridge] (-5.15,-3.85) -- (-4.45,-3.85);
-  \node[note, right=2mm] at (-4.45,-3.85) {bridge and entanglement};
+  \node[note, right=2mm] at (-4.45,-3.85) {reciprocal bridge relationship};
   \node[selected, minimum size=8mm] (legend-selected) at (0.15,-3.85) {};
   \node[note, right=2mm of legend-selected] {selected viewpoint};
 \end{tikzpicture}

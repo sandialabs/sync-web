@@ -1,81 +1,73 @@
+% Logical contents of one committed step.  Application paths are nested beneath
+% *state*; cryptographic/public-descriptor fields are intentionally simplified.
 \begin{tikzpicture}[
-  field/.style={draw=swgray, thin, fill=white, minimum height=7mm,
-                minimum width=20mm, align=center, inner xsep=3pt,
-                font=\footnotesize\ttfamily},
-  namespace/.style={field, draw=swblue, thick, fill=swlightblue,
-                    minimum width=29mm},
-  state/.style={field, draw=swgreen, fill=swlightgreen, minimum width=20mm},
-  history/.style={field, fill=swlightblue, minimum width=18mm},
-  document/.style={draw=swgreen, thick, rounded corners=2pt, fill=white,
-                   minimum width=18mm, minimum height=8mm,
-                   align=center, font=\scriptsize},
-  container/.style={draw=swblue!55, rounded corners=4pt, dashed, inner sep=6pt},
-  link/.style={-{Latex[length=2.2mm]}, thick, draw=swgray},
-  recursive/.style={link, dashed, draw=swblue},
-  annotation/.style={font=\scriptsize, text=swgray, align=center},
+  box/.style={draw=swgray, rounded corners=2pt, fill=white,
+              minimum height=7mm, align=center, font=\footnotesize},
+  ns/.style={box, draw=swblue, thick, fill=swlightblue, minimum width=28mm,
+             font=\footnotesize\ttfamily},
+  data/.style={box, draw=swgreen, fill=swlightgreen, minimum width=20mm},
+  history/.style={box, fill=swlightblue, minimum width=16mm},
+  group/.style={draw=swblue!55, rounded corners=4pt, dashed, inner sep=6pt},
+  arrow/.style={-{Latex[length=2.1mm]}, thick, draw=swgray},
+  recur/.style={arrow, dashed, draw=swblue},
+  note/.style={font=\scriptsize, text=swgray, align=center},
 ]
-  % Indexed local history.
+  % Local history and selected step.
   \matrix (chain) [matrix of nodes, nodes={history}, column sep=-\pgflinewidth,
-                   label={[font=\small\bfseries]above:Local permanent history}] at (0,0) {
+                   label={[font=\small\bfseries]above:Logical committed history}] at (0,0) {
     $\cdots$ & $n-2$ & $n-1$ & $n$ \\
   };
 
-  % Reserved namespaces in the selected step.
-  \node[namespace] (ns-state) at (-5.2,-2.0) {\texttt{*state*}};
-  \node[namespace] (ns-transition) at (-5.2,-4.7) {\texttt{*transition*}};
-  \node[namespace] (ns-bridge) at (-5.2,-6.7) {\texttt{*bridge*}};
-  \node[namespace] (ns-crypto) at (-5.2,-9.0) {\texttt{*crypto*}};
-  \node[container, fit=(ns-state)(ns-transition)(ns-bridge)(ns-crypto),
+  \node[ns] (state-ns) at (-5.1,-2.0) {\texttt{*state*}};
+  \node[ns] (trans-ns) at (-5.1,-4.2) {\texttt{*transition*}};
+  \node[ns] (bridge-ns) at (-5.1,-6.4) {\texttt{*bridge*}};
+  \node[ns] (crypto-ns) at (-5.1,-8.6) {\texttt{*crypto*}};
+  \node[group, fit=(state-ns)(trans-ns)(bridge-ns)(crypto-ns),
         label={[font=\small\bfseries]above:Step $n$ tree}] (step) {};
-  \draw[link] (chain-1-4.south) -- ++(0,-4mm) -| (step.north);
+  \draw[arrow] (chain-1-4.south) -- ++(0,-4mm) -| (step.north);
 
-  % State tree entries point to documents.
-  \matrix (state-tree) [matrix of nodes, nodes={state}, column sep=-\pgflinewidth,
-                        label={[font=\small\bfseries]above:State tree}] at (0.8,-2.0) {
-    alice & report & \texttt{*time*} & $\cdots$ \\
-  };
-  \node[document, below=6mm of state-tree-1-1] (doc-a) {Document A};
-  \node[document, below=6mm of state-tree-1-2] (doc-b) {Document B};
-  \node[sw metadata, below=6mm of state-tree-1-3, text width=1.7cm,
-        minimum height=8mm, font=\scriptsize] (time) {UTC time};
-  \draw[link] (ns-state.east) -- (state-tree.west);
-  \draw[link] (state-tree-1-1.south) -- (doc-a.north);
-  \draw[link] (state-tree-1-2.south) -- (doc-b.north);
-  \draw[link] (state-tree-1-3.south) -- (time.north);
+  % Correct nested application path: (*state* alice report).
+  \node[data] (alice) at (-1.6,-1.55) {alice};
+  \node[data] (report) at (1.0,-1.55) {report};
+  \node[box, draw=swgreen, thick, minimum width=32mm] (document) at (4.0,-1.55)
+    {document or retained stub};
+  \node[data, font=\footnotesize\ttfamily] (time-key) at (-1.6,-2.55) {\texttt{*time*}};
+  \node[box, minimum width=23mm] (time-value) at (1.0,-2.55) {UTC value};
+  \draw[arrow] (state-ns.east) -- (alice.west);
+  \draw[arrow] (alice.east) -- (report.west);
+  \draw[arrow] (report.east) -- (document.west);
+  \draw[arrow] (state-ns.east) -- ++(5mm,0) |- (time-key.west);
+  \draw[arrow] (time-key.east) -- (time-value.west);
+  \node[note, above=1mm of report] {nested path};
 
-  % Flat transition record.
-  \matrix (transition) [matrix of nodes, nodes={field, minimum width=28mm},
-                        column sep=-\pgflinewidth,
-                        label={[font=\small\bfseries]above:Transition record}] at (-0.5,-4.7) {
-    previous & operation \\
-  };
-  \draw[link] (ns-transition.east) -- (transition.west);
+  % Declared transition metadata, not an exhaustive provenance log.
+  \node[box, minimum width=31mm] (declared) at (-1.2,-4.2) {declared operation};
+  \node[box, minimum width=29mm] (previous) at (2.4,-4.2) {previous metadata};
+  \draw[arrow] (trans-ns.east) -- (declared.west);
+  \draw[arrow] (declared.east) -- (previous.west);
+  \node[note, above=1mm of declared] {transition metadata};
 
-  % Bridge entry points to the retained head of another history.
-  \matrix (bridge) [matrix of nodes, nodes={field, minimum width=25mm},
-                    column sep=-\pgflinewidth,
-                    label={[font=\small\bfseries]above:Bridge entry}] at (-0.5,-6.7) {
-    peer info & remote head \\
-  };
-  \draw[link] (ns-bridge.east) -- (bridge.west);
-
-  \matrix (remote) [matrix of nodes, nodes={history, minimum width=15mm},
-                    column sep=-\pgflinewidth,
-                    label={[font=\scriptsize\bfseries]above:Remote history}] at (4.4,-6.7) {
+  % Retained foreign history can recursively contain other heads.
+  \node[box, minimum width=27mm] (peer) at (-1.4,-6.4) {peer descriptor};
+  \node[box, minimum width=24mm] (remote-head) at (1.7,-6.4) {remote head $m$};
+  \matrix (remote) [matrix of nodes, nodes={history, minimum width=13mm},
+                    column sep=-\pgflinewidth] at (5.0,-6.4) {
     $\cdots$ & $m-1$ & $m$ \\
   };
-  \draw[link] (bridge-1-2.east) -- (remote.west);
-  \node[sw primary, below=7mm of remote, text width=3.7cm, font=\scriptsize] (remote-step)
-    {step $m$ tree with its own \texttt{*bridge*}};
-  \node[font=\Large, text=swblue, right=7mm of remote-step] (more) {$\cdots$};
-  \draw[link] (remote-1-3.south) -- (remote-step.north);
-  \draw[recursive] (remote-step.east) -- node[above,annotation] {recurse} (more.west);
+  \draw[arrow] (bridge-ns.east) -- (peer.west);
+  \draw[arrow] (peer.east) -- (remote-head.west);
+  \draw[arrow] (remote-head.east) -- (remote.west);
+  \node[note, above=1mm of remote] {retained foreign history};
+  \node[box, draw=swblue, fill=swlightblue, minimum width=34mm] (nested) at (5.0,-7.45)
+    {step $m$ may retain other heads};
+  \draw[recur] (remote.south) -- (nested.north);
 
-  % Flat cryptographic record.
-  \matrix (crypto) [matrix of nodes, nodes={field, minimum width=28mm},
-                    column sep=-\pgflinewidth,
-                    label={[font=\small\bfseries]above:Cryptographic record}] at (-0.5,-9.0) {
-    public-key & signature \\
-  };
-  \draw[link] (ns-crypto.east) -- (crypto.west);
+  % Deliberately simplified public cryptographic/descriptor view.
+  \node[box, minimum width=33mm] (journal-crypto) at (-1.1,-8.6)
+    {journal key + signature};
+  \node[box, minimum width=37mm] (interface-crypto) at (3.1,-8.6)
+    {interface key + endpoint};
+  \draw[arrow] (crypto-ns.east) -- (journal-crypto.west);
+  \draw[arrow] (journal-crypto.east) -- (interface-crypto.west);
+  \node[note, above=1mm of journal-crypto] {simplified public crypto/descriptor view};
 \end{tikzpicture}
