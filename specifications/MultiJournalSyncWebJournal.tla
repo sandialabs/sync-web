@@ -404,8 +404,8 @@ SingleJournalAvailability ==
 
 \* any resolvable path that has been committed always returns the same value
 SingleJournalImmutability ==
-    [] (\A j \in JournalNames: \A path \in Paths: 
-        ledger[j][path] # EmptyValue => committed[j][path] = ledger[j][path]) \* committed and ledger must have same value
+    \A j \in JournalNames: \A path \in Paths: 
+        []<>(committed[j][path] # EmptyValue) => [] (committed[j][path] = ledger[j][path]) \* committed and ledger must have same value
         
 \* any path this is resolvable on a single journal and reachable across bridged journals is also resolvable  
 MultiJournalAvailability == 
@@ -419,8 +419,8 @@ MultiJournalAvailability ==
 MultiJournalImmutability ==
     \A id \in BridgeIds:
         \A path \in Paths: 
-            [] ((bridges[id].valid /\ ledger[id[2]][path] # EmptyValue) => \* bridge is valid, remote journal has value
-                [] (ledger[id[2]][path] # EmptyValue)) \* remote and local has same value
+            [] ((bridges[id].valid /\ ledger[id[1]][path] # EmptyValue) => \* bridge is valid, remote journal has value
+                [] (ledger[id[2]][path] = ledger[id[1]][path])) \* remote and local has same value
 
 THEOREM Spec => SingleJournalAvailability
 THEOREM Spec => SingleJournalImmutability
