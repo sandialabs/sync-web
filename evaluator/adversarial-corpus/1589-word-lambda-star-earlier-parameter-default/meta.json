@@ -1,0 +1,16 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "lambda-star",
+    "default",
+    "parameter-reference"
+  ],
+  "description": "A word-runtime lambda* default symbol must resolve an earlier bound parameter rather than become a literal symbol.",
+  "expected_to_fail_candidate": true
+}

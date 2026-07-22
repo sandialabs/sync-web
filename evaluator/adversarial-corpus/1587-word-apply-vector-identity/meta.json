@@ -1,0 +1,18 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "identity",
+    "vector",
+    "apply",
+    "named-let",
+    "mutation"
+  ],
+  "description": "A mutable vector returned through apply inside a word loop must remain the original object.",
+  "expected_to_fail_candidate": true
+}

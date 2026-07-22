@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "fundamental-correctness", "native-jit", "builtin-shadowing", "environment"],
+  "description": "A newly inserted scalar binding that shadows an inherited builtin must invalidate native compiled assumptions.",
+  "expected_to_fail_candidate": true
+}

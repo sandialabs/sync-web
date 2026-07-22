@@ -17,7 +17,7 @@ The current baseline is the vendored s7 in sync-web:
   - `WITH_SYSTEM_EXTRAS=0`
   - `WITH_C_LOADER=0`
 
-The Rust port should target sync-web-compatible s7 behavior, not necessarily full upstream s7 embedding compatibility.
+The Rust port should target sync-web-compatible s7 behavior, not necessarily full upstream s7 embedding compatibility. The current runtime representation, execution tiers, guard rules, and safety invariants are summarized in [`docs/runtime-architecture.md`](docs/runtime-architecture.md).
 
 ## Important non-goals
 
@@ -114,6 +114,28 @@ tools/run-tail-calls.py --candidate target/debug/s7-rust
 ```
 
 See [`docs/tail-calls.md`](docs/tail-calls.md) for the requirement, current harness, and acceptance checks.
+
+## Runtime performance diagnostics
+
+Developer-side tools expose architectural costs without adding profiling or system authority to Scheme:
+
+```sh
+# Refuse to benchmark when load or sampled CPU idle makes results unreliable.
+tools/check-benchmark-host.py
+
+# Compare candidate/oracle hardware counters and write structured evidence.
+tools/profile-runtime.py --case record-method-dispatch --repeats 3 \
+  --json-report target/profile-runtime.json
+
+# Attribute a flat perf profile to stable runtime components.
+tools/profile-hotspots.py record-method-dispatch \
+  --json-report target/profile-hotspots.json
+
+# Explain which compiled bodies are admitted to or rejected from the Word tier.
+tools/report-trace-eligibility.py --case record-method-dispatch
+```
+
+The first three tools require Linux `perf`. Trace-eligibility counters exist only in the Rust test harness; the production interpreter remains unchanged. Use `tools/run-benchmarks.py --baseline-report ...` for release A/B decisions after focused profiling.
 
 ## Imported upstream s7 tests
 

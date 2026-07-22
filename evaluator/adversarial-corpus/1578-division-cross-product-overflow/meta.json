@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "rational", "integer-overflow", "division"],
+  "description": "Exact division cross-products must not wrap i64 and produce a small negative result.",
+  "expected_to_fail_candidate": true
+}

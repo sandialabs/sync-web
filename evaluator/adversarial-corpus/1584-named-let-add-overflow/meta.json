@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "named-let", "bytecode", "integer-overflow"],
+  "description": "Optimized named-let addition overflow must match the C oracle rather than clamp to the maximum fixnum.",
+  "expected_to_fail_candidate": true
+}

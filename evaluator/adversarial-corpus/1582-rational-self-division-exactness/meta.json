@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "rational", "exactness", "division"],
+  "description": "Large rational self-division should cancel to exact integer one before overflow promotion.",
+  "expected_to_fail_candidate": true
+}

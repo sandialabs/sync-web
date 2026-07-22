@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "fundamental-correctness", "macro", "side-effects", "cache"],
+  "description": "Repeated evaluation of the same macro call site should rerun observable expansion-time effects.",
+  "expected_to_fail_candidate": true
+}

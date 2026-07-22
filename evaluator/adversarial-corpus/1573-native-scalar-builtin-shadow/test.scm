@@ -1,0 +1,6 @@
+(let ((e (sublet (rootlet)))
+      (f #f))
+  (set! f (with-let e (lambda (x) (+ x 1))))
+  (f 1)
+  (varlet e '+ 5)
+  (f 2))

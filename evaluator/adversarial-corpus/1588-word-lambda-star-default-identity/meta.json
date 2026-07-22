@@ -1,0 +1,18 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "identity",
+    "lambda-star",
+    "default",
+    "named-let",
+    "mutation"
+  ],
+  "description": "A quoted lambda* default returned through a word loop must retain its persistent object identity across calls.",
+  "expected_to_fail_candidate": true
+}

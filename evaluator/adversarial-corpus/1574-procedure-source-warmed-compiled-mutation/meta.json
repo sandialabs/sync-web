@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "fundamental-correctness", "procedure-source", "mutation", "compiled-code"],
+  "description": "Mutating procedure-source after a procedure has executed must affect later calls rather than leave warmed compiled code stale.",
+  "expected_to_fail_candidate": true
+}

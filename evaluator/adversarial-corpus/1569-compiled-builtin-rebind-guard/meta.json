@@ -1,0 +1,4 @@
+{
+  "description": "Compiled builtin fast paths must observe callable rebinding before executing side effects.",
+  "tags": ["compiled", "bytecode", "binding", "regression"]
+}

@@ -1,0 +1,17 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "lambda-star",
+    "default",
+    "global-binding",
+    "mutation"
+  ],
+  "description": "A word-runtime lambda* default must re-evaluate a mutable global binding on each omitted-argument call.",
+  "expected_to_fail_candidate": true
+}

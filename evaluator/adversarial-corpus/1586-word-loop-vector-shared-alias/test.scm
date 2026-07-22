@@ -1,0 +1,6 @@
+(let* ((p (list 1))
+       (v (vector p p))
+       (out (let loop ((i 0) (x v))
+              (if (= i 1) x (loop (+ i 1) x)))))
+  (set-car! (out 0) 9)
+  (list (out 1) (eq? (out 0) (out 1))))

@@ -1,0 +1,18 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "aliasing",
+    "vector",
+    "pair",
+    "named-let",
+    "mutation"
+  ],
+  "description": "Word-loop aggregate conversion must preserve shared pair aliases inside a returned vector.",
+  "expected_to_fail_candidate": true
+}

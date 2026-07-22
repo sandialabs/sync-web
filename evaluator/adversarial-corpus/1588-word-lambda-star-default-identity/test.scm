@@ -1,0 +1,5 @@
+(define* (f (a '(1 2))) a)
+(let ((out (let loop ((i 0))
+             (if (= i 1) (f) (loop (+ i 1))))))
+  (set-car! out 9)
+  (f))

@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "integer-overflow", "multiple-arguments", "addition"],
+  "description": "Multi-argument addition must continue numerically after an intermediate overflow promotion.",
+  "expected_to_fail_candidate": true
+}

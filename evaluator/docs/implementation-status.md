@@ -1,8 +1,8 @@
 # Rust interpreter implementation status
 
-Last updated: 2026-06-06.
+Last updated: 2026-07-12.
 
-The Rust candidate is now a real broad-coverage interpreter prototype. It is still not architecturally polished, but the black-box C-oracle corpus, Rust-only metering checks, and Rust-only tail-call checks pass.
+The Rust candidate is a broad-coverage interpreter with conservative compiled, bytecode, and native tiers. The runtime architecture and safety invariants are documented in [`runtime-architecture.md`](runtime-architecture.md).
 
 ## Current validation
 
@@ -16,6 +16,8 @@ Latest result:
 ```text
 expected-current: 98/98
 correct: 98/98
+upstream-corpus: 800/800
+adversarial: 1579/1579
 metering-current: 8/8
 tail-call-current: 5/5
 all requested checks passed
@@ -26,6 +28,9 @@ Unified validation status:
 - C oracle build/check/corpus: passing.
 - Rust candidate build: passing.
 - Rust candidate corpus: passing, 98/98.
+- Filtered upstream corpus: passing, 800/800.
+- Adversarial corpus: passing, 1579/1579.
+- System-authority guard: passing.
 - Rust-only metering suite: passing, 8/8.
 - Rust-only tail-call suite: passing, 5/5 at the default validation depth.
 
@@ -43,6 +48,13 @@ Unified validation status:
 - Managed string/captured ports are implemented enough for the corpus output-string cases.
 - Multiple values splice into argument lists for the covered cases.
 - CLI runs evaluation on a larger-stack thread and returns stringified output to avoid aborting on current recursive evaluator paths before proper tail-call/trampoline work.
+
+## Runtime and performance status
+
+- `Value` is compile-time constrained to 16 bytes; cold aggregate payloads use single-word shared handles.
+- Pairs use stable thread-arena allocation with cycle- and mutation-compatible identity.
+- Compiled local applicable bindings, bytecode operand addressing, and guarded integer Cranelift lowering are active.
+- Current canonical 44-case report is `target/benchmarks-runtime-word16-local-applicable-5r.*`, approximately `1.37x` candidate/oracle geomean; candidate-time comparisons should use adjacent `--baseline-report` measurements because oracle timing varies.
 
 ## Known limitations / next implementation slices
 

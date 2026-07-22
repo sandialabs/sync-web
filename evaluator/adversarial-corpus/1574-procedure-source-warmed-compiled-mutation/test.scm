@@ -1,0 +1,5 @@
+(let ((f (lambda (x) (+ x 1))))
+  (let ((before (f 2))
+        (source (procedure-source f)))
+    (set! (source 2) '(* x 3))
+    (list before (f 2))))

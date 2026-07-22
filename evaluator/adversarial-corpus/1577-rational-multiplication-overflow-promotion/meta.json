@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "rational", "integer-overflow", "multiplication"],
+  "description": "Rational multiplication overflow should promote with s7-compatible rounding rather than host f64 formatting.",
+  "expected_to_fail_candidate": true
+}

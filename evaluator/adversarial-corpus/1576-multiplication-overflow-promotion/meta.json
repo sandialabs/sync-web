@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "integer-overflow", "multiplication"],
+  "description": "Overflowing integer multiplication should preserve s7's promoted numeric value and representation.",
+  "expected_to_fail_candidate": true
+}

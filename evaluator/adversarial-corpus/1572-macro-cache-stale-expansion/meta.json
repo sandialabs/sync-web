@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "fundamental-correctness", "macro", "lexical-environment", "cache"],
+  "description": "Macro expansion caching should not reuse expansion data derived from a mutated lexical binding.",
+  "expected_to_fail_candidate": true
+}

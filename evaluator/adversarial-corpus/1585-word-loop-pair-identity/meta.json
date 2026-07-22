@@ -1,0 +1,17 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "identity",
+    "pair",
+    "named-let",
+    "mutation"
+  ],
+  "description": "Word-loop return must preserve identity and mutation linkage of a pair argument.",
+  "expected_to_fail_candidate": true
+}

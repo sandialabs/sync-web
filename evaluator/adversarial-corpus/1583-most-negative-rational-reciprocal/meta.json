@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "rational", "integer-boundary", "division"],
+  "description": "Reciprocal normalization at the most-negative fixnum boundary must preserve numeric sign and s7 promotion.",
+  "expected_to_fail_candidate": true
+}

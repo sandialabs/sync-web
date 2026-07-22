@@ -1,0 +1,8 @@
+(let ((p (list 1)))
+  (define* (f (a p)) a)
+  (let ((a (let loop ((i 0))
+             (if (= i 1) (f) (loop (+ i 1))))))
+    (set-car! p 8)
+    (let ((b (let loop ((i 0))
+               (if (= i 1) (f) (loop (+ i 1))))))
+      (list a b (eq? p b)))))

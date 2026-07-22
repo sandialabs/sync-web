@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "integer-overflow", "unary-negation", "diagnostics"],
+  "description": "Negating the most-negative fixnum should raise s7's out-of-range error rather than return it unchanged.",
+  "expected_to_fail_candidate": true
+}

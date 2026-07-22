@@ -1,0 +1,8 @@
+(let* ((v (vector 1))
+       (id (lambda (x) x))
+       (out (let loop ((i 0))
+              (if (= i 1)
+                  (apply id (list v))
+                  (loop (+ i 1))))))
+  (list (eq? v out)
+        (begin (set! (out 0) 2) (v 0))))

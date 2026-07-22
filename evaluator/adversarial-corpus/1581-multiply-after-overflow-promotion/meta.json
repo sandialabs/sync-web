@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "integer-overflow", "multiple-arguments", "multiplication"],
+  "description": "Multi-argument multiplication must accept an intermediate promoted result and continue to zero.",
+  "expected_to_fail_candidate": true
+}

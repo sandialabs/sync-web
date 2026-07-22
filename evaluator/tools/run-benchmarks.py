@@ -163,6 +163,7 @@ def flatten_row(row: dict[str, Any]) -> dict[str, Any]:
         "candidate_min": candidate.get("min"),
         "candidate_max": candidate.get("max"),
         "ratio_median": row.get("ratio_median"),
+        "candidate_change": row.get("candidate_change"),
         "output_bytes": row.get("output_bytes"),
         "description": row.get("meta", {}).get("description", ""),
         "scale": row.get("meta", {}).get("scale", ""),
@@ -178,26 +179,30 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(flat)
 
 
-def write_markdown(path: Path, rows: list[dict[str, Any]], geomean: float | None) -> None:
+def write_markdown(path: Path, rows: list[dict[str, Any]], geomean: float | None, candidate_geomean: float | None) -> None:
     lines = [
         "# s7-rust benchmark report",
         "",
-        "| case | category | oracle median (s) | candidate median (s) | ratio | ok |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| case | category | oracle median (s) | candidate median (s) | ratio | candidate change | ok |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         oracle = row["oracle"] or {}
         candidate = row["candidate"] or {}
         ratio = row.get("ratio_median")
+        change=row.get("candidate_change")
+        change_s="-" if change is None else f"{change:.3f}"
         lines.append(
             f"| {row['case']} | {row.get('category', '')} | "
             f"{oracle.get('median', math.nan):.6f} | "
             f"{candidate.get('median', math.nan):.6f} | "
-            f"{ratio:.3f} | {row['ok']} |" if ratio is not None else
-            f"| {row['case']} | {row.get('category', '')} | {oracle.get('median', math.nan):.6f} | - | - | {row['ok']} |"
+            f"{ratio:.3f} | {change_s} | {row['ok']} |" if ratio is not None else
+            f"| {row['case']} | {row.get('category', '')} | {oracle.get('median', math.nan):.6f} | - | - | - | {row['ok']} |"
         )
     if geomean is not None:
         lines.extend(["", f"Geomean median ratio: `{geomean:.3f}`"])
+    if candidate_geomean is not None:
+        lines.append(f"Baseline-relative candidate-time geomean: `{candidate_geomean:.3f}`")
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -230,6 +235,7 @@ def main() -> int:
     parser.add_argument("--json-report", type=Path)
     parser.add_argument("--csv-report", type=Path)
     parser.add_argument("--markdown-report", type=Path)
+    parser.add_argument("--baseline-report",type=Path,help="prior JSON report used for adjacent candidate-time comparison")
     args = parser.parse_args()
 
     if args.repeats <= 0:
@@ -247,6 +253,10 @@ def main() -> int:
         print("no benchmark cases selected", file=sys.stderr)
         return 2
 
+    baseline_candidates:dict[str,float]={}
+    if args.baseline_report:
+        baseline=json.loads(args.baseline_report.read_text())
+        baseline_candidates={row["case"]:row["candidate"]["median"] for row in baseline.get("rows",[]) if row.get("candidate") and row["candidate"].get("median",0)>0}
     rows: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     print(f"benchmarks: {len(cases)}")
@@ -287,6 +297,7 @@ def main() -> int:
             "oracle": oracle_summary,
             "candidate": candidate_summary,
             "ratio_median": ratio,
+            "candidate_change": candidate_summary["median"]/baseline_candidates[case.name] if candidate_summary and case.name in baseline_candidates else None,
             "output_bytes": len(expected.encode()),
             "ok": ok,
         })
@@ -305,12 +316,17 @@ def main() -> int:
         print(f"{row['case']:<26} {str(row.get('category','')):<14} {oracle_med:>10} {cand_med:>10} {ratio_s:>8} {out_s:>8} {str(row['ok']):>4}")
 
     geomean = None
+    candidate_geomean=None
     if not args.oracle_only:
         ratios = [row["ratio_median"] for row in rows if row.get("ratio_median") is not None and row["ratio_median"] > 0]
         if ratios:
             geomean = statistics.geometric_mean(ratios)
             print("-" * len(header))
             print(f"{'geomean-ratio':<26} {'':<14} {'':>10} {'':>10} {geomean:>8.3f}")
+        changes=[row["candidate_change"] for row in rows if row.get("candidate_change") is not None and row["candidate_change"]>0]
+        if changes:
+            candidate_geomean=statistics.geometric_mean(changes)
+            print(f"{'candidate-change':<26} {'':<14} {'':>10} {'':>10} {candidate_geomean:>8.3f}")
 
     report = {
         "config": {
@@ -322,8 +338,9 @@ def main() -> int:
             "sort": args.sort,
             "cases": args.cases,
             "categories": args.categories,
+            "baseline_report":str(args.baseline_report) if args.baseline_report else None,
         },
-        "summary": {"geomean_ratio": geomean, "case_count": len(rows), "failure_count": len(failures)},
+        "summary": {"geomean_ratio": geomean,"candidate_change_geomean":candidate_geomean, "case_count": len(rows), "failure_count": len(failures)},
         "rows": rows,
         "failures": failures,
     }
@@ -332,7 +349,7 @@ def main() -> int:
     if args.csv_report:
         write_csv(args.csv_report, rows)
     if args.markdown_report:
-        write_markdown(args.markdown_report, rows, geomean)
+        write_markdown(args.markdown_report,rows,geomean,candidate_geomean)
 
     if failures:
         print(f"\nfailures: {len(failures)}", file=sys.stderr)

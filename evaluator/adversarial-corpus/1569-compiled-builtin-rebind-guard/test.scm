@@ -1,0 +1,6 @@
+(let ((+ +) (v (vector '())))
+  (define (f x)
+    (set! (v 0) (cons 'x (v 0)))
+    (+ x 2))
+  (set! + (lambda (a b) (- a b)))
+  (list (f 10) v))

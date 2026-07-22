@@ -5,10 +5,10 @@
 
 #![allow(dead_code)]
 
-use std::rc::Rc;
+use std::{cell::Cell,collections::HashSet,rc::Rc};
 
 use crate::bytecode::{BytecodeFunction, BytecodeLayout};
-use crate::core::{EnvRef, Procedure, Value};
+use crate::core::{Env, EnvRef, Procedure, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SymId(pub(crate) u32);
@@ -38,29 +38,38 @@ pub(crate) enum BuiltinId {
     EqualP,
     Caar,
     Cdar,
+    Cadr,
+    Cadar,
     Assoc,
     Memq,
     VectorRef,
     VectorSet,
+    ByteVectorRef,
+    ByteVectorSet,
     HashRef,
     HashSet,
     Remainder,
     Modulo,
     Inlet,
     HashTable,
+    Apply,
+    ListRef,
+    Length,
+    List,
+    ObjectToString,
 }
 
 impl BuiltinId {
     pub(crate) fn from_name(name:&str)->Option<Self>{
         Some(match name{
             "+"=>Self::Add,"-"=>Self::Sub,"*"=>Self::Mul,"="=>Self::NumEq,"<"=>Self::Less,"<="=>Self::LessEq,">"=>Self::Greater,">="=>Self::GreaterEq,
-            "cons"=>Self::Cons,"car"=>Self::Car,"cdr"=>Self::Cdr,"null?"=>Self::NullP,"pair?"=>Self::PairP,"number?"=>Self::NumberP,"char?"=>Self::CharP,"symbol?"=>Self::SymbolP,"boolean?"=>Self::BooleanP,"not"=>Self::Not,"eq?"=>Self::EqP,"equal?"=>Self::EqualP,"caar"=>Self::Caar,"cdar"=>Self::Cdar,"assoc"=>Self::Assoc,"memq"=>Self::Memq,
-            "vector-ref"=>Self::VectorRef,"vector-set!"=>Self::VectorSet,"hash-table-ref"=>Self::HashRef,"hash-table-set!"=>Self::HashSet,"remainder"=>Self::Remainder,"modulo"=>Self::Modulo,"inlet"=>Self::Inlet,"hash-table"=>Self::HashTable,
+            "cons"=>Self::Cons,"car"=>Self::Car,"cdr"=>Self::Cdr,"null?"=>Self::NullP,"pair?"=>Self::PairP,"number?"=>Self::NumberP,"char?"=>Self::CharP,"symbol?"=>Self::SymbolP,"boolean?"=>Self::BooleanP,"not"=>Self::Not,"eq?"=>Self::EqP,"equal?"=>Self::EqualP,"caar"=>Self::Caar,"cdar"=>Self::Cdar,"cadr"=>Self::Cadr,"cadar"=>Self::Cadar,"assoc"=>Self::Assoc,"memq"=>Self::Memq,
+            "vector-ref"=>Self::VectorRef,"vector-set!"=>Self::VectorSet,"byte-vector-ref"=>Self::ByteVectorRef,"byte-vector-set!"=>Self::ByteVectorSet,"hash-table-ref"=>Self::HashRef,"hash-table-set!"=>Self::HashSet,"remainder"=>Self::Remainder,"modulo"=>Self::Modulo,"inlet"=>Self::Inlet,"hash-table"=>Self::HashTable,"apply"=>Self::Apply,"list-ref"=>Self::ListRef,"length"=>Self::Length,"list"=>Self::List,"object->string"=>Self::ObjectToString,
             _=>return None,
         })
     }
     pub(crate) fn name(self)->&'static str{
-        match self{Self::Add=>"+",Self::Sub=>"-",Self::Mul=>"*",Self::NumEq=>"=",Self::Less=>"<",Self::LessEq=>"<=",Self::Greater=>">",Self::GreaterEq=>">=",Self::Cons=>"cons",Self::Car=>"car",Self::Cdr=>"cdr",Self::NullP=>"null?",Self::PairP=>"pair?",Self::NumberP=>"number?",Self::CharP=>"char?",Self::SymbolP=>"symbol?",Self::BooleanP=>"boolean?",Self::Not=>"not",Self::EqP=>"eq?",Self::EqualP=>"equal?",Self::Caar=>"caar",Self::Cdar=>"cdar",Self::Assoc=>"assoc",Self::Memq=>"memq",Self::VectorRef=>"vector-ref",Self::VectorSet=>"vector-set!",Self::HashRef=>"hash-table-ref",Self::HashSet=>"hash-table-set!",Self::Remainder=>"remainder",Self::Modulo=>"modulo",Self::Inlet=>"inlet",Self::HashTable=>"hash-table"}
+        match self{Self::Add=>"+",Self::Sub=>"-",Self::Mul=>"*",Self::NumEq=>"=",Self::Less=>"<",Self::LessEq=>"<=",Self::Greater=>">",Self::GreaterEq=>">=",Self::Cons=>"cons",Self::Car=>"car",Self::Cdr=>"cdr",Self::NullP=>"null?",Self::PairP=>"pair?",Self::NumberP=>"number?",Self::CharP=>"char?",Self::SymbolP=>"symbol?",Self::BooleanP=>"boolean?",Self::Not=>"not",Self::EqP=>"eq?",Self::EqualP=>"equal?",Self::Caar=>"caar",Self::Cdar=>"cdar",Self::Cadr=>"cadr",Self::Cadar=>"cadar",Self::Assoc=>"assoc",Self::Memq=>"memq",Self::VectorRef=>"vector-ref",Self::VectorSet=>"vector-set!",Self::ByteVectorRef=>"byte-vector-ref",Self::ByteVectorSet=>"byte-vector-set!",Self::HashRef=>"hash-table-ref",Self::HashSet=>"hash-table-set!",Self::Remainder=>"remainder",Self::Modulo=>"modulo",Self::Inlet=>"inlet",Self::HashTable=>"hash-table",Self::Apply=>"apply",Self::ListRef=>"list-ref",Self::Length=>"length",Self::List=>"list",Self::ObjectToString=>"object->string"}
     }
 }
 
@@ -87,6 +96,8 @@ pub(crate) struct CompiledLambda {
     pub(crate) params: Vec<Rc<String>>,
     pub(crate) rest: Option<Rc<String>>,
     pub(crate) body: Vec<CExpr>,
+    pub(crate) source_body: Vec<Value>,
+    pub(crate) bytecode: Option<Rc<BytecodeFunction>>,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +123,7 @@ pub(crate) enum CExpr {
     Or(Vec<CExpr>),
     Quasiquote(Box<Value>),
     QuasiquoteTemplate(Box<QTemplate>),
-    Loop { name: Rc<String>, params: Vec<Rc<String>>, inits: Vec<CExpr>, body: Box<CExpr> },
+    Loop { name: Rc<String>, params: Vec<Rc<String>>, inits: Vec<CExpr>, body: Box<CExpr>, relative_slots: bool },
     Recur { args: Vec<CExpr> },
     Lambda(CompiledLambda),
     Call { op: Box<CExpr>, args: Vec<CExpr>, tail: bool, fallback: Box<Value> },
@@ -134,7 +145,10 @@ pub struct CompiledBody {
     pub(crate) exprs: Vec<CExpr>,
     pub(crate) layout: CompiledLayout,
     pub(crate) bytecode: Option<Rc<BytecodeFunction>>,
+    pub(crate) native: Option<crate::native_jit::NativeLoop>,
+    pub(crate) native_lambda: Option<crate::native_jit::NativeLambda>,
     pub(crate) capture_values: Vec<Value>,
+    pub(crate) valid: Rc<Cell<bool>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,24 +157,29 @@ pub(crate) enum CompileDecision {
     Fallback,
 }
 
+fn new_valid()->Rc<Cell<bool>>{Rc::new(Cell::new(true))}
+
 pub(crate) fn analyze_body(env: EnvRef, exprs: &[Value]) -> Option<CompiledBody> {
     let mut out=Vec::with_capacity(exprs.len());
     for expr in exprs { out.push(analyze_expr(expr)?); }
-    let bytecode=BytecodeFunction::from_exprs(BytecodeLayout::DynamicEnv,&out).map(Rc::new);
-    Some(CompiledBody{env,exprs:out,layout:CompiledLayout::DynamicEnv,bytecode,capture_values:Vec::new()})
+    let bytecode=BytecodeFunction::from_exprs(BytecodeLayout::DynamicEnv,&out).map(Rc::new);let valid=new_valid();
+    Some(CompiledBody{env,exprs:out,layout:CompiledLayout::DynamicEnv,bytecode,native:None,native_lambda:None,capture_values:Vec::new(),valid})
 }
 
-pub(crate) fn analyze_body_with_params(env:EnvRef, exprs:&[Value], params:&[String])->Option<CompiledBody>{
+pub(crate) fn analyze_body_with_params(env:EnvRef, exprs:&[Value], params:&[String], name:Option<&str>)->Option<CompiledBody>{
     let param_rc=params.iter().map(|p|Rc::new(p.clone())).collect::<Vec<_>>();
+    let analysis_env=Env::new(Some(env.clone()));
+    for param in params{analysis_env.define(param,Value::Undefined);}
     let mut raw=Vec::with_capacity(exprs.len());
-    for expr in exprs { raw.push(analyze_expr_inner(expr,None,false,Some(&env))?); }
+    for expr in exprs { raw.push(analyze_expr_inner(expr,None,false,Some(&analysis_env))?); }
     let captures=collect_stable_captures(&raw,&env,&param_rc);
     let capture_values=captures.iter().map(|n|env.get(n.as_str())).collect::<Option<Vec<_>>>()?;
     let mut slot_names=param_rc.clone();
     slot_names.extend(captures);
     let out=raw.into_iter().map(|expr|slot_loop_vars(expr,&slot_names)).collect::<Option<Vec<_>>>()?;
     let bytecode=BytecodeFunction::from_exprs(BytecodeLayout::SlotFrame{names:slot_names.clone()},&out).map(Rc::new);
-    Some(CompiledBody{env,exprs:out,layout:CompiledLayout::SlotFrame{params:slot_names},bytecode,capture_values})
+    let native_lambda=crate::native_jit::compile_lambda(env.clone(),params.len(),&out,name);let valid=new_valid();
+    Some(CompiledBody{env,exprs:out,layout:CompiledLayout::SlotFrame{params:slot_names},bytecode,native:None,native_lambda,capture_values,valid})
 }
 
 pub(crate) fn analyze_named_let(env:EnvRef, name:&str, params:Vec<Rc<String>>, inits:&[Value], body:&[Value])->Option<CompiledBody>{
@@ -171,20 +190,21 @@ pub(crate) fn analyze_named_let(env:EnvRef, name:&str, params:Vec<Rc<String>>, i
     let capture_names=if capture_loop_safe(&raw_body){collect_scalar_captures(&raw_body,&env,&params)}else{Vec::new()};
     let exprs=if capture_names.is_empty(){
         let body_expr=slot_loop_vars(raw_body,&params)?;
-        vec![CExpr::Loop{name:Rc::new(name.to_string()),params,inits:init_exprs,body:Box::new(body_expr)}]
+        vec![CExpr::Loop{name:Rc::new(name.to_string()),params,inits:init_exprs,body:Box::new(body_expr),relative_slots:false}]
     }else{
         let mut scope=capture_names.clone();
         scope.extend(params.iter().cloned());
         let body_expr=slot_loop_vars(raw_body,&scope)?;
         let bindings=capture_names.iter().map(|n|env.get(n.as_str()).and_then(scalar_capture_value).map(|v|(n.clone(),CExpr::Const(v)))).collect::<Option<Vec<_>>>()?;
-        vec![CExpr::Let{sequential:false,bindings,body:vec![CExpr::Loop{name:Rc::new(name.to_string()),params,inits:init_exprs,body:Box::new(body_expr)}]}]
+        vec![CExpr::Let{sequential:false,bindings,body:vec![CExpr::Loop{name:Rc::new(name.to_string()),params,inits:init_exprs,body:Box::new(body_expr),relative_slots:false}]}]
     };
     let bytecode=BytecodeFunction::from_exprs(BytecodeLayout::DynamicEnv,&exprs).map(Rc::new);
-    Some(CompiledBody{env,exprs,layout:CompiledLayout::DynamicEnv,bytecode,capture_values:Vec::new()})
+    let native=crate::native_jit::compile(env.clone(),&exprs);let valid=new_valid();
+    Some(CompiledBody{env,exprs,layout:CompiledLayout::DynamicEnv,bytecode,native,native_lambda:None,capture_values:Vec::new(),valid})
 }
 
 fn scalar_capture_value(v:Value)->Option<Value>{
-    match v{Value::Bool(_)|Value::Nil|Value::Int(_)|Value::Rational(_,_)|Value::Float(_)|Value::Complex(_,_)|Value::NumberLiteral(_,_)|Value::Char(_)|Value::NamedChar(_)|Value::Keyword(_)=>Some(v),_=>None}
+    match v{Value::Bool(_)|Value::Nil|Value::Int(_)|Value::RationalValue(_)|Value::Float(_)|Value::ComplexValue(_)|Value::NumberLiteral(_,_)|Value::Char(_)|Value::NamedChar(_)|Value::Keyword(_)=>Some(v),_=>None}
 }
 fn capture_loop_safe(expr:&CExpr)->bool{
     match expr{
@@ -284,6 +304,7 @@ fn slot_loop_vars(expr:CExpr, params:&[Rc<String>])->Option<CExpr>{
         CExpr::Quasiquote(v)=>Some(CExpr::Quasiquote(v)),
         CExpr::QuasiquoteTemplate(t)=>Some(CExpr::QuasiquoteTemplate(Box::new(slot_template(*t,params)?))),
         CExpr::Recur{args}=>Some(CExpr::Recur{args:args.into_iter().map(|x|slot_loop_vars(x,params)).collect::<Option<Vec<_>>>()?}),
+        CExpr::Loop{name,params:loop_params,inits,body,relative_slots}=>Some(CExpr::Loop{name,params:loop_params,inits:inits.into_iter().map(|value|slot_loop_vars(value,params)).collect::<Option<Vec<_>>>()?,body,relative_slots}),
         CExpr::BuiltinCall{id,name,args,tail,fallback}=>Some(CExpr::BuiltinCall{id,name,args:args.into_iter().map(|x|slot_loop_vars(x,params)).collect::<Option<Vec<_>>>()?,tail,fallback}),
         CExpr::Call{op,args,tail,fallback}=>Some(CExpr::Call{op:Box::new(slot_loop_vars(*op,params)?),args:args.into_iter().map(|x|slot_loop_vars(x,params)).collect::<Option<Vec<_>>>()?,tail,fallback}),
         CExpr::ApplicableRef{target,index}=>Some(CExpr::ApplicableRef{target:Box::new(slot_loop_vars(*target,params)?),index:Box::new(slot_loop_vars(*index,params)?)}),
@@ -320,6 +341,9 @@ fn analyze_expr_no_loop(expr:&Value, loop_name:&str)->Option<CExpr>{ analyze_exp
 fn analyze_expr_tail(expr:&Value, loop_name:&str)->Option<CExpr>{ analyze_expr_inner(expr,Some(loop_name),true,None) }
 fn analyze_expr_no_loop_env(expr:&Value, loop_name:&str, env:&EnvRef)->Option<CExpr>{ analyze_expr_inner(expr,Some(loop_name),false,Some(env)) }
 fn analyze_expr_tail_env(expr:&Value, loop_name:&str, env:&EnvRef)->Option<CExpr>{ analyze_expr_inner(expr,Some(loop_name),true,Some(env)) }
+fn nested_body_has_unbound(v:&Value,env:Option<&EnvRef>,allowed:&[Rc<String>],seen:&mut HashSet<usize>)->bool{match v{Value::Symbol(symbol)=>!allowed.iter().any(|name|name.as_str()==symbol.as_str())&&env.and_then(|env|env.get(symbol.as_str())).is_none(),Value::Pair(pair)=>{let id=pair.as_ptr() as usize;if !seen.insert(id){return false}let pair=pair.borrow();if pair.car.as_symbol()==Some("quote"){false}else{nested_body_has_unbound(&pair.car,env,allowed,seen)||nested_body_has_unbound(&pair.cdr,env,allowed,seen)}},Value::Vector(values)=>values.values().iter().any(|value|nested_body_has_unbound(value,env,allowed,seen)),_=>false}}
+fn contains_call(v:&Value,name:&str,seen:&mut HashSet<usize>)->bool{match v{Value::Pair(p)=>{let id=p.as_ptr() as usize;if !seen.insert(id){return false}let pair=p.borrow();pair.car.as_symbol()==Some(name)||contains_call(&pair.car,name,seen)||contains_call(&pair.cdr,name,seen)},Value::Vector(xs)=>xs.values().iter().any(|x|contains_call(x,name,seen)),_=>false}}
+fn cold_branch_fallback(v:&Value,loop_name:Option<&str>)->Option<CExpr>{let name=loop_name?;if contains_call(v,name,&mut HashSet::new()){None}else{Some(CExpr::Fallback(v.clone()))}}
 
 fn analyze_body_tail_env(body:&[Value], loop_name:&str, env:&EnvRef)->Option<CExpr>{
     if body.is_empty(){return None;}
@@ -333,12 +357,12 @@ fn analyze_body_tail_env(body:&[Value], loop_name:&str, env:&EnvRef)->Option<CEx
 fn const_expr(expr:&Value)->Option<CExpr>{
     match expr {
         Value::Bool(_)|Value::Nil|Value::Unspecified|Value::Undefined|Value::Eof|
-        Value::Int(_)|Value::Rational(_,_)|Value::Float(_)|Value::Complex(_,_)|Value::NumberLiteral(_,_)|
+        Value::Int(_)|Value::RationalValue(_)|Value::Float(_)|Value::ComplexValue(_)|Value::NumberLiteral(_,_)|
         Value::Char(_)|Value::NamedChar(_)|Value::String(_)|Value::Keyword(_)|Value::Vector(_)|
-        Value::ByteVector(_)|Value::FloatVector(_)|Value::IntVector(_)|Value::MultiVector{..}|
-        Value::MultiVectorView{..}|Value::HashTable(_)|Value::Env(_)|Value::Procedure(_)|
-        Value::Macro(_,_)|Value::Port(_)|Value::Hook(_,_)|Value::Iterator{..}|Value::CPointer(_) |
-        Value::Dilambda(_)|Value::Values(_)|Value::Commented(_)|Value::SetterRef(_)|Value::RootMeta(_) |
+        Value::ByteVector(_)|Value::FloatVector(_)|Value::IntVector(_)|Value::MultiVector(_)|
+        Value::MultiVectorView(_)|Value::HashTable(_)|Value::Env(_)|Value::Procedure(_)|
+        Value::Macro(_,_)|Value::Port(_)|Value::Hook(_,_)|Value::Iterator(_)|Value::CPointer(_) |
+        Value::Dilambda(_)|Value::ValuesData(_)|Value::Commented(_)|Value::SetterRef(_)|Value::RootMeta(_) |
         Value::RawDisplay(_)|Value::ProcedureSource(_)=>Some(CExpr::Const(expr.clone())),
         _=>None,
     }
@@ -377,14 +401,23 @@ fn compile_quasiquote_template(v:&Value, loop_name:Option<&str>, known_env:Optio
         Value::Pair(_)=>{
             let car=v.car().ok()?;
             let cdr=v.cdr().ok()?;
+            if car.as_symbol()==Some("quasiquote"){return None;}
             if car.as_symbol()==Some("unquote"){
                 let xs=cdr.to_vec().ok()?;
                 if xs.len()!=1{return None;}
-                let e=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr(&xs[0])?};
+                let e=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr_inner(&xs[0],None,false,known_env)?};
                 return Some(QTemplate::Unquote(Box::new(e)));
             }
-            if car.as_symbol()==Some("unquote-splicing"){return None;}
-            Some(QTemplate::Pair(Box::new(compile_quasiquote_template(&car,loop_name,known_env)?),Box::new(compile_quasiquote_template(&cdr,loop_name,known_env)?)))
+            if car.as_symbol()==Some("unquote-splicing"){
+                let xs=cdr.to_vec().ok()?;
+                if xs.len()!=1{return None;}
+                let e=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr_inner(&xs[0],None,false,known_env)?};
+                return Some(QTemplate::Splice(Box::new(e)));
+            }
+            let qcar=compile_quasiquote_template(&car,loop_name,known_env)?;
+            let qcdr=compile_quasiquote_template(&cdr,loop_name,known_env)?;
+            if matches!(qcdr,QTemplate::Splice(_)){return None;}
+            Some(QTemplate::Pair(Box::new(qcar),Box::new(qcdr)))
         }
         Value::Vector(vec)=>{
             let mut out=Vec::new();
@@ -420,18 +453,21 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
         }
         if sym=="apply"{
             let xs=args.to_vec().ok()?;
-            if xs.is_empty() || !safe_known_apply_target(&xs[0],known_env){return None;}
-            if xs.len()==2{
+            if xs.is_empty(){return None;}
+            if safe_known_apply_target(&xs[0],known_env) && xs.len()==2{
                 if let (Some(env),Value::Pair(_))=(known_env,&xs[1]){
                     if env_builtin(env,"apply") && env_builtin(env,"list") && xs[1].car().ok().and_then(|v|v.as_symbol().map(|s|s=="list")).unwrap_or(false){
                         let raw=xs[1].cdr().ok()?.to_vec().ok()?;
-                        let op=if let Some(name)=loop_name{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr(&xs[0])?};
+                        let op=if let Some(name)=loop_name{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_inner(&xs[0],None,false,known_env)?};
                         let mut out=Vec::with_capacity(raw.len());
-                        for x in raw{out.push(if let Some(name)=loop_name{analyze_expr_no_loop_env(&x,name,env)?}else{analyze_expr(&x)?});}
+                        for x in raw{out.push(if let Some(name)=loop_name{analyze_expr_no_loop_env(&x,name,env)?}else{analyze_expr_inner(&x,None,false,known_env)?});}
                         return Some(CExpr::Call{op:Box::new(op),args:out,tail:false,fallback:Box::new(expr.clone())});
                     }
                 }
             }
+            if let Some(target)=xs[0].as_symbol(){if !safe_known_apply_target(&xs[0],known_env)&&!known_env.and_then(|env|env.get(target)).map(|v|matches!(v,Value::Undefined)).unwrap_or(false){return None;}}
+            if let Some(env)=known_env{if env_builtin(env,"apply"){let mut out=Vec::with_capacity(xs.len());for x in &xs{let analyzed=if let Some(name)=loop_name{analyze_expr_no_loop_env(x,name,env)}else{analyze_expr_inner(x,None,false,Some(env))};let analyzed=analyzed.or_else(||{let op=x.car().ok().and_then(|v|v.as_symbol().map(str::to_string));matches!(op.as_deref(),Some("lambda"|"lambda*")).then(||CExpr::Fallback(x.clone()))})?;out.push(analyzed);}return Some(CExpr::BuiltinCall{id:BuiltinId::Apply,name:"apply",args:out,tail:false,fallback:Box::new(expr.clone())});}}
+            return None;
         }
         if Some(sym)==loop_name{
             if !tail{return None;}
@@ -445,6 +481,10 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                 let xs=args.to_vec().ok()?;
                 return if xs.len()==1{Some(CExpr::Const(xs[0].clone()))}else{None};
             }
+            "lambda"=>{
+                let xs=args.to_vec().ok()?;if xs.len()<2{return None;}let raw_params=xs[0].to_vec().ok()?;let mut params=Vec::with_capacity(raw_params.len());for p in raw_params{let Value::Symbol(name)=p else{return None};if params.iter().any(|n:&Rc<String>|n.as_str()==name.as_str()){return None}params.push(name);}
+                let nested=Env::new(known_env.cloned());for p in &params{nested.define(p.as_str(),Value::Undefined);}let mut body=Vec::with_capacity(xs.len()-1);for (i,x) in xs[1..].iter().enumerate(){body.push(analyze_expr_inner(x,None,i+1==xs.len()-1,Some(&nested))?);}let body=body.into_iter().map(|x|slot_loop_vars(x,&params)).collect::<Option<Vec<_>>>()?;let bytecode=BytecodeFunction::from_exprs(BytecodeLayout::SlotFrame{names:params.clone()},&body).map(Rc::new);return Some(CExpr::Lambda(CompiledLambda{name:None,params,rest:None,body,source_body:xs[1..].to_vec(),bytecode}));
+            }
             "quasiquote"=>{
                 let xs=args.to_vec().ok()?;
                 if xs.len()!=1{return None;}
@@ -456,9 +496,9 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                 let rest=args.cdr().ok()?;
                 let then_expr=rest.car().ok()?;
                 let alt_expr=match rest.cdr().ok()?{Value::Pair(p)=>{let crate::core::PairData{car,..}= &*p.borrow(); car.clone()},Value::Nil=>Value::Unspecified,_=>return None};
-                let test=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&test_expr,name,env)?}else{analyze_expr_no_loop(&test_expr,name)?}}else{analyze_expr(&test_expr)?};
-                let conseq=if let Some(name)=loop_name{if let Some(env)=known_env{if tail{analyze_expr_tail_env(&then_expr,name,env)?}else{analyze_expr_no_loop_env(&then_expr,name,env)?}}else if tail{analyze_expr_tail(&then_expr,name)?}else{analyze_expr_no_loop(&then_expr,name)?}}else{analyze_expr(&then_expr)?};
-                let alt=if let Some(name)=loop_name{if let Some(env)=known_env{if tail{analyze_expr_tail_env(&alt_expr,name,env)?}else{analyze_expr_no_loop_env(&alt_expr,name,env)?}}else if tail{analyze_expr_tail(&alt_expr,name)?}else{analyze_expr_no_loop(&alt_expr,name)?}}else{analyze_expr(&alt_expr)?};
+                let test=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&test_expr,name,env)?}else{analyze_expr_no_loop(&test_expr,name)?}}else{analyze_expr_inner(&test_expr,None,false,known_env)?};
+                let conseq=(if let Some(name)=loop_name{if let Some(env)=known_env{if tail{analyze_expr_tail_env(&then_expr,name,env)}else{analyze_expr_no_loop_env(&then_expr,name,env)}}else if tail{analyze_expr_tail(&then_expr,name)}else{analyze_expr_no_loop(&then_expr,name)}}else{analyze_expr_inner(&then_expr,None,tail,known_env)}).or_else(||cold_branch_fallback(&then_expr,loop_name))?;
+                let alt=(if let Some(name)=loop_name{if let Some(env)=known_env{if tail{analyze_expr_tail_env(&alt_expr,name,env)}else{analyze_expr_no_loop_env(&alt_expr,name,env)}}else if tail{analyze_expr_tail(&alt_expr,name)}else{analyze_expr_no_loop(&alt_expr,name)}}else{analyze_expr_inner(&alt_expr,None,tail,known_env)}).or_else(||cold_branch_fallback(&alt_expr,loop_name))?;
                 return Some(CExpr::If{test:Box::new(test),conseq:Box::new(conseq),alt:Box::new(alt)});
             }
             "begin"=>{
@@ -467,14 +507,14 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                 let mut out=Vec::with_capacity(xs.len());
                 for (i,x) in xs.iter().enumerate(){
                     let tail_pos=tail && i+1==xs.len();
-                    out.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});
+                    out.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,known_env)?});
                 }
                 return Some(CExpr::Begin(out));
             }
             "and"|"or"=>{
                 let xs=args.to_vec().ok()?;
                 let mut out=Vec::with_capacity(xs.len());
-                for (i,x) in xs.iter().enumerate(){let tail_pos=tail && i+1==xs.len(); out.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});}
+                for (i,x) in xs.iter().enumerate(){let tail_pos=tail && i+1==xs.len(); out.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,known_env)?});}
                 return if sym=="and"{Some(CExpr::And(out))}else{Some(CExpr::Or(out))};
             }
             "cond"=>{
@@ -489,12 +529,12 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                     if xs[0].as_symbol()==Some("else"){
                         if !is_last{return None;}
                         let mut body=Vec::with_capacity(xs.len()-1);
-                        for (i,x) in xs[1..].iter().enumerate(){let tail_pos=tail && i+1==xs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});}
+                        for (i,x) in xs[1..].iter().enumerate(){let tail_pos=tail && i+1==xs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,known_env)?});}
                         else_body=Some(body);
                     }else{
-                        let test=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr(&xs[0])?};
+                        let test=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr_inner(&xs[0],None,false,known_env)?};
                         let mut body=Vec::with_capacity(xs.len()-1);
-                        for (i,x) in xs[1..].iter().enumerate(){let tail_pos=tail && i+1==xs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});}
+                        for (i,x) in xs[1..].iter().enumerate(){let tail_pos=tail && i+1==xs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,known_env)?});}
                         clauses.push((test,body));
                     }
                 }
@@ -503,7 +543,7 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
             "case"=>{
                 let xs=args.to_vec().ok()?;
                 if xs.len()<2{return None;}
-                let key=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr(&xs[0])?};
+                let key=if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&xs[0],name,env)?}else{analyze_expr_no_loop(&xs[0],name)?}}else{analyze_expr_inner(&xs[0],None,false,known_env)?};
                 let mut clauses=Vec::new();
                 let mut else_body=None;
                 for (ci,clause) in xs[1..].iter().enumerate(){
@@ -513,12 +553,12 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                     if cs[0].as_symbol()==Some("else"){
                         if !is_last{return None;}
                         let mut body=Vec::with_capacity(cs.len()-1);
-                        for (i,x) in cs[1..].iter().enumerate(){let tail_pos=tail && i+1==cs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});}
+                        for (i,x) in cs[1..].iter().enumerate(){let tail_pos=tail && i+1==cs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,known_env)?});}
                         else_body=Some(body);
                     }else{
                         let datums=cs[0].to_vec().ok()?;
                         let mut body=Vec::with_capacity(cs.len()-1);
-                        for (i,x) in cs[1..].iter().enumerate(){let tail_pos=tail && i+1==cs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});}
+                        for (i,x) in cs[1..].iter().enumerate(){let tail_pos=tail && i+1==cs.len()-1; body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,known_env)?});}
                         clauses.push((datums,body));
                     }
                 }
@@ -527,7 +567,7 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
             "let"|"let*"=>{
                 let xs=args.to_vec().ok()?;
                 if xs.len()<2{return None;}
-                if matches!(xs[0],Value::Symbol(_)){return None;}
+                if let Value::Symbol(name)=&xs[0]{if sym=="let"&&tail&&loop_name.is_some()&&xs.len()>=3{let raw_bindings=xs[1].to_vec().ok()?;let mut params=Vec::with_capacity(raw_bindings.len());let mut inits=Vec::with_capacity(raw_bindings.len());for binding in raw_bindings{let values=binding.to_vec().ok()?;if values.len()!=2{return None}let Value::Symbol(param)=&values[0] else{return None};if params.iter().any(|existing:&Rc<String>|existing.as_str()==param.as_str()){return None}params.push(param.clone());inits.push(if let Some(outer)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&values[1],outer,env)?}else{analyze_expr_no_loop(&values[1],outer)?}}else{analyze_expr_inner(&values[1],None,false,known_env)?});}if params.is_empty(){return None}let mut allowed=params.clone();allowed.push(name.clone());if xs[2..].iter().any(|value|nested_body_has_unbound(value,known_env,&allowed,&mut HashSet::new())){return None}let nested_env=Env::new(known_env.cloned());for param in &params{nested_env.define(param.as_str(),Value::Undefined)}let raw_body=analyze_body_tail_env(&xs[2..],name.as_str(),&nested_env)?;let body=slot_loop_vars(raw_body,&params)?;return Some(CExpr::Loop{name:name.clone(),params,inits,body:Box::new(body),relative_slots:true})}return None;}
                 let raw_bindings=xs[0].to_vec().ok()?;
                 let mut bindings=Vec::with_capacity(raw_bindings.len());
                 let mut seen=Vec::new();
@@ -539,13 +579,15 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                     if bv[1].as_symbol().map(crate::core::is_syntax_name).unwrap_or(false){return None;}
                     if sym!="let*" && seen.iter().any(|n: &Rc<String>| n.as_str()==name.as_str()){return None;}
                     seen.push(name.clone());
-                    let init=if let Some(loop_name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&bv[1],loop_name,env)?}else{analyze_expr_no_loop(&bv[1],loop_name)?}}else{analyze_expr(&bv[1])?};
+                    let init=if let Some(loop_name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&bv[1],loop_name,env)?}else{analyze_expr_no_loop(&bv[1],loop_name)?}}else{analyze_expr_inner(&bv[1],None,false,known_env)?};
                     bindings.push((name.clone(), init));
                 }
+                let body_env=known_env.map(|parent|{let child=Env::new(Some(parent.clone()));for (name,_) in &bindings{child.define(name.as_str(),Value::Undefined);}child});
+                let body_known=body_env.as_ref().or(known_env);
                 let mut body=Vec::with_capacity(xs.len()-1);
                 for (i,x) in xs[1..].iter().enumerate(){
                     let tail_pos=tail && i+1==xs.len()-1;
-                    body.push(if let Some(name)=loop_name{if let Some(env)=known_env{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr(x)?});
+                    body.push(if let Some(name)=loop_name{if let Some(env)=body_known{if tail_pos{analyze_expr_tail_env(x,name,env)?}else{analyze_expr_no_loop_env(x,name,env)?}}else if tail_pos{analyze_expr_tail(x,name)?}else{analyze_expr_no_loop(x,name)?}}else{analyze_expr_inner(x,None,tail_pos,body_known)?});
                 }
                 return Some(CExpr::Let{sequential:sym=="let*",bindings,body});
             }
@@ -553,11 +595,14 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                 if let Some(env)=known_env{
                     let xs=args.to_vec().ok()?;
                     if xs.len()!=2{return None;}
+                    if contains_call(&xs[1],"values",&mut HashSet::new()){return None;}
                     if let Value::Pair(_)=&xs[0]{
                         let target=xs[0].car().ok()?;
                         let idxs=xs[0].cdr().ok()?.to_vec().ok()?;
-                        if idxs.len()==1 && loop_name.map(|n|target.as_symbol()!=Some(n)).unwrap_or_else(||target.as_symbol().map(|s|is_known_applicable(env,s)).unwrap_or(false)){
-                            let target_expr=if let Some(n)=loop_name{analyze_expr_no_loop_env(&target,n,env)?}else{CExpr::Var(VarRef::Dynamic{name:Rc::new(target.as_symbol()?.to_string())})};
+                        let direct=loop_name.map(|n|target.as_symbol()!=Some(n)).unwrap_or_else(||target.as_symbol().map(|s|is_known_applicable(env,s)||matches!(env.get(s),Some(Value::Undefined))).unwrap_or(false));
+                        let nested_formal=if let Value::Pair(_)=&target{target.car().ok().and_then(|op|op.as_symbol().map(|s|matches!(env.get(s),Some(Value::Undefined))&&target.cdr().ok().and_then(|x|x.to_vec().ok()).map(|xs|xs.len()==1).unwrap_or(false))).unwrap_or(false)}else{false};
+                        if idxs.len()==1 && (direct||nested_formal){
+                            let target_expr=if direct{if let Some(n)=loop_name{analyze_expr_no_loop_env(&target,n,env)?}else{CExpr::Var(VarRef::Dynamic{name:Rc::new(target.as_symbol()?.to_string())})}}else if let Some(n)=loop_name{analyze_expr_no_loop_env(&target,n,env)?}else{analyze_expr_inner(&target,None,false,Some(env))?};
                             let index_expr=if let Some(n)=loop_name{analyze_expr_no_loop_env(&idxs[0],n,env)?}else{analyze_expr_inner(&idxs[0],None,false,Some(env))?};
                             let value_expr=if let Some(n)=loop_name{analyze_expr_no_loop_env(&xs[1],n,env)?}else{analyze_expr_inner(&xs[1],None,false,Some(env))?};
                             return Some(CExpr::SetApplicable{target:Box::new(target_expr),index:Box::new(index_expr),value:Box::new(value_expr)});
@@ -578,25 +623,24 @@ fn analyze_pair(expr:&Value, loop_name:Option<&str>, tail:bool, known_env:Option
                     if let Some(env)=known_env{env.builtin_func(sym)?;}
                     let xs=args.to_vec().ok()?;
                     let mut out=Vec::with_capacity(xs.len());
-                    for x in xs { out.push(if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&x,name,env)?}else{analyze_expr_no_loop(&x,name)?}}else{analyze_expr(&x)?}); }
+                    for x in xs { out.push(if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&x,name,env)?}else{analyze_expr_no_loop(&x,name)?}}else{analyze_expr_inner(&x,None,false,known_env)?}); }
                     return Some(CExpr::BuiltinCall{id,name:id.name(),args:out,tail:false,fallback:Box::new(expr.clone())});
                 }
                 if !crate::core::is_syntax_name(sym){
                     if observes_current_env(sym){return None;}
                     let xs=args.to_vec().ok()?;
                     let mut out=Vec::with_capacity(xs.len());
-                    for x in xs { out.push(if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&x,name,env)?}else{analyze_expr_no_loop(&x,name)?}}else{analyze_expr(&x)?}); }
+                    for x in xs { out.push(if let Some(name)=loop_name{if let Some(env)=known_env{analyze_expr_no_loop_env(&x,name,env)?}else{analyze_expr_no_loop(&x,name)?}}else{analyze_expr_inner(&x,None,false,known_env)?}); }
                     return Some(CExpr::Call{op:Box::new(CExpr::Var(VarRef::Dynamic{name:Rc::new(sym.to_string())})),args:out,tail:false,fallback:Box::new(expr.clone())});
                 }
             }
         }
     }else{
-        let Some(loop_name)=loop_name else{return None;};
         let Some(env)=known_env else{return None;};
-        let op_expr=analyze_expr_no_loop_env(&op,loop_name,env)?;
+        let op_expr=if let Some(loop_name)=loop_name{analyze_expr_no_loop_env(&op,loop_name,env)?}else{analyze_expr_inner(&op,None,false,Some(env))?};
         let xs=args.to_vec().ok()?;
         let mut out=Vec::with_capacity(xs.len());
-        for x in xs{out.push(analyze_expr_no_loop_env(&x,loop_name,env)?);}
+        for x in xs{out.push(if let Some(loop_name)=loop_name{analyze_expr_no_loop_env(&x,loop_name,env)?}else{analyze_expr_inner(&x,None,false,Some(env))?});}
         return Some(CExpr::Call{op:Box::new(op_expr),args:out,tail:false,fallback:Box::new(expr.clone())});
     }
     None

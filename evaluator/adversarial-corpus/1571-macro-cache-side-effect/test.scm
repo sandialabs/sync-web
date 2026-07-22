@@ -1,0 +1,7 @@
+(let ((count 0))
+  (define-macro (m x)
+    `(begin ,(begin (set! count (+ count 1)) x)))
+  (define (f x) (m x))
+  (f 1)
+  (f 2)
+  count)

@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "mutation-discovered", "known-rust-mismatch", "fundamental-correctness", "integer-overflow", "subtraction"],
+  "description": "Integer subtraction through a binding should promote on overflow rather than wrap i64.",
+  "expected_to_fail_candidate": true
+}

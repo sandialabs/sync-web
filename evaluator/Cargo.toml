@@ -4,10 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-mimalloc = { version = "0.1", default-features = false }
+mimalloc = { version = "0.1", default-features = false, features = ["v2", "local_dynamic_tls", "no_thp"] }
+cranelift-codegen = "0.133"
+cranelift-frontend = "0.133"
+cranelift-jit = "0.133"
+cranelift-module = "0.133"
+cranelift-native = "0.133"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 panic = "abort"
-opt-level = 2
+opt-level = 3

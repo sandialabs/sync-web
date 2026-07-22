@@ -1,0 +1,18 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": [
+    "adversarial",
+    "mutation-discovered",
+    "known-rust-mismatch",
+    "fundamental-correctness",
+    "word-runtime",
+    "lambda-star",
+    "default",
+    "closure-capture",
+    "identity",
+    "mutation"
+  ],
+  "description": "A word-runtime lambda* default must resolve a captured mutable object and preserve its identity.",
+  "expected_to_fail_candidate": true
+}

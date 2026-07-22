@@ -1,0 +1,5 @@
+(define* (f (a 2) (b a)) (list a b))
+(let loop ((i 0))
+  (if (= i 1)
+      (list (f) (f 7))
+      (loop (+ i 1))))

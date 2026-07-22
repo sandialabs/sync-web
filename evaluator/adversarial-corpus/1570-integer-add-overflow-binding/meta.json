@@ -1,0 +1,7 @@
+{
+  "status": "oracle-current",
+  "category": "adversarial-counterexample",
+  "features": ["adversarial", "known-rust-mismatch", "fundamental-correctness", "integer-overflow", "arithmetic"],
+  "description": "Integer addition through a binding should preserve s7 overflow promotion rather than wrapping i64.",
+  "expected_to_fail_candidate": true
+}

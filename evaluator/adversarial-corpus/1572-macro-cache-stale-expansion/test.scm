@@ -1,0 +1,6 @@
+(let ((x 1))
+  (define-macro (m) `(quote ,x))
+  (define (f) (m))
+  (f)
+  (set! x 2)
+  (f))
