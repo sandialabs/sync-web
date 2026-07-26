@@ -6,7 +6,7 @@
 
 \section{Bounded Guarantees}
 
-The architecture provides bounded properties relative to explicit commitments, evaluator semantics, retained evidence, and local policy. It does not make unconditional security claims. \Cref{tab:assurance-matrix} summarizes the principal mechanisms in the same form used throughout the paper: the property obtained, the property not obtained, and the burden displaced elsewhere.
+The Synchronic Web builds assurance from explicit commitments. An accepted root and correct verifier establish structural integrity for available evidence; a signature authenticates the key that authorized a head; historical resolution identifies earlier states; entanglement orders a foreign head before a later incorporating head; an exact committed route object connects a remote key and endpoint to evidence retained by the relying journal; and authorization applies local rules to the resulting principal. These layers answer different questions and depend on distinct operations: authentication gives a key historical meaning, domain evidence supports truth, replication and preservation sustain availability, witness diversity exposes divergent branches, and selective disclosure, terminal policy, and secure transport protect confidentiality. The local client, evaluator, runtime, and key store form the trusted computing base through which these assurances reach an application. \Cref{tab:assurance-matrix} summarizes each mechanism and its operational conditions. The bounded character of these guarantees is a source of clarity: a digest can remain valid after every full copy disappears and thereby identify a preservation failure, two valid signatures can expose an equivocation, and a deterministic transition can reproduce the effect of a supplied timestamp while leaving its accuracy to the source. The architecture preserves evidence for judgment and keeps the evidentiary boundary visible.
 
 \begin{table}[htbp]
   \centering
@@ -16,46 +16,29 @@ The architecture provides bounded properties relative to explicit commitments, e
   \label{tab:assurance-matrix}
 \end{table}
 
-\section{Explicit Non-Properties}
+\section{Costs and Architectural Fit}
 
-Integrity is not availability. A valid digest may identify data that no reachable participant still possesses, so preservation requires replication and operational commitment~\cite{DeCandia2007dynamo,Maniatis2005lockss}. Signatures likewise establish branches rather than one unique global view. Witness comparison and transparency overlays can expose forks, but bridges do not prevent a dishonest journal from presenting them~\cite{Maniatis2002timeline,Chase2016transparency}. Unrelated journals need not converge and share no mandatory consensus.
+Integrity adds hashing, persisted handles, proof paths, and verification work; history adds retained states and key stewardship; partial possession saves content storage while keeping ancestor evidence, stumps, and serialization metadata; self-encoding objects add evaluation, confinement, debugging, compatibility, and migration; and federation adds exact-object routing, direct transport, terminal-local authorization, origin verification of historical results, and application handling of accepted replay. These costs make architectural fit important, as summarized in \cref{tab:architectural-fit}. The Synchronic Web becomes compelling when independent roots, selective possession, durable interpretation, historical correction, and cross-institutional evidence coincide, as they may in production traceability, portable identity, or decentralized archives. Applications may still add coordination above the journal layer for payments, settlement, exclusive allocation, deadlines, or physical custody; journals give these domain protocols durable inputs and histories, while each application defines its shared decision procedure.
 
-A bridge, digest, signature, or path does not imply trust, endorsement, authorization, or semantic truth. Partial structure is not confidentiality; private final-mile communication requires access control and authenticated secure transport, normally TLS/HTTPS in secure deployments, with additional encryption where the application demands it. Federation supplies neither anonymity, onion routing, offline private relay, nor generic exactly-once execution.
+\begin{table}[htbp]
+  \centering
+  \small
+  \input{tables/architectural-fit}
+  \caption{Architectural Fit}
+  \label{tab:architectural-fit}
+\end{table}
 
-Self-encoding definitions are not guaranteed to terminate, remain compatible, or behave correctly. Root-key recovery is especially consequential: the initial design cannot rotate a lost or compromised trust anchor without an out-of-band decision that established peers do not yet know how to authenticate. Discovery, moderation, governance, human-readable naming, and legal erasure remain institutional and application concerns. The architecture can preserve evidence relevant to those decisions, but it cannot make the decisions socially legitimate.
+\section{Technical Path Forward}
 
-\section{Costs and Displaced Burdens}
+The records layer now covers reciprocal continuity, exact-object multi-hop routing, directional aliases, signed descriptor/key/endpoint/audience binding, direct \texttt{get}/\texttt{set!}/\texttt{resolve}, terminal-local authorization, and origin verification and retention of resolved proofs. \WIP The work ahead should follow dependency---integrity and history invariants first, federation and authorization next, then general semantic and client surfaces---and connect digest/handle separation, root advancement, partial possession, strict evaluation, bridge incorporation, and terminal-local authorization directly to implementing code and tests. Four technical fronts lead from this foundation to a durable specification:
 
-Integrity adds hashing, persisted handles, proof paths, and traversal beyond the cost of storing raw bytes. Historical retention multiplies state even when immutable sharing reduces duplication. Partial possession saves content storage but still retains ancestor paths, stubs, digests, and serialization metadata. Fine-grained resource addressability improves citation and selective transfer while increasing path depth, object overhead, and reliance on derived indices.
+\begin{itemize}
+  \item \textbf{Federation:} exercise real TLS; define endpoint cutover beyond operational overlap or forwarding; constrain auto-accept egress and SSRF exposure; retrieve incorporation receipts; develop broader durable response receipts where applications require them; and implement the stable journal identifier and predecessor-authorized signing-key lineage.
+  \item \textbf{Execution:} mediate ambient time; meter computation, allocation, recursion, reads, results, and mutation; and test application-defined objects and fixed-head read queries through persistence, proof, authorization, migration, rollback, and touched-data evidence.
+  \item \textbf{Resources:} specify projection manifests, correction, privacy, deletion, backpressure, bidirectional synchronization, and rebuildable derived indices.
+  \item \textbf{Long-horizon assurance:} develop authenticated key recovery, interpreter compatibility, cryptographic renewal, formal models, property tests, and workload measurements for history growth, proof size, route traversal, projection, object execution, and queries.
+\end{itemize}
 
-Self-encoding interpretation adds evaluation, method dispatch, confinement, metering, debugging, versioning, and migration relative to inert data. Root plurality removes a mandatory naming authority but requires local key management, endpoint continuity, route comparison, and discovery. Federated calls add public proof compilation, freshness concerns, terminal reachability, direct transport, terminal authorization, and operation-specific replay safety.
+\section{Toward a Plural Web}
 
-Cross-journal workflows still require coordination when applications demand deadlines, exclusivity, payment, settlement, or globally unique allocation. Decentralization changes who may decide and who must operate the infrastructure; it does not make preservation or coordination free.
-
-\section{Scale and Assurance Work}
-
-\WIP Evaluation should measure history growth, proof size, bridge-graph traversal, bulk projection, self-encoding objects, and programmable queries under explicit workloads and resource budgets. Derived relational, search, and semantic indices may accelerate reads as long as they remain rebuildable views rather than untracked semantic authorities. Route proofs need bounded depth, cycle detection, proof-size limits, freshness rules, and reuse of verified evidence. Bulk projection needs batching, compaction, and observable progress.
-
-\WIP Formal models should distinguish logical digest from persisted handle, root advancement from mutation, partial possession from absence, strict evaluation from durable acceptance, and bridge acceptance from historical incorporation. Core invariants include preservation of digest under slice, prune, serialization, and compatible merge; atomic failure of strict evaluation; predecessor continuity; and local authorization despite remote historical reachability.
-
-Property tests, model checking, and source inspection must connect the declarative claims in this paper to active implementations. The draft should not become a final specification merely because its conceptual pieces are coherent.
-
-\section{When Simpler Systems Suffice}
-
-An ordinary database is preferable when one operator, current state, and efficient local queries are sufficient. Signed documents are simpler when the only requirement is publisher authentication of complete immutable payloads. Content-addressed storage is sufficient for immutable retrieval by digest, and a transparency log is better matched to public accountability for one authority.
-
-CRDTs and conventional distributed services are appropriate when replicas should converge on one application state. A globally ordered ledger is appropriate when participants require a shared transaction order and accept the governance and execution costs of consensus. The Synchronic Web is justified only where independent roots, partial possession, self-encoding interpretation, and entangled history are jointly consequential. Using the complete architecture where one of these simpler models suffices would add burden without corresponding value.
-
-\section{Return to Human Agency}
-
-The architectural mechanisms return to the human problem with which the paper began. Durable historical grounding can support self-sovereign agency, decentralized reputation, and collective struggles over trustworthy information. People and communities can preserve their own roots while referring to evidence retained by others, without requiring one universal platform or owner.
-
-This possibility still depends on usable clients, durable institutions, preservation work, and legitimate policy. Cryptographic evidence cannot replace social judgment; it can make the record on which judgment operates harder to rewrite silently. Agents increase both the utility of persistent history and the harm of opaque or manipulated context, but they remain participants and instruments rather than the final beneficiaries.
-
-\section{Final Architectural Claim}
-
-The Synchronic Web combines integrity-protected partial state, self-encoding structure, timeline-entangled history, and journal-relative resources under plural local authority. Timeline entanglement supplies the foundational cross-history principle~\cite{Maniatis2002timeline}. The larger claim is that this principle becomes a Web substrate when independent histories carry ordinary resources together with the durable definitions needed to interpret them.
-
-The claim is conditional. Integrity depends on an accepted commitment and a correct verifier. Interpretation depends on a compatible controlled runtime. Availability depends on retention and replication. Remote authority depends on historical authentication and terminal-local authorization. Human value depends on institutions and clients that use those mechanisms responsibly.
-
-The paper should remain a draft until authorization, compiled route proofs and response binding, mutation preconditions, incorporation receipts, first-class links, programmable queries, application-defined objects, metering, migration, and key lifecycle survive implementation inspection and testing. If those mechanisms hold, the resulting architecture offers neither a global database nor a universal source of truth, but a more modest and potentially more durable foundation: a Web in which plural histories can remain independently owned, partially known, mutually referential, and verifiable across time.
+The architecture begins from a modest observation: durable information needs both continuity and a point of view. Integrity-protected state, signed succession, retained definitions, and cross-history receipts supply continuity; a journal that chooses roots, preserves evidence, follows relationships, and applies local policy supplies the viewpoint. Their composition produces a distinctive Web in which resources survive changes in representation and host, histories intersect while retaining independent order, observers possess different portions of one committed state, definitions evolve beside the objects they interpret, and federated paths preserve the historical routes through which other journals became meaningful. This is the deeper value of timeline entanglement in a resource architecture~\cite{Maniatis2002timeline}: foreign history becomes locally retained evidence, self-encoding structure turns evidence into durable meaning, journal-relative paths make that meaning findable and citable, and specialized clients keep the machinery quiet during ordinary use and explicit during inspection. A plural Web will still contain disagreement, loss, compromise, and institutional change; its strength lies in giving those events durable form through corrections, receipts, witnesses, and independently held roots. If the remaining protocol and implementation work succeeds, networked information can become easier to carry across time while preserving the diversity of systems and institutions that give it meaning.

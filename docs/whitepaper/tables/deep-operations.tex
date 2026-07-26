@@ -8,7 +8,7 @@ deep-slice! & (deep-slice! object path) & Retain evidence along the path while p
 deep-prune! & (deep-prune! object path) & Remove evidence along the path, rebuilding parents or replacing exhausted children with stubs. \\
 deep-merge! & (deep-merge! source target (path '())) & Merge digest-compatible evidence into the target or into the optional target path. \\
 deep-copy!  & (deep-copy! object source-path target-path) & Read a value from one nested path and set it at another. \\
-deep-call   & (deep-call object path callback) & Evaluate a callback against the selected object and return the callback result without rebuilding ancestors. \\
+deep-call   & (deep-call object path callback) & Evaluate a callback against the selected object and return the callback result while leaving ancestors unchanged. \\
 deep-call!  & (deep-call! object path callback) & Evaluate a callback, retain the mutated child node, and rebuild every ancestor. \\
 \bottomrule
 \end{tabularx}

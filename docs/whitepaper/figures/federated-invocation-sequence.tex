@@ -1,5 +1,5 @@
-% One public multi-hop handshake compiles two endpoint-relative proofs.  The
-% private invocation then bypasses the intermediary.
+% Public routing follows exact nested journal objects already committed beneath
+% the origin head.  The private invocation then bypasses the intermediary.
 \begin{tikzpicture}[
   participant/.style={draw=swblue, thick, rounded corners=3pt, fill=swlightblue,
                       minimum width=31mm, minimum height=8mm,
@@ -13,30 +13,28 @@
   \node[participant] (a) at (-5.0,0) {Origin A};
   \node[participant] (c) at (0,0) {Intermediary C};
   \node[participant] (b) at (5.0,0) {Terminal B};
-  \draw[lifeline] (a.south) -- (-5.0,-6.8);
-  \draw[lifeline] (c.south) -- (0,-4.7);
-  \draw[lifeline] (b.south) -- (5.0,-6.8);
+  \draw[lifeline] (a.south) -- (-5.0,-7.0);
+  \draw[lifeline] (c.south) -- (0,-4.9);
+  \draw[lifeline] (b.south) -- (5.0,-7.0);
 
   \draw[msg] (-5.0,-1.0) -- node[above,note]
-    {selected A head + C checkpoint} (0,-1.0);
+    {follow exact C object in selected A head} (0,-1.0);
   \draw[msg] (0,-1.8) -- node[above,note]
-    {C continuity + B checkpoint} (5.0,-1.8);
-  \node[note, anchor=west] at (5.1,-1.8)
-    {A-rooted proof of B};
+    {follow exact nested B object; preserve digest} (5.0,-1.8);
 
-  \draw[return] (5.0,-2.9) -- node[above,note]
-    {selected B head + C checkpoint} (0,-2.9);
-  \draw[return] (0,-3.7) -- node[above,note]
-    {C continuity + A checkpoint} (-5.0,-3.7);
-  \node[note, anchor=east] at (-5.1,-3.7)
-    {B-rooted proof of A};
+  \draw[return] (5.0,-2.8) -- node[above,note]
+    {B-rooted partial object + reverse route to A key} (0,-2.8);
+  \draw[return] (0,-3.6) -- node[above,note]
+    {same B index/digest + root-sequence context} (-5.0,-3.6);
+  \node[note, anchor=east] at (-5.1,-4.15)
+    {A matches returned B object to its committed forward route};
 
-  \draw[swgray!55, dashed] (-6.3,-4.55) -- (6.3,-4.55);
-  \node[note, fill=white, inner sep=2pt] at (0,-4.55)
+  \draw[swgray!55, dashed] (-6.3,-4.8) -- (6.3,-4.8);
+  \node[note, fill=white, inner sep=2pt] at (0,-4.8)
     {direct final mile; intermediary sees no private function, path, arguments, or value};
 
-  \draw[direct] (-5.0,-5.35) -- node[above,note, text=swblue]
-    {B-relative source proof + signed invocation} (5.0,-5.35);
-  \draw[return, draw=swblue] (5.0,-6.2) -- node[above,note, text=swblue]
-    {request-bound result (WIP)} (-5.0,-6.2);
+  \draw[direct] (-5.0,-5.65) -- node[above,note, text=swblue]
+    {B-rooted object + signed get/set!/resolve} (5.0,-5.65);
+  \draw[return, draw=swblue] (5.0,-6.55) -- node[above,note, text=swblue]
+    {live get/set! result; resolve returns verified proof} (-5.0,-6.55);
 \end{tikzpicture}

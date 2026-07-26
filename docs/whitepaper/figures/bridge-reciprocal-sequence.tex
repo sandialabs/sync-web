@@ -18,10 +18,10 @@
   \draw[lifeline] (b.south) -- (4.0,-6.9);
 
   \draw[msg] (-4.0,-1.0) -- node[above, font=\footnotesize]
-    {root-signed head A + continuity context} (4.0,-1.0);
+    {root-signed head A + control-path evidence} (4.0,-1.0);
   \node[local] (stage-a) at (4.0,-1.8) {verify and stage A\\status: accepted, not incorporated};
   \draw[return] (4.0,-2.7) -- node[above, font=\footnotesize]
-    {root-signed head B + acceptance of A} (-4.0,-2.7);
+    {root-signed head B + transport acknowledgment (accepted-index)} (-4.0,-2.7);
   \node[local] (stage-b) at (-4.0,-3.5) {verify and stage B\\status: accepted, not incorporated};
 
   \draw[swgray!55, dashed] (-5.8,-4.25) -- (5.8,-4.25);
@@ -30,6 +30,6 @@
 
   \node[local] (commit-a) at (-4.0,-5.15) {local commit includes head B};
   \node[local] (commit-b) at (4.0,-5.15) {local commit includes head A};
-  \node[note] at (-4.0,-6.0) {later A head + inclusion proof\\is B's incorporation receipt};
-  \node[note] at (4.0,-6.0) {later B head + inclusion proof\\is A's incorporation receipt};
+  \node[note] at (-4.0,-6.0) {later A head + inclusion proof\\proves A incorporated B};
+  \node[note] at (4.0,-6.0) {later B head + inclusion proof\\proves B incorporated A};
 \end{tikzpicture}

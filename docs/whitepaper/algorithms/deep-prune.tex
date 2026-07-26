@@ -3,7 +3,7 @@
 \label{alg:deep-prune}
 \begin{algorithmic}[1]
 \Require Object node $x$ and nonempty path $p$
-\Ensure Evidence at the selected path is removed without changing the logical digest
+\Ensure Evidence at the selected path is removed while the logical digest remains fixed
 \Function{DeepPrune}{$x,p$}
   \State $o \gets \Call{EvaluateObject}{x}$
   \State $k \gets \Call{First}{p}$

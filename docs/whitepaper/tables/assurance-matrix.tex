@@ -1,13 +1,13 @@
 \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
 \toprule
-\textbf{Mechanism} & \textbf{Provides} & \textbf{Limits and Displaced Burden} \\
+\textbf{Mechanism} & \textbf{Assurance} & \textbf{Operational Dependence} \\
 \midrule
-Integrity structure & Consistency with an accepted commitment & Does not establish origin, authority, truth, or availability; requires commitment acquisition and correct verification. \\
-Partial structure & Selected evidence tied to one complete-state identity & Does not reveal hidden content or prove completeness or future retrieval; requires proof metadata, disclosure policy, and retention. \\
-History & Detectable state succession and prior-state identity & Does not ensure one branch or physical preservation; requires storage, key continuity, migration, and witness comparison. \\
-Self-encoding structure & Durable association between state and interpretation & Does not ensure safety, termination, compatibility, or correctness; requires confinement, metering, documentation, and migration. \\
-Entanglement & Cross-history ordering and survivable incorporation receipts & Does not provide consensus, fork prevention, trust, or authority; requires synchronization, incorporation, witnesses, and policy. \\
-Federated route & Mutual endpoint identity and a direct authenticated final mile & Does not provide authorization, anonymity, offline relay, or exactly-once execution; requires proof freshness, terminal reachability, local rules, and replay-safe mutation. \\
-Rooted paths & Resource continuity from a selected viewpoint & Do not supply universal naming or discovery; require root choice, route maintenance, and indexing. \\
+Integrity structure & Available material agrees with an accepted commitment & Accepted anchors, canonical encoding, correct verification, and retained copies for availability. \\
+Partial structure & Selected evidence retains one complete-state identity & Proof metadata, disclosure policy, resource bounds, and custodians for omitted material. \\
+History & Successive states and earlier identities remain verifiable & Key continuity, storage, migration, and witness comparison among signed branches. \\
+Self-encoding structure & State remains durably associated with its interpretation & Compatible runtimes, confinement, metering, documentation, validation, and migration. \\
+Entanglement & Foreign history precedes a later incorporating head & Synchronization, committed inclusion, receipt retention, witnesses, and local trust policy. \\
+Federated route & A terminal authenticates an origin through the exact journal object committed in its own history & Exact committed route objects, a reachable committed endpoint, authenticated production transport, terminal-local authorization, origin verification of \texttt{resolve}, and application handling of accepted replay. \\
+Rooted paths & Resources retain continuity from a selected viewpoint & Root choice, discovery, route maintenance, historical context, and indexing. \\
 \bottomrule
 \end{tabularx}
