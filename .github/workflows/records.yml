@@ -44,9 +44,12 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: journal
-      - name: Build journal binary
-        working-directory: journal
-        run: cargo build --release
+          workspaces: |
+            journal
+            records/tests
+      - name: Build records test runner
+        run: |
+          CARGO_TARGET_DIR=journal/target cargo test --manifest-path records/tests/Cargo.toml
+          CARGO_TARGET_DIR=journal/target cargo build --release --manifest-path records/tests/Cargo.toml
       - name: Run records tests
-        run: records/tests/test.sh journal/target/release/journal-sdk
+        run: journal/target/release/records-test --suite records/tests/suite.toml --jobs 2

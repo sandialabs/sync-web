@@ -109,7 +109,7 @@ export const buildChildPath = (parentPath: JournalPath, itemName: string): Journ
   const last = parentPath[parentPath.length - 1];
 
   if (last === '*bridge*') {
-    return [...parentPath, itemName, -1];
+    return [...parentPath.slice(0, -1), itemName, -1];
   }
 
   const stateIndex = findLastMarkerIndex(parentPath, '*state*');

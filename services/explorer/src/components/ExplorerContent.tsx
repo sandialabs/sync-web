@@ -2,6 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DirectoryResult, ExplorerMode, ExplorerSelection, JournalPath, JournalResponse } from '../types';
 import { JournalService } from '../services/JournalService';
 import { compareSegmentedNames } from '../utils/sortKeys';
+import RawDocumentView from './RawDocumentView';
+
+const ACCESS_MESSAGE = 'Unable to load this location. Check that the selected journal has granted access to this user and path.';
+const SNAPSHOT_MESSAGE = 'The selected ledger snapshot is unavailable. It may still be committing or may no longer be retained.';
 
 interface ExplorerContentProps {
   mode: ExplorerMode;
@@ -9,6 +13,7 @@ interface ExplorerContentProps {
   journalService: JournalService | null;
   refreshKey: number;
   ledgerView: 'content' | 'proof';
+  stageReadOnly?: boolean;
   onLedgerViewToggle: () => void;
   onStageCreateFile: (path: JournalPath) => Promise<void>;
   onStageCreateDirectory: (path: JournalPath) => Promise<void>;
@@ -24,6 +29,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   journalService,
   refreshKey,
   ledgerView,
+  stageReadOnly = false,
   onLedgerViewToggle,
   onStageCreateFile,
   onStageCreateDirectory,
@@ -38,6 +44,8 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [rawView, setRawView] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const isEditingRef = useRef(false);
   const responseKeyRef = useRef<string | null>(null);
@@ -70,12 +78,15 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
       setIsEditing(false);
       setEditValue('');
       setActionNotice(null);
+      setLoadError(null);
+      setRawView(false);
       return;
     }
 
     let active = true;
     const load = async () => {
       setIsLoading(true);
+      setLoadError(null);
       try {
         const nextResponse = await journalService.get(selection.path);
         if (!active) {
@@ -91,18 +102,14 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
         setEditValue(JournalService.documentContentToText(nextResponse.content));
         setIsEditing(false);
         setActionNotice(null);
+        setLoadError(null);
       } catch (error) {
         if (active) {
-          const errorResponse = {
-            content: `Error loading content: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            'pinned?': null,
-            proof: { error: String(error) },
-          };
-          setResponse((prev) =>
-            JSON.stringify(prev) === JSON.stringify(errorResponse) ? prev : errorResponse,
-          );
+          setResponse(null);
           setResponseKey(selectionKey);
           setIsEditing(false);
+          setActionNotice(null);
+          setLoadError(JournalService.isSnapshotUnavailable(error) ? SNAPSHOT_MESSAGE : ACCESS_MESSAGE);
         }
       } finally {
         if (active) {
@@ -241,7 +248,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
         <div className="content-path-container">
           <div className="content-path">
             {title}
-            {mode === 'stage' && (
+            {mode === 'stage' && !rawView && !stageReadOnly && (
               <button
                 className="button-inline-icon"
                 title="Rename"
@@ -252,9 +259,9 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
           {actionNotice && <div className="content-meta-note">{actionNotice}</div>}
         </div>
         <div className="content-actions">
-          {mode === 'stage' && selection.type === 'directory' && (
+          {!loadError && mode === 'stage' && !stageReadOnly && selection.type === 'directory' && (
             <>
-              <button className="button button-secondary" onClick={() => void onStageCreateFile(selection.path)}>+ Document</button>
+              <button className="button button-secondary" onClick={() => void onStageCreateFile(selection.path)}>+ File</button>
               <button className="button button-secondary" onClick={() => void onStageCreateDirectory(selection.path)}>+ Directory</button>
               <button className="button button-secondary" onClick={openUploadDialog}>Upload File</button>
               <input
@@ -272,23 +279,34 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
               <button className="button button-secondary" onClick={() => void onStageDelete(selection.path, title)}>Delete</button>
             </>
           )}
-          {mode === 'stage' && selection.type === 'file' && (
+          {!loadError && mode === 'stage' && selection.type === 'file' && (
             <>
-              <button className="button button-secondary" onClick={() => {
-                if (isEditing) {
-                  void handleSave();
-                } else {
-                  setIsEditing(true);
-                }
-              }}>
-                {isEditing ? 'Save' : 'Edit'}
-              </button>
+              <button className="button button-secondary" onClick={() => setRawView(false)}>Content</button>
+              <button className="button button-secondary" onClick={() => setRawView(true)}>Raw</button>
+              {!rawView && !stageReadOnly && (
+                <button className="button button-secondary" onClick={() => {
+                  if (isEditing) {
+                    void handleSave();
+                  } else {
+                    setIsEditing(true);
+                  }
+                }}>
+                  {isEditing ? 'Save' : 'Edit'}
+                </button>
+              )}
               <button className="button button-secondary" onClick={handleDownload}>Download</button>
-              <button className="button button-secondary" onClick={() => void onStageDelete(selection.path, title)}>Delete</button>
+              {!rawView && !stageReadOnly && (
+                <button className="button button-secondary" onClick={() => void onStageDelete(selection.path, title)}>Delete</button>
+              )}
             </>
           )}
-          {mode === 'ledger' && selection.type === 'file' && (
+          {!loadError && mode === 'ledger' && selection.type === 'file' && (
             <>
+              <button className="button button-secondary" onClick={() => {
+                setRawView(false);
+                if (ledgerView === 'proof') onLedgerViewToggle();
+              }}>Content</button>
+              <button className="button button-secondary" onClick={() => setRawView(true)}>Raw</button>
               <button
                 className={isPinned ? 'button button-secondary' : 'button button-primary'}
                 onClick={handlePinToggle}
@@ -296,9 +314,10 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
                 {isPinned ? 'Unpin' : 'Pin'}
               </button>
               <button className="button button-secondary" onClick={handleDownload}>Download</button>
-              <button className="button button-secondary" onClick={onLedgerViewToggle}>
-                {ledgerView === 'content' ? 'Proof' : 'Content'}
-              </button>
+              <button className="button button-secondary" onClick={() => {
+                setRawView(false);
+                if (ledgerView === 'content') onLedgerViewToggle();
+              }}>Proof</button>
             </>
           )}
         </div>
@@ -307,6 +326,10 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
       <div className="content-body">
         {isLoading && !currentResponse ? (
           <div className="loading-spinner" />
+        ) : loadError ? (
+          <div className="content-load-error" role="alert">{loadError}</div>
+        ) : selection.type === 'file' && rawView ? (
+          <RawDocumentView content={currentResponse?.content} filename={title} />
         ) : mode === 'ledger' && selection.type === 'file' && ledgerView === 'proof' ? (
           <pre className="content-text">{JSON.stringify(currentResponse?.proof, null, 2)}</pre>
         ) : directory ? (
@@ -337,7 +360,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
                 </button>
               ))}
           </div>
-        ) : mode === 'stage' && selection.type === 'file' && isEditing ? (
+        ) : mode === 'stage' && selection.type === 'file' && isEditing && !rawView ? (
           <textarea
             className="content-editor"
             value={editValue}

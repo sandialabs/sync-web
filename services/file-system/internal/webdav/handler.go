@@ -7,13 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"path"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sandialabs/sync-web/services/file-system/internal/gateway"
 	"github.com/sandialabs/sync-web/services/file-system/internal/paths"
@@ -77,22 +77,23 @@ func (h Handler) handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) handlePropfind(w http.ResponseWriter, r *http.Request, parsed paths.ParsedPath) {
+	href := r.URL.EscapedPath()
 	if parsed.Namespace == paths.NamespaceControl {
 		if parsed.Directory {
-			writeMultistatus(w, []resource{collection(r.URL.Path), file(joinHref(r.URL.Path, "pin"), 0, time.Time{})})
+			writeMultistatus(w, []resource{collection(href), file(joinHref(href, "pin"), 0, time.Time{})})
 		} else {
-			writeMultistatus(w, []resource{file(r.URL.Path, 0, time.Time{})})
+			writeMultistatus(w, []resource{file(href, 0, time.Time{})})
 		}
 		return
 	}
 	if parsed.Namespace == paths.NamespaceLedger && parsed.Path == nil {
-		resources := []resource{collection(r.URL.Path)}
+		resources := []resource{collection(href)}
 		children := parsed.SyntheticChildren
 		if !parsed.Synthetic {
 			children = []string{"state"}
 		}
 		for _, child := range children {
-			resources = append(resources, collection(joinHref(r.URL.Path, child)))
+			resources = append(resources, collection(joinHref(href, child)))
 		}
 		writeMultistatus(w, resources)
 		return
@@ -104,48 +105,51 @@ func (h Handler) handlePropfind(w http.ResponseWriter, r *http.Request, parsed p
 	}
 	if isMissing(value) {
 		if parsed.Namespace == paths.NamespaceStage && parsed.Directory && h.markerExists(r, parsed.Path) {
-			writeMultistatus(w, []resource{collection(r.URL.Path)})
+			writeMultistatus(w, []resource{collection(href)})
 			return
 		}
 		if parsed.Namespace == paths.NamespaceLedger && parsed.Directory && isBridgeDirectoryPath(parsed.Path) {
-			writeMultistatus(w, []resource{collection(r.URL.Path)})
+			writeMultistatus(w, []resource{collection(href)})
 			return
 		}
 		http.NotFound(w, r)
 		return
 	}
 	if children, ok := directoryChildren(value); ok {
-		resources := []resource{collection(r.URL.Path)}
+		resources := []resource{collection(href)}
 		for _, child := range children {
 			if paths.IsReservedStateSegment(child.Name) {
 				continue
 			}
 			childPath := appendSegment(parsed.Path, child.Name)
-			childValue, err := h.readValue(r, paths.ParsedPath{Namespace: parsed.Namespace, Path: childPath})
+			childParsed := parsed
+			childParsed.Path = childPath
+			childParsed.Directory = false
+			childValue, err := h.readValue(r, childParsed)
 			if err == nil && isMissing(childValue) && !h.markerExists(r, childPath) {
 				continue
 			}
-			href := joinHref(r.URL.Path, child.Name)
+			childHref := joinHref(href, child.Name)
 			if child.Directory {
-				resources = append(resources, collection(href))
+				resources = append(resources, collection(childHref))
 			} else {
-				length, err := fileContentLength(childValue)
+				length, contentType, err := fileInfo(childValue, child.Name)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 					return
 				}
-				resources = append(resources, file(href, length, time.Time{}))
+				resources = append(resources, file(childHref, length, time.Time{}, contentType))
 			}
 		}
 		writeMultistatus(w, resources)
 		return
 	}
-	length, err := fileContentLength(value)
+	length, contentType, err := fileInfo(value, path.Base(r.URL.Path))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
-	writeMultistatus(w, []resource{file(r.URL.Path, length, time.Time{})})
+	writeMultistatus(w, []resource{file(href, length, time.Time{}, contentType)})
 }
 
 func (h Handler) handleGet(w http.ResponseWriter, r *http.Request, parsed paths.ParsedPath) {
@@ -166,12 +170,12 @@ func (h Handler) handleGet(w http.ResponseWriter, r *http.Request, parsed paths.
 		http.Error(w, "cannot GET a directory", http.StatusMethodNotAllowed)
 		return
 	}
-	body, contentType, err := encodeBody(value)
+	body, _, err := encodeBody(value)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
-	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Type", safeContentType(body, path.Base(r.URL.Path)))
 	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeContent(w, r, path.Base(r.URL.Path), time.Time{}, bytes.NewReader(body))
 }
@@ -276,18 +280,20 @@ func (h Handler) handleMove(w http.ResponseWriter, r *http.Request, parsed paths
 
 func (h Handler) readValue(r *http.Request, parsed paths.ParsedPath) (any, error) {
 	if parsed.Namespace == paths.NamespaceLedger {
-		return h.Gateway.Resolve(r.Context(), r, parsed.Path, false)
+		return h.Gateway.ResolveFederated(
+			r.Context(), r, parsed.Path, parsed.FederationRoute, parsed.FederationHistory,
+		)
 	}
-	return h.Gateway.Get(r.Context(), r, parsed.Path, false)
+	return h.Gateway.Get(r.Context(), r, parsed.Path)
 }
 
 func (h Handler) markerExists(r *http.Request, path []paths.Segment) bool {
-	value, err := h.Gateway.Get(r.Context(), r, paths.DirectoryMarkerPath(path), false)
+	value, err := h.Gateway.Get(r.Context(), r, paths.DirectoryMarkerPath(path))
 	return err == nil && !isMissing(value)
 }
 
 func (h Handler) copyStage(r *http.Request, source, target []paths.Segment) error {
-	value, err := h.Gateway.Get(r.Context(), r, source, false)
+	value, err := h.Gateway.Get(r.Context(), r, source)
 	if err != nil {
 		return err
 	}
@@ -315,7 +321,7 @@ func (h Handler) copyStage(r *http.Request, source, target []paths.Segment) erro
 }
 
 func (h Handler) deleteStage(r *http.Request, target []paths.Segment) error {
-	value, err := h.Gateway.Get(r.Context(), r, target, false)
+	value, err := h.Gateway.Get(r.Context(), r, target)
 	if err != nil {
 		return err
 	}
@@ -491,7 +497,7 @@ func directoryChildren(value any) ([]child, bool) {
 		children = make([]child, 0, len(entries))
 		for name, kindValue := range entries {
 			kind, _ := symbolName(kindValue)
-			children = append(children, child{Name: name, Directory: kind == "directory"})
+			children = append(children, child{Name: paths.DecodeSchemePathSegment(name), Directory: kind == "directory"})
 		}
 	default:
 		return nil, true
@@ -529,12 +535,12 @@ func emptyByteVector() map[string]any {
 	return map[string]any{"*type/byte-vector*": ""}
 }
 
-func fileContentLength(value any) (int64, error) {
+func fileInfo(value any, filename string) (int64, string, error) {
 	body, _, err := encodeBody(value)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return int64(len(body)), nil
+	return int64(len(body)), safeContentType(body, filename), nil
 }
 
 func encodeBody(value any) ([]byte, string, error) {
@@ -550,13 +556,67 @@ func encodeBody(value any) ([]byte, string, error) {
 	case nil:
 		return nil, "application/octet-stream", nil
 	}
-	return nil, "", errors.New("WebDAV only supports byte-vector document values")
+	return nil, "", errors.New("WebDAV only supports byte-vector values")
+}
+
+func safeContentType(body []byte, filename string) string {
+	starts := func(signature ...byte) bool {
+		return len(body) >= len(signature) && bytes.Equal(body[:len(signature)], signature)
+	}
+	asciiAt := func(offset int, text string) bool {
+		return offset >= 0 && len(body) >= offset+len(text) &&
+			string(body[offset:offset+len(text)]) == text
+	}
+
+	switch {
+	case starts(0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a):
+		return "image/png"
+	case starts(0xff, 0xd8, 0xff):
+		return "image/jpeg"
+	case asciiAt(0, "GIF87a") || asciiAt(0, "GIF89a"):
+		return "image/gif"
+	case asciiAt(0, "RIFF") && asciiAt(8, "WEBP"):
+		return "image/webp"
+	case asciiAt(4, "ftyp") && (asciiAt(8, "avif") || asciiAt(8, "avis")):
+		return "image/avif"
+	case asciiAt(0, "BM"):
+		return "image/bmp"
+	case starts(0x00, 0x00, 0x01, 0x00):
+		return "image/x-icon"
+	case bytes.Contains(body[:min(len(body), 1024)], []byte("%PDF-")):
+		return "application/pdf"
+	case asciiAt(0, "RIFF") && asciiAt(8, "WAVE"):
+		return "audio/wav"
+	case asciiAt(0, "OggS"):
+		if strings.EqualFold(path.Ext(filename), ".ogv") {
+			return "video/ogg"
+		}
+		return "audio/ogg"
+	case asciiAt(0, "ID3") || (len(body) > 1 && body[0] == 0xff && body[1]&0xe0 == 0xe0):
+		return "audio/mpeg"
+	case starts(0x1a, 0x45, 0xdf, 0xa3):
+		return "video/webm"
+	case asciiAt(4, "ftyp"):
+		ext := strings.ToLower(path.Ext(filename))
+		if ext == ".m4a" || ext == ".m4b" || ext == ".aac" {
+			return "audio/mp4"
+		}
+		return "video/mp4"
+	case utf8.Valid(body):
+		// HTML, SVG, XML, and script source remain inert over WebDAV.
+		return "text/plain; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func writeGatewayError(w http.ResponseWriter, err error) {
 	var gatewayErr gateway.Error
 	if errors.As(err, &gatewayErr) {
 		status := gatewayErr.StatusCode
+		if isExpiredFederatedHistory(gatewayErr.Body) {
+			status = http.StatusNotFound
+		}
 		if status == http.StatusUnauthorized {
 			w.Header().Set("WWW-Authenticate", `Basic realm="sync-web"`)
 		}
@@ -564,6 +624,15 @@ func writeGatewayError(w http.ResponseWriter, err error) {
 		return
 	}
 	http.Error(w, err.Error(), http.StatusBadGateway)
+}
+
+func isExpiredFederatedHistory(body any) bool {
+	payload, ok := body.(map[string]any)
+	if !ok || payload["error"] != "bridge-error" {
+		return false
+	}
+	message, ok := payload["message"].(string)
+	return ok && strings.HasPrefix(message, "Bridge is not committed at the selected local index:")
 }
 
 func joinHref(base, name string) string {
@@ -612,10 +681,10 @@ func collection(href string) resource {
 	return resource{Href: href, Collection: true}
 }
 
-func file(href string, length int64, modified time.Time) resource {
-	contentType := mime.TypeByExtension(path.Ext(href))
-	if contentType == "" {
-		contentType = "application/octet-stream"
+func file(href string, length int64, modified time.Time, contentTypes ...string) resource {
+	contentType := "application/octet-stream"
+	if len(contentTypes) > 0 && contentTypes[0] != "" {
+		contentType = contentTypes[0]
 	}
 	return resource{Href: href, Length: length, Modified: modified, ContentType: contentType}
 }

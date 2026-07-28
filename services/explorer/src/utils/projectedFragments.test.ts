@@ -31,7 +31,7 @@ describe('projectedFragments', () => {
 
   it('round-trips a ledger fragment with bridges and history', () => {
     const ledgerSelection: ExplorerSelection = {
-      path: [42, '*bridge*', 'alice', -1, '*bridge*', 'bob', -3, '*state*', 'docs', 'readme.md'],
+      path: [42, 'alice', -1, 'bob', -3, '*state*', 'docs', 'readme.md'],
       type: 'file',
     };
 
@@ -39,7 +39,7 @@ describe('projectedFragments', () => {
       mode: 'ledger',
       stageSelection: null,
       ledgerSelection,
-      ledgerRootPath: [42, '*bridge*', 'alice', -1, '*bridge*', 'bob', -3, '*state*'],
+      ledgerRootPath: [42, 'alice', -1, 'bob', -3, '*state*'],
       ledgerHops,
       rootIndex: 42,
     });

@@ -1,202 +1,296 @@
 (define-class (ledger)
   ;; Ledger class manages config, staged state, and signed/pinned chain history.
-  (define-method (*init* self standard (config '()) tree-class chain-class document-class)
+  (define-method (*init* self standard (config '()) tree-class chain-class)
     ;; Initialize ledger with helper objects, inline config data, and fresh storage classes.
-    ;;   Args:
-    ;;     standard (standard object): standard helper instance.
-    ;;     config (list): initial config expression.
-    ;;     tree-class (list): tree class definition.
-    ;;     chain-class (list): chain class definition.
-    ;;     document-class (list): document class definition.
-    ;;   Returns:
-    ;;     boolean: #t after setting fields.
     ((self '~field!) 'standard standard)
     ((self '~field!) 'config (expression->byte-vector config))
-    (if (null? ((self '~config-get) '(public bridge-policy)))
-        ((self '~config-set!) '(public bridge-policy) '((publish push) (subscribe pull))))
-    (let ((standard-obj (sync-eval standard #f)))
-      ((self '~field!) 'document ((standard-obj 'make) document-class))
+    (let ((standard-obj (sync-eval standard)))
       ((self '~field!) 'stage ((standard-obj 'init) tree-class))
       ((self '~field!) 'temp ((standard-obj 'init) chain-class))
       ((self '~field!) 'perm ((standard-obj 'init) chain-class))))
 
-  (define-method (config self (path '()))
-    ;; Return inline ledger config data.
-    ;;   Args:
-    ;;     path (list): optional nested config path.
-    ;;   Returns:
-    ;;     list: config expression or subexpression.
-    ((self '~config-get) path))
+  (define-method (~child self node operation . arguments)
+    (((sync-eval ((self '~field!) 'standard)) 'deep-call) node '()
+     `(lambda (object)
+        ((object ',operation)
+         ,@(map (lambda (argument) `',argument) arguments)))))
 
-  (define-method (info self (subscriber #f))
-    ;; Return public config info only, including bridge policy.
-    ;;   Args:
-    ;;     subscriber (symbol): optional subscriber name for future per-peer effective policy.
-    ;;   Returns:
-    ;;     list: public config expression.
+  (define-method (config self (path '()))
+    (cond ((and (pair? path) (eq? (car path) 'peer-preapproval))
+           ((self '~config-get) (append '(private bridge-preapproval) (cdr path))))
+          ((equal? path '(journal-rotation-indexes))
+           ((self '~config-get) '(private journal rotation-indexes)))
+          ((and (pair? path) (eq? (car path) 'private))
+           (error 'config-error "Private Ledger config is not public"))
+          (else ((self '~config-get) path))))
+
+  (define-method (descriptor self index)
+    ;; Return the public descriptor represented by the selected local state.
+    ;; The current implementation publishes descriptor values through committed
+    ;; Ledger state; callers use `index` to select the corresponding head.
+    (if (not (integer? index))
+        (error 'index-error "Descriptor index must be an integer: ~S" index))
     ((self '~config-get) '(public)))
 
   (define-method (size self)
-    ;; Size of the permanent chain.
-    ;;   Returns:
-    ;;     integer: chain size.
-    (let ((perm (sync-eval ((self '~field!) 'perm) #f)))
-      ((perm 'size))))
+    ((self '~child) ((self '~field!) 'perm) 'size))
 
-  (define-method (bridge! self name info-local info-remote)
-    ;; Apply prepared bridge/publication data and cache public key/policy.
-    ;;   Args:
-    ;;     name (symbol): local bridge/publication target name.
-    ;;     info-local (alist): locally chosen bridge data such as interface, policy, role, and remote-name.
-    ;;     info-remote (list): remote public info payload.
-    ;;   Returns:
-    ;;     boolean: #t after updating config, #f when policy disables the bridge/publication.
-    (let* ((public-key (cadr (assoc 'public-key info-remote)))
-           (remote-policy (cadr (assoc 'bridge-policy info-remote)))
-           (local-policy (cadr (assoc 'policy info-local))))
-      (if (eq? (cadr (assoc 'role info-local)) 'publisher)
-          (let ((mode ((self '~bridge-mode) local-policy remote-policy)))
-            (begin
-              ((self '~config-set!) `(private subscriber ,name) info-remote)
-              ((self '~config-set!) `(private subscriber ,name disabled?) (eq? mode 'none))
-              ((self '~config-set!) `(private subscriber ,name interface) (cadr (assoc 'interface info-local)))
-              ((self '~config-set!) `(private subscriber ,name public-key) public-key)
-              ((self '~config-set!) `(private subscriber ,name remote-name) (cadr (assoc 'remote-name info-local)))
-              ((self '~config-set!) `(private subscriber ,name policy local) local-policy)
-              ((self '~config-set!) `(private subscriber ,name policy remote) remote-policy)
-              ((self '~config-set!) `(private subscriber ,name policy mode) mode)
-              (not (eq? mode 'none))))
-          (let ((mode ((self '~bridge-mode) remote-policy local-policy)))
-            (begin
-              ((self '~config-set!) `(private bridge ,name) info-remote)
-              ((self '~config-set!) `(private bridge ,name disabled?) (eq? mode 'none))
-              ((self '~config-set!) `(private bridge ,name interface) (cadr (assoc 'interface info-local)))
-              ((self '~config-set!) `(private bridge ,name public-key) public-key)
-              ((self '~config-set!) `(private bridge ,name policy local) local-policy)
-              ((self '~config-set!) `(private bridge ,name policy remote) remote-policy)
-              ((self '~config-set!) `(private bridge ,name policy mode) mode)
-              (if (eq? mode 'none) ((self '~stage-delete-bridge!) name))
-              (not (eq? mode 'none)))))))
+  (define-method (read self index supplied-object)
+    (let ((standard (sync-eval ((self '~field!) 'standard))))
+      (if (or (not (sync-node? supplied-object)) (< index 0)
+              (>= index ((self 'size))))
+          (error 'integrity-error "Invalid local history object"))
+      (let* ((local ((self '~child) ((self '~field!) 'perm) 'previous index))
+             (temp ((self '~child) ((self '~field!) 'temp) 'previous index))
+             (local (if (equal? (sync-digest local) (sync-digest temp))
+                        ((standard 'deep-merge!) local temp) local)))
+        (if (not (equal? (sync-digest supplied-object) (sync-digest local)))
+            (error 'integrity-error "Object is not contained in local history"))
+        ((standard 'deep-merge!) supplied-object local))))
 
-  (define-method (get self path meta? expression?)
-    ;; Get value at a stage path.
-    ;;   Args:
-    ;;     path (list): path segments.
-    ;;     meta? (boolean): if #t, include document metadata envelope.
-    ;;     expression? (boolean): if #t, decode document payload bytes as an expression.
-    ;;   Returns:
-    ;;     any: document byte-vector/expression value, metadata envelope, sentinel, or directory listing.
-    (set! path ((self '~path-normalize) path #t #f))
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (stage ((self '~field!) 'stage))
-           (node ((standard 'deep-get) stage path)))
-      (if ((self '~bridge-chain-value-path?) path) node
-          ((self '~document-read) node meta? expression?))))
+  (define-method (~anchor self head)
+    (let loop ((index (- ((self 'size)) 1)))
+      (cond ((< index 0) (error 'integrity-error "Object is not in local history"))
+            ((equal? (sync-digest head)
+                     (sync-digest
+                      ((self '~child) ((self '~field!) 'perm) 'previous index)))
+             ((self 'read) index head))
+            (else (loop (- index 1))))))
 
-  (define-method (set! self path value (meta '()) expression?)
-    ;; Stage a document state change at path (not yet committed).
-    ;;   Args:
-    ;;     path (list): path segments.
-    ;;     value: byte-vector payload, expression payload when expression? is #t, or `(nothing)` to delete.
-    ;;     meta (alist): metadata patch, `()`, or `(nothing)`.
-    ;;     expression? (boolean): if #t, encode value as an expression before storing bytes.
-    ;;   Returns:
-    ;;     boolean: #t after staging.
-    (let ((public-path path))
-      (set! path ((self '~path-normalize) path #t #t))
-      (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-             (stage-obj (sync-eval ((self '~field!) 'stage) #f))
-             (existing ((standard 'deep-get) (stage-obj) path))
-             (document ((self '~document-write) existing value meta expression?)))
-        ((stage-obj 'copy!) '(*transition*) '(*transition* previous))
-        ((stage-obj 'set!) '(*transition* operation)
-         `((path ,public-path) (value ,value) ,@(if expression? `((expression? #t)) '()) ,@(if (null? meta) '() `((meta ,meta)))))
-        (if (> (length path) 2)
-            ((self '~field!) 'stage ((standard 'deep-set!) (stage-obj) path document))
-            (begin ((stage-obj 'set!) (car path) document)
-                   ((self '~field!) 'stage (stage-obj)))))))
+  (define-method (~identity-verify self identity)
+    ;; Validate and return a journal's stable SHA-256 identity commitment.
+    (let ((id (and (list? identity) (assoc 'id identity)
+                   (cadr (assoc 'id identity))))
+          (nonce (and (list? identity) (assoc 'nonce identity)
+                      (cadr (assoc 'nonce identity)))))
+      (if (not (and (list? identity) (= (length identity) 2)
+                    (byte-vector? id) (= (length id) 32)
+                    (byte-vector? nonce) (= (length nonce) 32)
+                    (equal? id
+                            (sync-hash
+                             (expression->byte-vector
+                              (list 'sync-web/journal-id/v1 nonce))))))
+          (error 'identity-error "Invalid journal identity commitment: ~S" identity))
+      id))
 
-  (define-method (set-batch! self paths values (metas '()) expression?)
-    ;; Stage multiple document value changes with optional metadata patches.
-    ;;   Args:
-    ;;     paths (list): document paths.
-    ;;     values (list): document values.
-    ;;     metas (list): optional metadata patches parallel to paths/values.
-    ;;     expression? (boolean): if #t, encode each value as an expression before storing bytes.
-    ;;   Returns:
-    ;;     boolean: #t after staging.
-    (let ((metas (if (null? metas) (make-list (length paths) '()) metas)))
-      (let loop ((paths paths) (values values) (metas metas))
-        (cond ((and (null? paths) (null? values) (null? metas)) #t)
-              ((or (null? paths) (null? values) (null? metas))
-               (error 'argument-error "Paths, values, and metadata lists must have equal length: ~S ~S ~S" paths values metas))
-              (else ((self 'set!) (car paths) (car values) (car metas) expression?)
-                    (loop (cdr paths) (cdr values) (cdr metas)))))))
+  (define-method (~rotation-verify self identity rotation previous-key)
+    ;; Verify one key transition starting at an already accepted public key.
+    (let* ((identity-id ((self '~identity-verify) identity))
+           (field (lambda (key) (and (list? rotation) (assoc key rotation)
+                                     (cadr (assoc key rotation)))))
+           (index (field 'index))
+           (previous-index (field 'previous-index))
+           (included-previous (field 'previous-key))
+           (public-key (field 'public-key))
+           (signature (field 'signature)))
+      (if (not (and (list? rotation) (= (length rotation) 5)
+                    (integer? index) (integer? previous-index)
+                    (< previous-index index)
+                    (byte-vector? included-previous)
+                    (byte-vector? public-key)
+                    (byte-vector? signature)))
+          (error 'integrity-error
+                 "Malformed journal signing-key transition: ~S" rotation))
+      (if (not (equal? included-previous previous-key))
+          (error 'integrity-error
+                 "Journal signing-key transition does not start at the accepted key: ~S"
+                 index))
+      (if (not (crypto-verify
+                previous-key signature
+                (expression->byte-vector
+                 (list 'sync-web/journal-key-rotation/v1
+                       identity-id index previous-index
+                       previous-key public-key))))
+          (error 'integrity-error
+                 "Journal signing-key transition signature does not verify: ~S"
+                 index))
+      public-key))
 
-  (define-method (resolve self path pinned? proof? head meta? expression?)
-    ;; Get value at path, optionally with metadata and proof details.
-    ;;   Args:
-    ;;     path (list): path segments.
-    ;;     pinned? (boolean): include pinned detail.
-    ;;     proof? (boolean): include proof detail.
-    ;;     head (sync node): optional prepared chain head.
-    ;;     meta? (boolean): if #t, include document metadata envelope.
-    ;;     expression? (boolean): if #t, decode document payload bytes as an expression.
-    ;;   Returns:
-    ;;     any: byte-vector/expression value, metadata envelope, or association list with content/pinned?/proof.
+  (define-method (~rotate-key! self previous-key public-key signature)
+    ;; Stage one root-secret-derived signing-key transition for an atomic step.
+    (let* ((identity ((self '~config-get) '(public identity)))
+           (configured-key ((self '~config-get) '(public journal public-key)))
+           (indexes ((self '~config-get) '(private journal rotation-indexes)))
+           (index ((self 'size)))
+           (previous-index (if (null? indexes) -1 (car (reverse indexes))))
+           (rotation `((index ,index)
+                       (previous-index ,previous-index)
+                       (previous-key ,previous-key)
+                       (public-key ,public-key)
+                       (signature ,signature))))
+      (if (not (equal? configured-key previous-key))
+          (error 'key-rotation-error
+                 "Root secret does not match the active journal signing key"))
+      (if (not (null? ((self '~config-get) '(private journal pending-rotation))))
+          (error 'key-rotation-error
+                 "A journal signing-key rotation is already pending commitment"))
+      (if (equal? previous-key public-key) #t
+          (begin
+            ((self '~rotation-verify) identity rotation previous-key)
+            ((self '~config-set!) '(private journal pending-rotation) rotation)
+            #t))))
+
+  (define-method (~store-peer! self name verified)
+    ;; Bind one reciprocal peer using its verified public descriptor.
+    (let* ((identity (cadr (assoc 'identity verified)))
+           (identity-id (cadr (assoc 'identity-id verified)))
+           (public-key (cadr (assoc 'public-key verified)))
+           (existing ((self '~config-get) `(private bridge ,name)))
+           (bound-identity ((self '~config-get) `(private bridge-identity ,name)))
+           (bound-name
+            (let find ((bindings ((self '~config-get) '(private bridge-identity))))
+              (cond ((null? bindings) #f)
+                    ((equal? (cadar bindings) identity-id) (caar bindings))
+                    (else (find (cdr bindings)))))))
+      (if (not (byte-vector? public-key))
+          (error 'bridge-key-error "Bridge descriptor lacks a journal signing key: ~S" name))
+      (if (and (not (null? bound-identity))
+               (not (equal? bound-identity identity-id)))
+          (error 'bridge-name-error
+                 "Bridge name is permanently bound to another journal identity: ~S" name))
+      (if (and bound-name (not (eq? bound-name name)))
+          (error 'bridge-identity-error
+                 "Journal identity is permanently bound to another bridge name: ~S" bound-name))
+      (if (null? existing)
+          (begin
+            ((self '~config-set!) `(private bridge-identity ,name) identity-id)
+            ((self '~config-set!) `(private bridge ,name identity) identity)
+            ((self '~config-set!) `(private bridge ,name public-key) public-key)
+            ((self '~config-set!) `(private bridge-retired ,name) '())))
+      #t))
+
+  (define-method (get self path)
+    (((sync-eval ((self '~field!) 'standard)) 'deep-get)
+     ((self '~field!) 'stage) ((self '~path-normalize) path #t #f)))
+
+  (define-method (set! self path value)
+    (if (not (or (byte-vector? value) (equal? value '(nothing))))
+        (error 'value-error "Expected bytes or (nothing)"))
+    (let* ((public-path path)
+           (standard (sync-eval ((self '~field!) 'standard)))
+           (path ((self '~path-normalize) path #t #t))
+           (stage
+            ((standard 'deep-call!) ((self '~field!) 'stage) '()
+             `(lambda (tree)
+                ((tree 'copy!) '(*transition*) '(*transition* previous))
+                ((tree 'set!) '(*transition* operation)
+                 '((path ,public-path) (value ,value)))))))
+      ((self '~field!) 'stage
+       (if (> (length path) 2)
+           ((standard 'deep-set!) stage path value)
+           ((standard 'deep-call!) stage '()
+            `(lambda (tree) ((tree 'set!) ',(car path) ',value)))))))
+
+  (define-method (set-batch! self changes)
+    (if (not (and (list? changes)
+                  (let loop ((in changes))
+                    (or (null? in)
+                        (and (list? (car in)) (= (length (car in)) 2)
+                             (loop (cdr in)))))))
+        (error 'argument-error "Malformed batch"))
+    (for-each (lambda (change) ((self 'set!) (car change) (cadr change))) changes)
+    #t)
+
+  (define-method (~resolve self path pinned? proof? head ancestor?)
     (set! path ((self '~path-normalize) path #f #f))
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (head (if head head ((self '~head) path)))
-           (node ((standard 'deep-get) head path))
-           (document? (and (eq? ((self '~object-type) node) 'document)
-                           (not ((self '~bridge-chain-value-path?) path))))
-           (content (if ((self '~bridge-chain-value-path?) path) node ((self '~document-read) node meta? expression?)))
-           (proof-path (if document? (append path (list ((self '~document-field) meta?))) path)))
-      (if (not (or pinned? proof?)) content
+           (content ((standard 'deep-get) head path))
+           (reserved?
+            (lambda (name)
+              (and (symbol? name)
+                   (let ((text (symbol->string name)))
+                     (and (> (length text) 1) (char=? (text 0) #\*)
+                          (char=? (text (- (length text) 1)) #\*))))))
+           (project
+            (lambda (value)
+              (let loop ((entries (cadr value)) (visible '()))
+                (if (null? entries)
+                    `(directory ,(reverse visible) ,(caddr value))
+                    (loop (cdr entries)
+                          (if (reserved? (caar entries)) visible
+                              (cons (car entries) visible)))))))
+           (directory
+            (and ancestor? (pair? content) (eq? (car content) 'directory)
+                 (pair? (cdr content)) (list? (cadr content)) content))
+           (content
+            (cond (directory (project directory))
+                  (ancestor? (error 'authorization-error
+                                    "Ancestor access requires a directory"))
+                  (else content)))
+           (proof
+            (and proof?
+                 (if (not directory) ((standard 'deep-slice!) head path)
+                     (let* ((parts (reverse path))
+                            (parent (reverse (cdr parts)))
+                            (prefix (car parts))
+                            (node head))
+                       (for-each
+                        (lambda (entry)
+                          (set! node
+                                ((standard 'deep-call!) node parent
+                                 `(lambda (tree)
+                                    ((tree 'prune!)
+                                     ',(append prefix (list (car entry)))
+                                     ,(not (reserved? (car entry))))))))
+                        (cadr directory))
+                       ((standard 'deep-slice!) node path)))))
+           (content
+            (if (and directory proof?)
+                (project ((standard 'deep-get) proof path)) content)))
+      (if (or (not (or pinned? proof?))
+              (and pinned? (not proof?) (equal? content '(unknown))))
+          content
           `((content ,content)
-            ,@(if (not pinned?) '()
-                  (let* ((perm-node ((standard 'deep-get) ((self '~field!) 'perm) path))
-                         (perm-content (if ((self '~bridge-chain-value-path?) path)
-                                           perm-node
-                                           ((self '~document-read) perm-node meta? expression?))))
-                    `((pinned? ,(not (equal? perm-content '(unknown)))))))
-            ,@(if (not proof?) '()
-                  (let ((proof ((standard 'deep-slice!) head proof-path)))
-                    `((proof ,((standard 'serialize) proof)))))))))
+            ,@(if pinned?
+                  `((pinned?
+                     ,(not (equal?
+                            ((standard 'deep-get)
+                             ((self '~field!) 'perm) path)
+                            '(unknown))))) '())
+            ,@(if proof? `((proof ,((standard 'serialize) proof))) '())
+            ,@(if ancestor? '((ancestor? #t)) '())))))
 
-  (define-method (bridge-head self path (index -1))
-    ;; Describe the remote bridge head needed to continue resolving a flat path.
-    ;;   Args:
-    ;;     path (list): flat bridge path being resolved.
-    ;;     index (integer): local history index to inspect.
-    ;;   Returns:
-    ;;     alist: remote interface, trace index, and remaining flat path.
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (path~ ((self '~path-normalize) path #f #f))
-           (segments (if (and (pair? path) (integer? (car path))) (cdr path) path))
-           (name (cadr segments))
-           (interface ((self '~config-get) `(private bridge ,name interface)))
+  (define-method (~peer-head self path (index -1) (remote-index -1))
+    ;; Describe a committed bridge edge at a selected local/remote index.
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
+           (selected-path
+            (if (and (pair? path) (integer? (car path)))
+                path (cons index path)))
+           (path~ ((self '~path-normalize) selected-path #f #f))
+           (segments (cdr selected-path))
+           (explicit? (eq? (car segments) '*bridge*))
+           (name (if explicit? (cadr segments) (car segments)))
            (local-index (car path~))
-           (local-chain (((sync-eval ((self 'resolve) '()) #f) 'previous) index))
-           (remote-chain ((standard 'deep-get) local-chain `(,local-index (*bridge* ,name chain))))
-           (remote-index (- (((sync-eval remote-chain #f) 'size)) 1))
-           (remote-path (cddr segments)))
-      `((interface ,interface)
+           (local-chain
+            ((self '~child) ((self '~field!) 'perm) 'previous index))
+           (info ((standard 'deep-get) local-chain
+                  `(,local-index (*bridge* ,name info))))
+           (remote-chain ((standard 'deep-get) local-chain
+                          `(,local-index (*bridge* ,name chain))))
+           (remote (if (and (sync-node? remote-chain)
+                            (not (equal? remote-chain '(nothing)))
+                            (not (equal? remote-chain '(unknown)))) remote-chain
+                       (error 'bridge-error
+                              "Bridge is not committed at the selected local index: ~S ~S"
+                              name local-index)))
+           (remote-head-index (- ((self '~child) remote 'size) 1))
+           (remote-index ((self '~child) remote 'index remote-index))
+           (remote-path (if explicit? (cddr segments) (cdr segments))))
+      `((interface ,(cadr (assoc 'interface info)))
+        (remote-name ,(cadr (assoc 'remote-name info)))
+        (identity ,(cadr (assoc 'identity info)))
+        (public-key ,(cadr (assoc 'public-key info)))
+        (head-index ,remote-head-index)
         (index ,remote-index)
         (path ,remote-path))))
 
-  (define-method (merge-head self path head (index -1))
+  (define-method (~merge-head self path head (index -1))
     ;; Merge a fetched remote bridge head into the local chain head for a flat path.
-    ;;   Args:
-    ;;     path (list): flat bridge path being resolved.
-    ;;     head (sync node): remote head fetched by the interface.
-    ;;     index (integer): local history index to merge against.
-    ;;   Returns:
-    ;;     sync node: merged local chain head.
     (set! path ((self '~path-normalize) path #f #f))
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (chain ((self 'resolve) '()))
-           (local-chain (((sync-eval chain #f) 'previous) index))
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
+           (local-chain
+            ((self '~child) ((self '~field!) 'perm) 'previous index))
            (remote-chain ((standard 'deep-get) local-chain (list (car path) (cadr path))))
            (remote-path (list-tail path 2))
            (remote-bridge? (and (> (length remote-path) 1)
@@ -209,412 +303,513 @@
           (error 'integrity-error "Remote chain does not match local bridge head for path: ~S" path)
           ((standard 'deep-merge!) head local-chain prefix))))
 
-  (define-method (pin! self path response)
+  (define-method (pin! self path proof)
     ;; Merge a prepared pinned proof object into the permanent chain.
-    ;;   Args:
-    ;;     response (list): serialized object returned by `pin~`.
-    ;;   Returns:
-    ;;     boolean: #t after pinning.
+    ;; A response is anchored against the matching retained local history root,
+    ;; so a concurrent later step does not invalidate an already resolved proof.
     (set! path ((self '~path-normalize) path #f #f))
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (perm (sync-eval ((self '~field!) 'perm) #f))
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (window ((self '~config-get) '(public window)))
-           (current (- ((perm 'size)) 1))
-           (target ((perm 'index) (car path))))
-      (if (and window (< target (- current window))) #f
-          (let ((head-node (if response ((standard 'deserialize) response)
+           (current (- ((self 'size)) 1))
+           (target ((self '~child) ((self '~field!) 'perm) 'index (car path))))
+      (if (and window (<= target (- current window))) #f
+          (let ((head-node (if proof
+                               (let* ((response-node ((standard 'deserialize) proof))
+                                      (anchor-index
+                                       (let loop ((index current))
+                                         (cond ((< index 0) #f)
+                                               ((equal? (sync-digest response-node)
+                                                        (sync-digest
+                                                         ((self '~child) ((self '~field!) 'perm) 'previous index)))
+                                                index)
+                                               (else (loop (- index 1)))))))
+                                 (if (not anchor-index)
+                                     (error 'integrity-error
+                                            "Pinned proof is not contained in local history")
+                                     ((self 'read) anchor-index response-node)))
                                (let* ((head ((self '~head) path))
                                       (node ((standard 'deep-get) head path)))
-                                 (if (or (equal? node '(nothing)) (equal? node '(unknown))) #f
-                                     (let ((proof-path (if (and (eq? ((self '~object-type) node) 'document)
-                                                                (not ((self '~bridge-chain-value-path?) path)))
-                                                           (append path '(value)) path)))
-                                       ((standard 'deep-slice!) head proof-path)))))))
+                                 (if (or (equal? node '(nothing))
+                                         (equal? node '(unknown)))
+                                     #f
+                                     ((standard 'deep-slice!) head path))))))
             (if (not head-node) #f
-                (let* ((head-obj (sync-eval head-node #f))
-                       (head-index ((head-obj 'index) (car path))))
-                  ((self '~field!) 'perm
-                   ((standard 'deep-merge!) ((head-obj 'get) (car path)) ((self '~field!) 'perm) `(,head-index)))))))))
+                (let* ((head-index ((self '~child) head-node 'index (car path)))
+                       (pinned
+                        ((standard 'deep-merge!)
+                         ((self '~child) head-node 'get (car path))
+                         ((self '~field!) 'perm) `(,head-index)))
+                       (temp ((self '~field!) 'temp))
+                       (temp-value ((standard 'deep-get) temp path))
+                       ;; A selected nested history entry can be absent from the
+                       ;; temporary origin head even while that origin index is recent.
+                       (historical-bridge-index?
+                        (let loop ((segments (cddr path)))
+                          (and (pair? segments)
+                               (or (and (integer? (car segments))
+                                        (>= (car segments) 0))
+                                   (loop (cdr segments)))))))
+                  ((self '~field!) 'perm pinned)
+                  (if (and historical-bridge-index?
+                           (equal? temp-value '(unknown))
+                           (equal? (sync-digest pinned) (sync-digest temp)))
+                      ((self '~field!) 'temp
+                       ((standard 'deep-merge!) pinned temp)))
+                  #t))))))
 
   (define-method (unpin! self path)
     ;; Remove a path from the permanent chain.
-    ;;   Args:
-    ;;     path (list): path segments.
-    ;;   Returns:
-    ;;     boolean: #t after unpinning.
     (set! path ((self '~path-normalize) path #f #f))
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (perm ((self '~field!) 'perm)))
       ((self '~field!) 'perm ((standard 'deep-prune!) perm path))))
 
-  (define-method (synchronize self index)
-    ;; Serialize bridge-visible chain digest at index for sync.
-    ;;   Args:
-    ;;     index (integer): index to access.
-    ;;   Returns:
-    ;;     list: serialization list.
-    (let ((standard (sync-eval ((self '~field!) 'standard) #f))
-          (perm (sync-eval ((self '~field!) 'perm) #f)))
-      ((standard 'serialize) (perm)
+  (define-method (~signed-head self (known-index -1) (known-through -1))
+    ;; Serialize the latest signed head and receiver-possible historical digests.
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
+           (perm ((self '~field!) 'perm))
+           (temp ((self '~field!) 'temp))
+           (rotation-indexes
+            (if (< known-index 0) '()
+                (let loop ((indexes
+                            ((self '~config-get)
+                             '(private journal rotation-indexes)))
+                           (selected '()))
+                  (cond ((null? indexes) (reverse selected))
+                        ((> (car indexes) known-index)
+                         (loop (cdr indexes) (cons (car indexes) selected)))
+                        (else (loop (cdr indexes) selected))))))
+           (head (if (equal? (sync-digest perm) (sync-digest temp))
+                     ((standard 'deep-merge!) perm temp)
+                     perm)))
+      ((standard 'serialize) head
        `(lambda (node)
-          (let ((chain (sync-eval node #f)))
+          (let ((chain (sync-eval node)))
             (if (> ((chain 'size)) 0)
                 (let* ((node ((chain 'get) -1))
-                       (tree (sync-eval node #f)))
+                       (tree (sync-eval node)))
                   ((tree 'get) '(*crypto* public-key))
                   ((tree 'get) '(*crypto* signature))
-                  ((chain 'digest) ,index))))))))
+                  ((tree 'get) '(*crypto* journal identity id))
+                  ((tree 'get) '(*crypto* journal identity nonce))
+                  ((tree 'get) '(*crypto* journal latest-rotation-index))
+                  ((tree 'get) '(*crypto* journal public-key))
+                  ((tree 'get) '(*crypto* journal signature))
+                  ((tree 'get) '(*crypto* interface public-key))
+                  ((tree 'get) '(*crypto* interface endpoint))
+                  ((tree 'get) '(*crypto* journal name))
+                  ,@(map
+                     (lambda (rotation-index)
+                       `(let* ((rotation-node ((chain 'get) ,rotation-index))
+                               (rotation-tree (sync-eval rotation-node)))
+                          ((rotation-tree 'get) '(*crypto* journal rotation))))
+                     rotation-indexes)
+                  ((chain 'digest))
+                  ,(if (>= known-index 0)
+                       `(let loop ((index ,known-index))
+                          (if ,(if (>= known-through known-index)
+                                   `(<= index ,known-through)
+                                   `(< index ((chain 'size))))
+                              (begin
+                                ((chain 'digest) index)
+                                (loop (+ index 1)))
+                              #t))
+                       #t))))))))
 
-  (define-method (trace self index path head (meta? #f))
+  (define-method (~trace self index path head)
     ;; Trace a remote path against a serialized chain at index.
-    ;;   Args:
-    ;;     index (integer): index to access.
-    ;;     path (list): path segments.
-    ;;   Returns:
-    ;;     list: serialization list of the traced object.
     (set! path ((self '~path-normalize) path #f #f))
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (head (if head head ((self '~head) path index)))
-           (node ((standard 'deep-get) head path))
-           (trace-path (if (and (eq? ((self '~object-type) node) 'document)
-                                (not ((self '~bridge-chain-value-path?) path)))
-                           (append path (list ((self '~document-field) meta?))) path)))
+           (last (and (pair? path) (car (reverse path))))
+           (boundary? (or (null? path)
+                          (and (pair? last) (= (length last) 3)
+                               (eq? (car last) '*bridge*)
+                               (eq? (caddr last) 'chain)))))
       ((standard 'serialize) head
        `(lambda (node)
           (letrec ((deep-get (lambda (node path)
-                               (if (null? path) node
+                               (if (or (null? path)
+                                       (equal? node '(nothing))
+                                       (equal? node '(unknown))) node
                                    (let ((child (((sync-eval node) 'get) (car path))))
                                      (if (not (sync-node? child)) child
                                          (deep-get child (cdr path))))))))
-            (deep-get node ',trace-path))))))
-  
-  (define-method (synchronize! self name index response info interface (local-policy '()))
-    ;; Receive a pushed bridge synchronization payload into staged bridge state.
-    ;;   Args:
-    ;;     name (symbol): configured or proposed bridge peer name.
-    ;;     index (integer): subscriber's last synchronized index for this peer.
-    ;;     response (list): pushed synchronization payload.
-    ;;     info (list): optional publisher info for optimistic first-push bootstrap.
-    ;;     interface (string): optional publisher interface for optimistic bootstrap.
-    ;;     local-policy (alist): optional local policy override for optimistic bootstrap.
-    ;;   Returns:
-    ;;     list: acknowledgement metadata.
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
+            (let ((result (deep-get node ',path)))
+              ,(if boundary?
+                   '(begin (sync-car result) result)
+                   'result)))))))
+
+  (define-method (~accept-peer-head! self name response info interface remote-name
+                                      known-index verified)
+    ;; Structurally apply a Federation-authenticated reciprocal peer head.
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (latest ((standard 'deserialize) response))
-           (latest-obj (sync-eval latest #f))
-           (pushed-index (if (> ((latest-obj 'size)) 0) (- ((latest-obj 'size)) 1) -1))
            (existing ((self '~config-get) `(private bridge ,name)))
-           (public-key (if (null? existing) (and info (cadr (assoc 'public-key info)))
-                           ((self '~config-get) `(private bridge ,name public-key)))))
-      (if (not public-key)
-          (error 'bridge-name-error "Unknown pushed bridge name and no publisher info supplied: ~S" name))
-      ((self '~signature-verify) latest public-key)
+           (latest-size ((self '~child) latest 'size)))
+      (if (= latest-size 0)
+          (error 'bridge-sync-error
+                 "A reciprocal bridge requires a signed peer head: ~S" name))
       (if (null? existing)
-          (begin
-            (if (not ((self 'bridge!) name
-                      `((interface ,(if interface interface ""))
-                        (policy ,(if (null? local-policy) ((self '~config-get) '(public bridge-policy)) local-policy))
-                        (role #f)
-                        (remote-name ,name))
-                      info))
-                (error 'bridge-mode-error "Local policy does not allow pushed publication: ~S" name)))
-          (if (and info (not (equal? public-key (cadr (assoc 'public-key info)))))
-              (error 'bridge-name-error "Pushed bridge name is already bound to another public key: ~S" name)))
-      (let ((mode ((self '~config-get) `(private bridge ,name policy mode)))
-            (current-index ((self '~config-get) `(private bridge ,name last-index))))
-        (if (not (eq? mode 'push))
-            (error 'bridge-mode-error "Bridge is not negotiated for push: ~S mode=~S" name mode))
-        (if (and (integer? current-index) (<= pushed-index current-index))
-            (error 'bridge-sync-error "Pushed bridge payload is not newer for peer: ~S pushed=~S current=~S" name pushed-index current-index))
-        (let ((applied ((self 'bridge-synchronize!) name index response)))
-          (if (not applied)
-              (error 'bridge-sync-error "Pushed bridge payload is stale or invalid for peer: ~S" name)
-              (let* ((accepted-index ((self '~config-get) `(private bridge ,name last-index)))
-                     (stage (sync-eval ((self '~field!) 'stage) #f)))
-                ((stage 'set!) '(*transition* operation)
-                 `((function synchronize!) (path (*bridge* ,name)) (index ,index) (accepted-index ,accepted-index)))
-                ((self '~field!) 'stage (stage))
-                `((ok? #t)
-                  (mode push)
-                  (accepted-index ,accepted-index))))))))
+          ((self '~store-peer!) name verified))
+      ((self '~store-peer-response!)
+       name response interface remote-name verified)
+      `((ok? #t)
+        (accepted-index ,((self '~config-get) `(private bridge ,name last-index)))
+        (head-index ,(- ((self 'size)) 1))
+        (response ,((self '~signed-head) known-index))
+        (info ,((self 'descriptor) -1))
+        (interface ,((self '~config-get) '(public interface endpoint))))))
 
-  (define-method (bridge-synchronize! self name index response (direction 'pull) local-interface)
-    ;; Prepare or apply bridge synchronization.
-    ;;   Args:
-    ;;     name (symbol): bridge/subscriber name.
-    ;;     index (integer): request index when applying response.
-    ;;     response (list): optional payload returned by `synchronize` or ack returned by `synchronize!`.
-    ;;     direction (symbol): `pull` or `push`.
-    ;;     local-interface (string): this journal's externally reachable interface for push requests.
-    ;;   Returns:
-    ;;     alist request when response is omitted, otherwise local apply result.
-    (if (not response)
-        (if (eq? direction 'push)
-            (let* ((last-ack ((self '~config-get) `(private subscriber ,name last-ack-index)))
-                   (index (if (integer? last-ack) last-ack -1)))
-              `((interface ,((self '~config-get) `(private subscriber ,name interface)))
-                (index ,index)
-                (query ((function synchronize!)
-                        (arguments ((name ,((self '~config-get) `(private subscriber ,name remote-name)))
-                                    (index ,index)
-                                    (response ,((self 'synchronize) -1))
-                                    (info ,((self 'info)))
-                                    (interface ,local-interface)))))))
-            (let ((index -1))
-              `((interface ,((self '~config-get) `(private bridge ,name interface)))
-                (index ,index)
-                (query ((function synchronize) (arguments ((index ,index))))))))
-        (if (and (list? response) (not (null? response)) (eq? (car response) 'error)) #f
-            (if (eq? direction 'push)
-                (let ((accepted (assoc 'accepted-index response)))
-                  (if accepted ((self 'update-config!) `(private subscriber ,name last-ack-index) (cadr accepted)) #f))
-                (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-                       (perm (sync-eval ((self '~field!) 'perm) #f))
-                       (stage (sync-eval ((self '~field!) 'stage) #f))
-                       (stage-set! (lambda (public-path storage-path value)
-                                     ((stage 'copy!) '(*transition*) '(*transition* previous))
-                                     ((stage 'set!) '(*transition* operation) `((path ,public-path) (value ,value)))
-                                     ((stage 'set!) storage-path value))))
-                  (if (eq? ((self '~config-get) `(private bridge ,name)) '()) #f
-                      (let* ((init (> ((perm 'size)) 0))
-                             (value (if init ((stage 'get) `(*bridge* ,name chain)) #f))
-                             (last (if (sync-node? value) (sync-eval value #f) #f)))
-                        (if (and last (> index 0) (< index (- ((last 'size)) 1))) #f
-                            (let* ((latest ((standard 'deserialize) response))
-                                   (latest-obj (sync-eval latest #f))
-                                   (interface ((self '~config-get) `(private bridge ,name interface)))
-                                   (public-key ((self '~config-get) `(private bridge ,name public-key)))
-                                   (valid? (if (< index 0) #t
-                                               (begin ((self '~signature-verify) latest public-key)
-                                                      (if (and last (> ((last 'size)) 0))
-                                                          (equal? ((last 'digest)) ((latest-obj 'digest) index)) #t))))
-                                   (stored-chain (if (> ((latest-obj 'size)) 0)
-                                                     ((standard 'deep-slice!) latest '(-1 ()))
-                                                     latest))
-                                   (stored-index (let ((chain (sync-eval stored-chain #f)))
-                                                   (if (> ((chain 'size)) 0) (- ((chain 'size)) 1) -1)))
-                                   (info `((valid? ,valid?)
-                                           (index ,stored-index)
-                                           (interface ,interface)
-                                           (public-key ,public-key))))
-                              ((self '~config-set!) `(private bridge ,name last-index) stored-index)
-                              (stage-set! `(*bridge* ,name) `(*bridge* ,name info) info)
-                              (stage-set! `(*bridge* ,name chain) `(*bridge* ,name chain) stored-chain)
-                              ((self '~field!) 'stage (stage)))))))))))
+  (define-method (~store-peer-response! self name response interface remote-name verified)
+    ;; Structurally validate and stage Federation-authenticated peer evidence.
+    (if (and (list? response) (pair? response) (eq? (car response) 'error)) #f
+        (let* ((standard (sync-eval ((self '~field!) 'standard)))
+               (stage ((self '~field!) 'stage))
+               (latest ((standard 'deserialize) response))
+               (identity (cadr (assoc 'identity verified)))
+               (public-key (cadr (assoc 'public-key verified)))
+               (value ((self '~child) stage 'get `(*bridge* ,name chain)))
+               (latest-size ((self '~child) latest 'size))
+               (last-size (if (sync-node? value) ((self '~child) value 'size) 0))
+               (latest-index (if (> latest-size 0) (- latest-size 1) -1))
+               (last-index (if (> last-size 0) (- last-size 1) -1)))
+          (if (not (and (list? verified)
+                        (assoc 'identity verified)
+                        (byte-vector? (cadr (assoc 'identity-id verified)))
+                        (byte-vector? public-key)
+                        (= (cadr (assoc 'index verified)) latest-index)))
+              (error 'bridge-sync-error
+                     "Malformed authenticated peer evidence: ~S" name))
+          (if (null? ((self '~config-get) `(private bridge ,name)))
+              (error 'bridge-name-error "Unknown reciprocal bridge: ~S" name))
+          (if (= latest-size 0)
+              (error 'bridge-sync-error "A reciprocal bridge requires a signed peer head: ~S" name))
+          ((self '~config-set!) `(private bridge ,name public-key) public-key)
+          (if (< latest-index last-index)
+              (error 'bridge-sync-error "Peer head is older than stored bridge head: ~S" name))
+          (if (and (>= last-index 0)
+                   (not (equal?
+                         ((self '~child) value 'digest)
+                         ((self '~child) latest 'digest last-index))))
+              (error 'bridge-sync-error "Peer head does not continue stored bridge head: ~S" name))
+          (if (= latest-index last-index) #t
+              (let* ((stored-chain (if (> latest-size 0)
+                                       ((standard 'deep-slice!) latest '(-1 ())) latest))
+                     (info `((valid? #t)
+                             (index ,latest-index)
+                             (interface ,interface)
+                             (identity ,identity)
+                             (public-key ,public-key)
+                             (remote-name ,remote-name))))
+                (set! stage
+                      (sync-let ((stage stage) (name name)
+                                 (latest-index latest-index) (info info)
+                                 (stored-chain stored-chain))
+                        (let ((stage (sync-eval stage)))
+                          ((stage 'copy!) '(*transition*) '(*transition* previous))
+                          ((stage 'set!) '(*transition* operation)
+                           `((function synchronize!)
+                             (path (*bridge* ,name))
+                             (accepted-index ,latest-index)))
+                          ((stage 'set!) `(*bridge* ,name info) info)
+                          ((stage 'set!) `(*bridge* ,name chain) stored-chain)
+                          (stage))))
+                ((self '~config-set!) `(private bridge ,name last-index) latest-index)
+                ((self '~field!) 'stage stage))))))
 
-  (define-method (step! self unix-time public-key secret-key)
+  (define-method (~step! self unix-time public-key secret-key)
     ;; Commit staged changes to permanent chain and update temp window.
-    ;;   Args:
-    ;;     unix-time (integer): step time as unix epoch seconds.
-    ;;     public-key (byte-vector): public verification key derived for this step.
-    ;;     secret-key (byte-vector): private signing key derived for this step.
-    ;;   Returns:
-    ;;     integer: new chain size.
     (let* ((window ((self '~config-get) '(public window)))
-           (standard (sync-eval ((self '~field!) 'standard) #f))
-           (stage (sync-eval ((self '~field!) 'stage) #f))
-           (perm (sync-eval ((self '~field!) 'perm) #f))
-           (temp (sync-eval ((self '~field!) 'temp) #f))
-           (curr-digest (sync-digest
-                         ((standard 'deep-call!) (stage) '()
-                          '(lambda (obj)
-                             ((obj 'set!) '(*transition*) '(nothing))))))
-           (prev-digest (if (= ((perm 'size)) 0) (sync-digest (sync-null))
-                            (sync-digest
-                             ((standard 'deep-call!) ((perm 'get) -1) '()
-                              '(lambda (obj)
-                                 ((obj 'set!) '(*transition*) '(nothing))
-                                 ((obj 'set!) '(*crypto*) '(nothing))))))))
-      (if (not (equal? curr-digest prev-digest))
+           (standard (sync-eval ((self '~field!) 'standard)))
+           (stage ((self '~field!) 'stage))
+           (perm ((self '~field!) 'perm))
+           (temp ((self '~field!) 'temp))
+           (perm-size ((self '~child) perm 'size))
+           (identity ((self '~config-get) '(public identity)))
+           (pending-rotation
+            ((self '~config-get) '(private journal pending-rotation)))
+           (rotation-indexes
+            ((self '~config-get) '(private journal rotation-indexes)))
+           (configured-key ((self '~config-get) '(public journal public-key)))
+           (key-change? (not (equal? configured-key public-key)))
+           (curr-digest
+            (sync-digest
+             ((standard 'deep-call!) stage '()
+              '(lambda (obj)
+                 ((obj 'set!) '(*transition*) '(nothing))))))
+           (prev-digest
+            (if (= perm-size 0) (sync-digest (sync-null))
+                (sync-digest
+                 ((standard 'deep-call!)
+                  ((self '~child) perm 'get -1)
+                  '()
+                  '(lambda (obj)
+                     ((obj 'set!) '(*transition*) '(nothing))
+                     ((obj 'set!) '(*crypto*) '(nothing))))))))
+      (if key-change?
+          (let ((expected-previous-index
+                 (if (null? rotation-indexes) -1
+                     (car (reverse rotation-indexes)))))
+            (if (or (null? pending-rotation)
+                    (not (= (cadr (assoc 'index pending-rotation))
+                            perm-size))
+                    (not (= (cadr (assoc 'previous-index pending-rotation))
+                            expected-previous-index))
+                    (not (equal? (cadr (assoc 'public-key pending-rotation))
+                                 public-key)))
+                (error 'key-rotation-error
+                       "Root secret is not authorized by a pending key transition"))
+            ((self '~rotation-verify) identity pending-rotation configured-key))
+          (if (not (null? pending-rotation))
+              (error 'key-rotation-error
+                     "Pending journal signing key does not match the root secret")))
+      (if (or key-change? (not (equal? curr-digest prev-digest)))
           (let ((utc-time (system-time-utc unix-time)))
-            ((stage 'copy!) '(*transition*) '(*transition* previous))
-            ((stage 'set!) '(*transition* operation) `((path (*state* *time*)) (value ,utc-time)))
-            ((stage 'set!) '(*state* *time*) utc-time)
-            ((perm 'push!) (stage))
-            ((stage 'set!) '(*transition*) '(nothing))
+            (set! stage
+                  ((standard 'deep-call!) stage '()
+                   `(lambda (tree)
+                      ((tree 'copy!) '(*transition*) '(*transition* previous))
+                      ((tree 'set!) '(*transition* operation)
+                       '((path (*state* *time*)) (value ,utc-time)))
+                      ((tree 'set!) '(*state* *time*) ,utc-time))))
+            (set! perm
+                  (sync-let ((perm perm) (stage stage))
+                    (let ((perm (sync-eval perm)))
+                      ((perm 'push!) stage)
+                      (perm))))
+            (set! stage
+                  ((standard 'deep-call!) stage '()
+                   '(lambda (tree) ((tree 'set!) '(*transition*) '(nothing)))))
+            (set! perm
+                  ((self '~signature-sign!)
+                   perm public-key secret-key pending-rotation))
             ((self '~config-set!) '(public public-key) public-key)
-            (set! perm (sync-eval ((self '~signature-sign!) (perm) public-key secret-key) #f))
-            ((temp 'push!) ((perm 'get) -1))
-            (let ((time-node ((standard 'deep-slice!) (temp) '(-1 (*state* *time*)))))
-              (if (and window (> ((temp 'size)) window)) ((temp 'prune!) (- (+ window 1))))
-              ((self '~field!) 'stage (stage))
+            ((self '~config-set!) '(public journal public-key) public-key)
+            (if key-change?
+                (begin
+                  ((self '~config-set!) '(private journal rotation-indexes)
+                   (append rotation-indexes
+                           (list (cadr (assoc 'index pending-rotation)))))
+                  ((self '~config-set!) '(public journal latest-rotation-index)
+                   (cadr (assoc 'index pending-rotation)))
+                  ((self '~config-set!) '(private journal pending-rotation) '())))
+            (let ((latest ((self '~child) perm 'get -1)))
+              (set! temp
+                    (sync-let ((temp temp) (latest latest))
+                      (let ((temp (sync-eval temp)))
+                        ((temp 'push!) latest)
+                        (temp)))))
+            (let ((time-node ((standard 'deep-slice!) temp '(-1 (*state* *time*)))))
+              (if (and window (> ((self '~child) temp 'size) window))
+                  (let ((prune-index (- (+ window 1))))
+                    (set! temp
+                          ((standard 'deep-call!) temp '()
+                           `(lambda (chain) ((chain 'prune!) ,prune-index))))))
+              ((self '~field!) 'stage stage)
               ((self '~field!) 'perm
-               ((standard 'deep-merge!) time-node ((standard 'deep-prune!) (perm) '(-1 (*state*)))))
-              ((self '~field!) 'temp (temp)))))
-      ((perm 'size))))
+               ((standard 'deep-merge!) time-node
+                ((standard 'deep-prune!) perm '(-1 (*state*)))))
+              ((self '~field!) 'temp temp))))
+      ((self '~child) perm 'size)))
 
-  (define-method (update-config! self path value)
-    ;; Update a config entry in place.
-    ;;   Args:
-    ;;     path (list): config path to update.
-    ;;     value (any): replacement value.
-    ;;   Returns:
-    ;;     boolean: #t after updating config.
+  (define-method (~update-config! self path value)
+    ;; Update a config entry in place. Shrinking the public retention window
+    ;; destructively prunes newly excluded temporary history.
     (if (equal? path '(public window))
-        (let* ((temp (sync-eval ((self '~field!) 'temp) #f))
+        (let* ((standard (sync-eval ((self '~field!) 'standard)))
+               (temp ((self '~field!) 'temp))
                (old-window ((self '~config-get) '(public window)))
-               (size ((temp 'size))))
+               (size ((self '~child) temp 'size)))
           (if (and (integer? value) (> size value))
-              (let loop ((i (if (and (integer? old-window) (< value old-window))
-                                (max 0 (- size old-window))
-                                (+ size 1))))
+              (let loop ((i (cond ((not (integer? old-window)) 0)
+                                   ((< value old-window)
+                                    (max 0 (- size old-window)))
+                                   (else (+ size 1)))))
                 (if (> i (- size value 1)) #t
-                    (begin ((temp 'prune!) i)
-                           (loop (+ i 1))))))
-          ((self '~field!) 'temp (temp))))
+                    (begin
+                      (set! temp
+                            ((standard 'deep-call!) temp '()
+                             `(lambda (chain) ((chain 'prune!) ,i))))
+                      (loop (+ i 1))))))
+          ((self '~field!) 'temp temp)))
     ((self '~config-set!) path value))
 
-  (define-method (update-code! self class (update '(lambda (obj) obj)))
-    ;; Update one surface-level code object in place.
-    ;;   Args:
-    ;;     class (symbol): update target (`standard`, `tree`, `chain`, or `document`).
-    ;;     update (expr): quoted function of form '(lambda (obj) ... obj)
-    ;;   Returns:
-    ;;     boolean: #t after updating code.
-    (let ((update-func (eval update)))
-      (case class
-        ((standard) ((self '~field!) 'standard (update-func ((self '~field!) 'standard))))
-        ((tree) ((self '~field!) 'stage (update-func ((self '~field!) 'stage))))
-        ((chain) ((self '~field!) 'perm (update-func ((self '~field!) 'perm)))
-         ((self '~field!) 'temp (update-func ((self '~field!) 'temp))))
-        ((document) ((self '~field!) 'document (update-func ((self '~field!) 'document))))
-        (else (error 'argument-error "Unrecognized class update candidate: ~S" class)))))
+  ;; Public data/history protocol used by Interface and Federation.
 
-  (define-method (~document-field self meta?)
-    ;; Select the internal document field for a public read option.
-    ;;   Args:
-    ;;     meta? (boolean): whether metadata was requested.
-    ;;   Returns:
-    ;;     symbol: `meta` when metadata requested, otherwise `value`.
-    (if meta? 'meta 'value))
+  (define-method (resolve self path (pinned? #f) (proof? #f)
+                          (head #f) (ancestor? #f))
+    ((self '~resolve) path pinned? proof?
+     (and head ((self '~anchor) head)) ancestor?))
 
-  (define-method (~document-new self value meta)
-    ;; Build a new document object node.
-    ;;   Args:
-    ;;     value: document content.
-    ;;     meta (alist): initial metadata dictionary or patch.
-    ;;   Returns:
-    ;;     sync node: document object node.
-    (let ((document (sync-eval ((self '~field!) 'document) #f)))
-      ((document '*init*) value (if (equal? meta '(nothing)) '() meta))
-      (document)))
+  (define-method (trace self path (head #f))
+    (if (not head)
+        ((self '~trace)
+         (if (and (pair? path) (integer? (car path))) (car path) -1)
+         (if (and (pair? path) (integer? (car path))) (cdr path) path)
+         #f)
+        (let* ((standard (sync-eval ((self '~field!) 'standard)))
+               (normalized ((self '~path-normalize) path #f #f)))
+          ((standard 'serialize)
+           ((standard 'deep-slice!) head normalized)))))
 
-  (define-method (~object-type self node)
-    ;; Return a standard object's declared type when available.
-    ;;   Args:
-    ;;     node: candidate object node.
-    ;;   Returns:
-    ;;     symbol/#f: object type, or #f when unavailable.
-    (if (not (and (sync-node? node) (sync-pair? node) (byte-vector? (sync-car node)))) #f
-        (let ((object (sync-eval node #f)))
-          (if (memq '*type* (object '*api*)) ((object '*type*)) #f))))
+  (define-method (pinned? self path)
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
+           (normalized ((self '~path-normalize) path #f #f)))
+      (not (equal? ((standard 'deep-get)
+                    ((self '~field!) 'perm) normalized)
+                   '(unknown)))))
 
-  (define-method (~bridge-chain-value-path? self path)
-    ;; Return whether a public path points at bridge chain storage rather than a document.
-    ;;   Args:
-    ;;     path (list): stage or indexed path.
-    ;;   Returns:
-    ;;     boolean: #t for bridge chain storage paths.
-    (let ((segment (cond ((null? path) #f)
-                         ((and (= (length path) 1) (pair? (car path))) (car path))
-                         ((and (= (length path) 2) (integer? (car path)) (pair? (cadr path))) (cadr path))
-                         (else #f))))
-      (and segment
-           (= (length segment) 3)
-           (eq? (car segment) '*bridge*)
-           (eq? (caddr segment) 'chain))))
+  (define-method (signed-head self known-index)
+    (cond ((integer? known-index) ((self '~signed-head) known-index -1))
+          ((and (list? known-index) (assoc 'index known-index))
+           ((self '~signed-head) (cadr (assoc 'index known-index))
+            (if (assoc 'through known-index)
+                (cadr (assoc 'through known-index)) -1)))
+          (else (error 'index-error "Invalid signed-head cursor"))))
 
-  (define-method (~document-decode self value expression?)
-    ;; Apply the public document read codec.
-    ;;   Args:
-    ;;     value: byte-vector payload or sentinel.
-    ;;     expression? (boolean): if #t, decode bytes as an expression.
-    ;;   Returns:
-    ;;     any: byte-vector, decoded expression, or sentinel.
-    (cond ((or (equal? value '(unknown)) (not expression?)) value)
-          ((byte-vector? value) (byte-vector->expression value))
-          (else (error 'value-error "Document payload cannot be decoded as an expression: ~S" value))))
+  (define-method (peer-head self alias index)
+    (if (and (symbol? alias) (list? index) (assoc 'checkpoint index))
+        ((self '~peer-checkpoint) alias)
+        (let* ((path (if (list? alias) alias `(*bridge* ,alias)))
+               (local-index
+                (if (and (list? index) (assoc 'local index))
+                    (cadr (assoc 'local index)) index))
+               (remote-index
+                (if (and (list? index) (assoc 'remote index))
+                    (cadr (assoc 'remote index)) -1)))
+          ((self '~peer-head) path local-index remote-index))))
 
-  (define-method (~document-encode self value expression?)
-    ;; Apply the public document write codec.
-    ;;   Args:
-    ;;     value: byte-vector payload, expression payload, or `(nothing)`.
-    ;;     expression? (boolean): if #t, encode value as an expression.
-    ;;   Returns:
-    ;;     byte-vector or `(nothing)`.
-    (cond ((equal? value '(nothing)) value)
-          (expression? (expression->byte-vector value))
-          ((byte-vector? value) value)
-          (else (error 'value-error "Document value must be a byte-vector unless expression? is #t: ~S" value))))
+  (define-method (~peer-checkpoint self alias)
+    ;; Return inert accepted peer evidence and an opaque apply precondition.
+    (let* ((active ((self '~config-get) `(private bridge ,alias)))
+           (retired ((self '~config-get) `(private bridge-retired ,alias)))
+           (binding ((self '~config-get) `(private bridge-identity ,alias)))
+           (preapproval
+            ((self '~config-get) `(private bridge-preapproval ,alias)))
+           (selected (if (null? active) retired active))
+           (get (lambda* (key (default '()))
+                  (let ((entry (and (list? selected) (assoc key selected))))
+                    (if entry (cadr entry) default))))
+           (status (cond ((not (null? active)) 'active)
+                         ((not (null? retired)) 'retired) (else 'absent)))
+           (head ((self '~child) ((self '~field!) 'stage)
+                  'get `(*bridge* ,alias chain)))
+           (head-digest (if (sync-node? head) (sync-digest head) '()))
+           (body
+            `((status ,status)
+              (identity ,(get 'identity))
+              (identity-id ,binding)
+              (public-key ,(get 'public-key))
+              (accepted-index ,(get 'last-index -1))
+              (head-digest ,head-digest)
+              (acceptance ,((self '~config-get) '(public bridge-accept)))
+              (preapproval ,preapproval))))
+      (append body
+              `((checkpoint
+                 ,(sync-hash (expression->byte-vector body)))))))
 
-  (define-method (~document-read self node meta? expression?)
-    ;; Decode a document node for public reads.
-    ;;   Args:
-    ;;     node: tree value or sentinel.
-    ;;     meta? (boolean): whether metadata was requested.
-    ;;     expression? (boolean): if #t, decode payload bytes as an expression.
-    ;;   Returns:
-    ;;     any: document value, metadata envelope, or original non-document value.
-    (cond ((eq? ((self '~object-type) node) 'document)
-           (let* ((document (sync-eval node #f))
-                  (value ((self '~document-decode) ((document 'get) 'value) expression?)))
-             (if meta?
-                 `((content ,value)
-                   (meta ,((document 'get) 'meta)))
-                 value)))
-          ((and (list? node) (not (null? node)) (eq? (car node) 'directory))
-           `(directory ,(map (lambda (entry)
-                               `(,(car entry) ,(if (eq? (cadr entry) 'object) 'value (cadr entry))))
-                             (cadr node))
-                       ,(caddr node)))
-          (else node)))
+  (define-method (merge-head! self alias supplied-head)
+    (let* ((path (cond ((and (list? alias) (assoc 'path alias))
+                        (cadr (assoc 'path alias)))
+                       ((list? alias) alias)
+                       (else `(*bridge* ,alias))))
+           (head (if (and (list? supplied-head) (assoc 'head supplied-head))
+                     (cadr (assoc 'head supplied-head)) supplied-head))
+           (index (cond ((and (list? alias) (assoc 'index alias))
+                         (cadr (assoc 'index alias)))
+                        ((and (list? supplied-head) (assoc 'index supplied-head))
+                         (cadr (assoc 'index supplied-head)))
+                        (else -1))))
+      ((self '~merge-head) path head index)))
 
-  (define-method (~document-write self existing value meta expression?)
-    ;; Build an updated document node from an existing tree value.
-    ;;   Args:
-    ;;     existing: current tree value or sentinel.
-    ;;     value: replacement document value, expression value, or `(nothing)`.
-    ;;     meta (alist): metadata patch, `()`, or `(nothing)`.
-    ;;     expression? (boolean): if #t, encode value as an expression.
-    ;;   Returns:
-    ;;     sync node or `(nothing)`: updated document object node or delete sentinel.
-    (if (equal? value '(nothing)) '(nothing)
-        (let* ((bytes ((self '~document-encode) value expression?))
-               (type ((self '~object-type) existing))
-               (document (cond ((eq? type 'document) (sync-eval existing #f))
-                               ((equal? existing '(nothing)) (sync-eval ((self '~document-new) bytes '()) #f))
-                               ((equal? existing '(unknown)) (error 'value-error "Cannot write document over unknown state"))
-                               (else (error 'value-error "Cannot replace raw non-document state with a document: ~S" existing)))))
-          ((document 'set!) 'value bytes)
-          ((document 'set!) 'meta meta)
-          (document))))
+  (define-method (store-peer-head! self alias verified-head)
+    (if (not (and (symbol? alias) (list? verified-head)
+                  (assoc 'mode verified-head)))
+        (error 'bridge-sync-error
+               "Malformed prepared peer-head update: ~S" verified-head))
+    (if (and (assoc 'checkpoint verified-head)
+             (not (equal?
+                   (cadr (assoc 'checkpoint verified-head))
+                   (cadr (assoc 'checkpoint
+                                ((self '~peer-checkpoint) alias))))))
+        (error 'federation-conflict
+               "Peer checkpoint changed before durable apply: ~S" alias))
+    (case (cadr (assoc 'mode verified-head))
+      ((accept)
+       ((self '~accept-peer-head!)
+        alias
+        (cadr (assoc 'response verified-head))
+        (and (assoc 'info verified-head)
+             (cadr (assoc 'info verified-head)))
+        (cadr (assoc 'interface verified-head))
+        (cadr (assoc 'remote-name verified-head))
+        (if (assoc 'known-index verified-head)
+            (cadr (assoc 'known-index verified-head)) -1)
+        (cadr (assoc 'verified verified-head))))
+      ((update)
+       ((self '~store-peer-response!)
+        alias (cadr (assoc 'response verified-head))
+        (cadr (assoc 'interface verified-head))
+        (cadr (assoc 'remote-name verified-head))
+        (cadr (assoc 'verified verified-head))))
+      ((establish)
+       ((self '~store-peer!) alias (cadr (assoc 'verified verified-head)))
+       ((self '~store-peer-response!)
+        alias
+        (cadr (assoc 'response verified-head))
+        (cadr (assoc 'interface verified-head))
+        (cadr (assoc 'remote-name verified-head))
+        (cadr (assoc 'verified verified-head))))
+      (else
+       (error 'bridge-sync-error
+              "Unknown prepared peer-head update mode: ~S"
+              (cadr (assoc 'mode verified-head))))))
+
+  (define-method (step! self prepared-inputs)
+    (if (not (and (list? prepared-inputs)
+                  (assoc 'unix-time prepared-inputs)
+                  (assoc 'public-key prepared-inputs)
+                  (assoc 'secret-key prepared-inputs)))
+        (error 'argument-error "Malformed prepared Ledger step: ~S"
+               prepared-inputs))
+    (if (assoc 'rotation prepared-inputs)
+        (let ((rotation (cadr (assoc 'rotation prepared-inputs))))
+          ((self '~rotate-key!)
+           (cadr (assoc 'previous-key rotation))
+           (cadr (assoc 'public-key rotation))
+           (cadr (assoc 'signature rotation)))))
+    ((self '~step!)
+     (cadr (assoc 'unix-time prepared-inputs))
+     (cadr (assoc 'public-key prepared-inputs))
+     (cadr (assoc 'secret-key prepared-inputs))))
+
+  (define-method (update-config! self changes)
+    (if (and (equal? (cadr (assoc 'path changes)) '(public window))
+             (not (or (not (cadr (assoc 'value changes)))
+                      (and (integer? (cadr (assoc 'value changes)))
+                           (> (cadr (assoc 'value changes)) 0)))))
+        (error 'argument-error "Window must be positive"))
+    (if (not (and (list? changes) (assoc 'path changes)
+                  (assoc 'value changes)))
+        (error 'argument-error "Malformed Ledger config change: ~S" changes))
+    ((self '~update-config!)
+     (cadr (assoc 'path changes)) (cadr (assoc 'value changes))))
 
   (define-method (~field! self name value)
     ;; Resolve or set internal field by name.
-    ;;   Args:
-    ;;     name (symbol): field name.
-    ;;     value (optional procedure returning value or #f): thunk to store, or #f to read.
-    ;;   Returns:
-    ;;     any: field value when value is #f, otherwise #t after set.
     (let ((address (case name
                      ((standard) '(1 0 0 0))
                      ((config) '(1 0 0 1))
                      ((stage) '(1 0 1 0))
                      ((temp) '(1 0 1 1))
-                     ((document) '(1 1 0))
-                     ((perm) '(1 1 1))
+                     ((perm) '(1 1))
                      (else (error 'field-error "Ledger field not found: ~S" name)))))
       (if value (set! (self address) value)
           (self address))))
 
   (define-method (~path-normalize self path stage? state-only?)
     ;; Convert a flat public path into the current nested ledger representation.
-    ;;   Args:
-    ;;     path (list): flat public path segments.
-    ;;     stage? (boolean): whether this is a staged-state path.
-    ;;     state-only? (boolean): if #t, restrict to *state* paths only.
-    ;;   Returns:
-    ;;     list: internal nested path.
     (define (reject reason)
       (error 'path-error "Invalid ledger path (~A): ~S" reason path))
     (define (contains-pair? xs)
@@ -629,12 +824,24 @@
             ((eq? (car segments) '*state*) `(,index ,segments))
             ((eq? (car segments) '*transition*) `(,index ,segments))
             ((eq? (car segments) '*crypto*) `(,index ,segments))
+            ;; `*bridge*` remains the local bridge namespace and the explicit
+            ;; compatibility form. Concise paths name each bridge directly and
+            ;; optionally follow it with the selected remote index.
             ((eq? (car segments) '*bridge*)
              (cond ((null? (cdr segments)) `(,index (*bridge*)))
-                   ((null? (cddr segments)) `(,index (*bridge* ,(cadr segments) info)))
+                   ((null? (cddr segments)) `(,index (*bridge* ,(cadr segments) chain)))
                    (else (append `(,index (*bridge* ,(cadr segments) chain))
                                  (indexed-tail (cddr segments))))))
-            (else (reject "expected namespace marker"))))
+            ((symbol? (car segments))
+             (let* ((name (car segments))
+                    (rest (cdr segments))
+                    (remote-index (if (and (pair? rest) (integer? (car rest)))
+                                      (car rest) -1))
+                    (tail (if (and (pair? rest) (integer? (car rest)))
+                              (cdr rest) rest)))
+               (append `(,index (*bridge* ,name chain))
+                       (indexed-segments remote-index tail))))
+            (else (reject "expected bridge name or namespace marker"))))
     (cond ((not (list? path)) (reject "not a list"))
           ((contains-pair? path) (reject "nested public paths are not supported"))
           (stage?
@@ -644,40 +851,26 @@
                  ((and (not state-only?) (eq? (car path) '*transition*)) `(,path))
                  ((and (not state-only?) (eq? (car path) '*bridge*))
                   (cond ((null? (cdr path)) '((*bridge*)))
-                        ((null? (cddr path)) `((*bridge* ,(cadr path) info)))
+                        ((null? (cddr path)) `((*bridge* ,(cadr path) chain)))
                         (else (reject "stage bridge traversal is not supported"))))
                  (else (reject "expected namespace marker"))))
           (else (indexed-tail path))))
 
-  (define-method (~bridge-mode self publisher-policy subscriber-policy)
-    ;; Determine bridge mode from publisher publish policy and subscriber subscribe policy.
-    (let ((publish (cadr (assoc 'publish publisher-policy)))
-          (subscribe (cadr (assoc 'subscribe subscriber-policy))))
-      (cond ((or (eq? publish 'none) (eq? subscribe 'none)) 'none)
-            ((eq? publish 'push)
-             (if (memq subscribe '(push pull)) 'push
-                 (error 'bridge-mode-error "Invalid subscribe policy: ~S" subscribe)))
-            ((eq? publish 'pull)
-             (cond ((eq? subscribe 'pull) 'pull)
-                   ((eq? subscribe 'push)
-                    (error 'bridge-mode-error "Incompatible bridge policies: publisher=~S subscriber=~S" publish subscribe))
-                   (else (error 'bridge-mode-error "Invalid subscribe policy: ~S" subscribe))))
-            (else (error 'bridge-mode-error "Invalid publish policy: ~S" publish)))))
 
-  (define-method (delete-bridge! self name)
-    ;; Remove current incoming bridge config and staged exposure while preserving history.
-    ((self '~config-set!) `(private bridge ,name) '())
-    ((self '~stage-delete-bridge!) name))
-
-  (define-method (delete-subscriber! self name)
-    ;; Remove current outgoing subscriber config.
-    ((self '~config-set!) `(private subscriber ,name) '()))
-
-  (define-method (~stage-delete-bridge! self name)
-    ;; Remove staged bridge exposure while preserving history.
-    (let ((stage (sync-eval ((self '~field!) 'stage) #f)))
-      ((stage 'set!) `(*bridge* ,name) '(nothing))
-      ((self '~field!) 'stage (stage))))
+  (define-method (delete-peer-head! self alias)
+    ;; Remove active peer state while retaining permanent identity binding.
+    (let ((existing ((self '~config-get) `(private bridge ,alias))))
+      (if (not (null? existing))
+          ((self '~config-set!) `(private bridge-retired ,alias)
+           `((identity ,(cadr (assoc 'identity existing)))
+             (public-key ,(cadr (assoc 'public-key existing)))
+             (last-index ,(cadr (assoc 'last-index existing))))))
+      ((self '~config-set!) `(private bridge ,alias) '())
+      ((self '~config-set!) `(private bridge-preapproval ,alias) '())
+      ((self '~field!) 'stage
+       (((sync-eval ((self '~field!) 'standard)) 'deep-call!)
+        ((self '~field!) 'stage) '()
+        `(lambda (tree) ((tree 'set!) '(*bridge* ,alias) '(nothing)))))))
 
   (define-method (~config-get self (path '()))
     (let loop ((config (byte-vector->expression ((self '~field!) 'config))) (path path))
@@ -702,57 +895,57 @@
                     (else (cons (car config) (loop-2 (cdr config)))))))))))
 
   (define-method (~head self path (index -1))
-    ;; Fetch the appropriate local chain head node for a path/index.
-    ;;   Args:
-    ;;     path (list): path segments.
-    ;;     index (integer): chain index to use.
-    ;;   Returns:
-    ;;     sync node: chain head node.
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (perm (sync-eval ((self '~field!) 'perm) #f))
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (window ((self '~config-get) '(public window)))
-           (target ((perm 'index) (cond ((null? path) -1) ((>= (car path) 0) (car path)) (else (+ index 1 (car path))))))
-           (current (- ((perm 'size)) 1)))
-      (let ((chain (if (and window (<= target (- current window))) perm (sync-eval ((self '~field!) 'temp) #f))))
-        ((chain 'previous) index))))
+           (selected (cond ((null? path) -1) ((>= (car path) 0) (car path))
+                           (else (+ index 1 (car path)))))
+           (target ((self '~child) ((self '~field!) 'perm) 'index selected))
+           (current (- ((self 'size)) 1))
+           (perm-head ((self '~child) ((self '~field!) 'perm) 'previous index)))
+      (if (and window (<= target (- current window))) perm-head
+          (let ((temp-head ((self '~child) ((self '~field!) 'temp) 'previous index)))
+            (if (and (equal? ((standard 'deep-get) temp-head path) '(unknown))
+                     (equal? (sync-digest perm-head) (sync-digest temp-head)))
+                ((standard 'deep-merge!) perm-head temp-head) temp-head)))))
 
-  (define-method (~signature-sign! self chain public-key secret-key)
-    ;; Embed public key and signature into chain head using ephemeral step keys.
-    ;;   Args:
-    ;;     chain (sync node): chain node to sign.
-    ;;     public-key (byte-vector): public verification key.
-    ;;     secret-key (byte-vector): private signing key for this step only.
-    ;;   Returns:
-    ;;     sync node: signed chain node.
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f)))
+  (define-method (~signature-sign! self chain public-key secret-key rotation)
+    ;; Embed journal/interface public keys and journal signature into chain head using ephemeral step keys.
+    (let* ((standard (sync-eval ((self '~field!) 'standard)))
+           (identity ((self '~config-get) '(public identity)))
+           (latest-rotation-index
+            (if (null? rotation)
+                ((self '~config-get) '(public journal latest-rotation-index))
+                (cadr (assoc 'index rotation))))
+           (interface-public-key ((self '~config-get) '(public interface public-key)))
+           (interface-endpoint ((self '~config-get) '(public interface endpoint)))
+           (journal-name ((self '~config-get) '(public name))))
+      (if (not (null? interface-endpoint))
+          (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* interface endpoint)) interface-endpoint)))
+      (if (not (null? journal-name))
+          (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* journal name)) journal-name)))
       (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* public-key)) #u()))
       (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* signature)) #u()))
-      ((standard 'deep-call!) chain '(-1)
-       `(lambda (tree)
-          ((tree 'set!) '(*crypto* public-key) ,public-key)
-          ((tree 'set!) '(*crypto* signature) (crypto-sign ,secret-key ,(sync-digest chain)))))))
+      (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* journal identity id))
+                   (cadr (assoc 'id identity))))
+      (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* journal identity nonce))
+                   (cadr (assoc 'nonce identity))))
+      (set! chain
+            ((standard 'deep-set!) chain
+             '(-1 (*crypto* journal latest-rotation-index))
+             latest-rotation-index))
+      (if (not (null? rotation))
+          (set! chain
+                ((standard 'deep-set!) chain
+                 '(-1 (*crypto* journal rotation)) rotation)))
+      (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* journal public-key)) #u()))
+      (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* journal signature)) #u()))
+      (set! chain ((standard 'deep-set!) chain '(-1 (*crypto* interface public-key)) interface-public-key))
+      (let ((signature (crypto-sign secret-key (sync-digest chain))))
+        ((standard 'deep-call!) chain '(-1)
+         `(lambda (tree)
+            ((tree 'set!) '(*crypto* public-key) ,public-key)
+            ((tree 'set!) '(*crypto* signature) ,signature)
+            ((tree 'set!) '(*crypto* journal public-key) ,public-key)
+            ((tree 'set!) '(*crypto* journal signature) ,signature))))))
 
-  (define-method (~signature-verify self chain public-key)
-    ;; Verify chain head signature and optional expected public key.
-    ;;   Args:
-    ;;     chain (sync node): chain node to verify.
-    ;;     public-key (byte-vector or #f): expected public key.
-    ;;   Returns:
-    ;;     boolean: #t when signature verifies (or raises on failure).
-    (let* ((standard (sync-eval ((self '~field!) 'standard) #f))
-           (chain-copy chain))
-      (set! chain-copy ((standard 'deep-set!) chain-copy '(-1 (*crypto* public-key)) #u()))
-      (set! chain-copy ((standard 'deep-set!) chain-copy '(-1 (*crypto* signature)) #u()))
-      (let* ((included-key ((standard 'deep-call) chain '(-1)
-                            '(lambda (tree)
-                               ((tree 'get) '(*crypto* public-key)))))
-             (signature ((standard 'deep-call) chain '(-1)
-                         '(lambda (tree)
-                            ((tree 'get) '(*crypto* signature))))))
-        (cond ((or (null? signature) (null? included-key))
-               (error 'integrity-error "Chain does not include public key and signature"))
-              ((and public-key (not (equal? public-key included-key)))
-               (error 'integrity-error "Included public key does not match expected key"))
-              ((not (crypto-verify (if public-key public-key included-key) signature (sync-digest chain-copy)))
-               (error 'integrity-error "Included signature does not verify"))
-              (else #t))))))
+)

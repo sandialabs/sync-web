@@ -50,6 +50,8 @@ selfservice:
   methods:
     password:
       enabled: true
+      config:
+        min_password_length: 8
 
   flows:
     error:

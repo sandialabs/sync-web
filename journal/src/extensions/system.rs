@@ -8,7 +8,12 @@ pub fn primitive_s7_system_time_utc() -> Primitive {
     unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
         unsafe {
             let dt = if s7::s7_is_null(sc, args) {
+                if let Some(unix) = crate::scenario_unix_time(sc) {
+                    OffsetDateTime::from_unix_timestamp(unix)
+                        .expect("Scenario clock produced an invalid timestamp")
+                } else {
                 OffsetDateTime::now_utc()
+                }
             } else {
                 let arg = s7::s7_car(args);
 
@@ -81,7 +86,11 @@ pub fn primitive_s7_system_time_unix() -> Primitive {
     unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
         unsafe {
             if s7::s7_is_null(sc, args) {
-                return s7::s7_make_integer(sc, OffsetDateTime::now_utc().unix_timestamp());
+                return s7::s7_make_integer(
+                    sc,
+                    crate::scenario_unix_time(sc)
+                        .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp()),
+                );
             }
 
             let arg = s7::s7_car(args);

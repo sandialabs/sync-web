@@ -980,3 +980,75 @@
 .modal-body strong {
   color: var(--blue);
 }
+
+@media (max-width: 700px) {
+  .toolbar {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .toolbar-title {
+    display: none;
+  }
+
+  .toolbar-status {
+    min-width: 0;
+    margin-right: 0;
+  }
+
+  .status-error {
+    max-width: 120px;
+  }
+
+  .main-content {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .left-pane,
+  .right-pane {
+    width: 100% !important;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  .left-pane {
+    height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .middle-section {
+    width: 100%;
+    min-width: 0;
+    height: 520px;
+    flex: none;
+  }
+
+  .right-pane {
+    height: 220px;
+    border-left: 0;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .resize-handle {
+    display: none;
+  }
+
+  .query-tabs {
+    flex-wrap: wrap;
+    padding: 4px;
+  }
+
+  .query-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+    overflow-x: auto;
+  }
+
+  .keyboard-hint {
+    display: none;
+  }
+}

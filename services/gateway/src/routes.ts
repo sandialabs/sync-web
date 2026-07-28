@@ -213,14 +213,84 @@ const buildSchemeExpression = (
   functionName: string,
   argsExpression: string,
   authSecret?: string,
-  identityId?: string
+  identityId?: string,
+  routeTarget?: string[],
+  historyIndexes?: number[]
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    const identityPart = identityId ? `(identity ${identityId}) ` : "";
-    parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
+    if (routeTarget && routeTarget.length > 0) {
+      parts.push(
+        `(invocation ((identity ${identityId}) (route-source ()) ` +
+        `(route-target (${routeTarget.join(" ")})) ` +
+        `${historyIndexes ? `(history-indexes (${historyIndexes.join(" ")})) ` : ""}` +
+        `(credentials "${escapeLispString(authSecret)}")))`
+      );
+    } else {
+      const identityPart = identityId ? `(identity (*state* ${identityId})) ` : "";
+      parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
+    }
   }
   return `(${parts.join(" ")})`;
+};
+
+const extractFederationContext = (body: unknown): {
+  argsBody: unknown;
+  present: boolean;
+  routeTarget?: string[];
+  historyIndexes?: number[];
+} => {
+  if (!body || typeof body !== "object" || Array.isArray(body) || Buffer.isBuffer(body)) {
+    return { argsBody: body, present: false };
+  }
+  const record = body as Record<string, unknown>;
+  const context = record.$federation;
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    return { argsBody: body, present: false };
+  }
+  const federation = context as Record<string, unknown>;
+  const route = federation.route;
+  const history = federation.history;
+  if (!Array.isArray(route) || !route.every((name) => typeof name === "string")) {
+    throw new Error("$federation.route must be an array of bridge names");
+  }
+  if (history !== undefined &&
+      (!Array.isArray(history) || !history.every((index) => Number.isInteger(index)))) {
+    throw new Error("$federation.history must be an array of integer indexes");
+  }
+  const { $federation: _ignored, ...argsBody } = record;
+  return {
+    argsBody,
+    present: true,
+    routeTarget: route,
+    historyIndexes: history as number[] | undefined,
+  };
+};
+
+const validateFederationContext = (
+  functionName: string,
+  context: ReturnType<typeof extractFederationContext>,
+  root: boolean,
+): void => {
+  if (!context.present) return;
+  if (root) {
+    throw new Error("Federation context is not allowed on root operations");
+  }
+  const route = context.routeTarget ?? [];
+  if (route.length === 0) {
+    throw new Error("Federation context requires a nonempty route");
+  }
+  if (!new Set(["get", "set!", "resolve"]).has(functionName)) {
+    throw new Error(`Federation context is not allowed for ${functionName}`);
+  }
+  if (context.historyIndexes) {
+    if (functionName !== "resolve") {
+      throw new Error("Federation history is allowed only for resolve");
+    }
+    if (context.historyIndexes.length !== route.length + 1) {
+      throw new Error("Federation history must contain one index for the origin and each route hop");
+    }
+  }
 };
 
 const buildRootSchemeExpression = (
@@ -269,13 +339,17 @@ const callWithNegotiation = async (input: {
     );
   }
 
-  const rawArgs = extractJsonArguments(request.body);
+  const federation = extractFederationContext(request.body);
+  validateFederationContext(functionName, federation, root);
+  const rawArgs = extractJsonArguments(federation.argsBody);
   if (!root && functionName === "batch!") {
     const expression = buildSchemeExpression(
       functionName,
       jsonToSchemeExpression(rawArgs),
       authSecret,
-      identityId
+      identityId,
+      federation.routeTarget,
+      federation.historyIndexes
     );
     const result = await journal.callScheme({ expression, functionName });
     return typeof result === "string" ? parseSchemeResult(result) : result;
@@ -293,6 +367,8 @@ const callWithNegotiation = async (input: {
         args,
         authentication: authSecret,
         identityId,
+        ...(federation.routeTarget ? { routeTarget: federation.routeTarget } : {}),
+        ...(federation.historyIndexes ? { historyIndexes: federation.historyIndexes } : {}),
       });
 };
 
@@ -319,19 +395,24 @@ const generalAliases = {
   pin: "pin!",
   unpin: "unpin!",
   batch: "batch!",
+  "set-batch": "set-batch!",
   info: "info",
-  synchronize: "synchronize",
+  size: "size",
   "synchronize!": "synchronize!",
   resolve: "resolve",
   trace: "trace",
+  route: "route",
   bridge: "bridge!",
   "delete-bridge": "delete-bridge!",
-  "delete-subscriber": "delete-subscriber!",
   config: "config",
+  "update-config": "update-config!",
   admins: "*admins-get*",
   "set-admins": "*admins-set*",
   "set-window": "*window-set*",
   "set-secret": "*secret*",
+  authorizations: "authorizations",
+  authorize: "authorize!",
+  deauthorize: "deauthorize!",
 } as const;
 
 const rootAliases = {
@@ -343,19 +424,22 @@ const rootAliases = {
   "set-query": "*set-query*",
 } as const;
 
-const publicGeneralFunctions = new Set<string>(["synchronize", "synchronize!", "trace"]);
+const publicGeneralFunctions = new Set<string>(["synchronize!", "trace", "route"]);
 const eventedGeneralOperations = new Set<string>([
   "set",
   "pin",
   "unpin",
   "batch",
+  "set-batch",
   "bridge",
   "delete-bridge",
-  "delete-subscriber",
   "synchronize!",
+  "update-config",
   "set-admins",
   "set-window",
   "set-secret",
+  "authorize",
+  "deauthorize",
 ]);
 const eventedRootOperations = new Set<string>([
   "step",
@@ -397,30 +481,35 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls public general function `info`. Returns public node metadata.",
   },
-  synchronize: {
-    summary: "Generate synchronization payload",
-    description:
-      "Calls public general function `synchronize`. Used by bridges/services to fetch digest/proof material for anti-entropy synchronization.",
-  },
   "synchronize!": {
-    summary: "Receive pushed synchronization payload",
+    summary: "Exchange reciprocal signed heads",
     description:
-      "Calls public peer function `synchronize!`. Used by bridge publishers to push signed synchronization payloads to subscribers; journal signature verification and bridge policy checks are authoritative.",
+      "Calls public peer function `synchronize!`. Applies the initiator head and returns the acceptor head in one reciprocal exchange.",
   },
   resolve: {
     summary: "Resolve committed chain content",
     description:
-      "Calls general function `resolve`. Reads indexed/committed content with optional pinned/proof metadata.",
+      "Calls general function `resolve`. Reads indexed/committed content with optional pin/proof details.",
   },
   trace: {
     summary: "Trace remote content against a chain index",
     description:
       "Calls public general function `trace`. Used by bridges/services to fetch a serialized remote path view from a committed chain index.",
   },
-  bridge: {
-    summary: "Register or update a bridge",
+  route: {
+    summary: "Resolve a federated journal route",
     description:
-      "Calls general function `bridge!` with a bridge name and local bridge info. The local info includes the peer interface, local policy, role, and remote-name for publisher-initiated pushes.",
+      "Calls public function `route`. Resolves canonical committed endpoint/key material through reciprocal bridges.",
+  },
+  bridge: {
+    summary: "Create a reciprocal bridge",
+    description:
+      "Calls `bridge!` with the local peer alias, peer interface, and the name the peer should use for this journal.",
+  },
+  "update-config": {
+    summary: "Update ledger configuration",
+    description:
+      "Calls admin function `update-config!`. Used for bridge acceptance/preapproval and other explicit configuration updates.",
   },
   config: {
     summary: "Read full node config",
@@ -436,6 +525,18 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     summary: "Replace interface admins",
     description:
       "Calls general function `*admins-set*`. Replaces the interface admin username list wholesale.",
+  },
+  authorizations: {
+    summary: "List authorization rules",
+    description: "Calls general function `authorizations`. Returns local sharing/authorization rules for a user principal.",
+  },
+  authorize: {
+    summary: "Add authorization rule",
+    description: "Calls general function `authorize!`. Adds a local sharing/authorization rule for a user principal.",
+  },
+  deauthorize: {
+    summary: "Remove authorization rule",
+    description: "Calls general function `deauthorize!`. Removes a local sharing/authorization rule for a user principal.",
   },
   "set-window": {
     summary: "Set ledger window size",
@@ -468,7 +569,7 @@ const rootOperationDocs: Record<string, { summary: string; description: string }
   "set-secret": {
     summary: "Rotate admin/root secret",
     description:
-      "Calls root function `*set-secret*`. Changes the root credential.",
+      "Calls root function `*set-secret*`. Atomically changes the root credential and commits an identity-bound journal signing-key rotation; runtime root-secret configuration must then use the new value.",
   },
   "set-step": {
     summary: "Replace step handler",
@@ -515,16 +616,21 @@ const generalOperationExamples: Record<string, unknown> = {
   unpin:        { path: [-1, "*state*", "mykey"] },
   resolve:      { path: [-1, "*state*", "mykey"], "pinned?": true, "proof?": false, "expression?": true },
   batch:        { queries: [{ function: "get", arguments: { path: ["*state*", "mykey"] } }, { function: "config" }] },
+  "set-batch": { paths: [["*state*", "mykey"]], values: ["myvalue"], "expression?": true },
   info:         {},
-  bridge:       { name: "peer-a", "info-local": { interface: "http://peer-a/interface", policy: { publish: "push", subscribe: "pull" }, role: false, "remote-name": "my-journal" } },
+  bridge:       { name: "peer-a", interface: "http://peer-a/interface", "remote-name": "my-journal" },
+  "update-config": { path: ["public", "bridge-accept"], value: "preapproved" },
   config:       {},
   admins:       {},
-  "set-admins": { admins: ["admin", "alice"] },
+  "set-admins": { admins: [["*state*", "admin"], ["*state*", "alice"]] },
   "set-window": { value: 128 },
   "set-secret": { secret: "new-secret" },
-  synchronize:  { index: 0 },
-  "synchronize!": { name: "peer-a", index: -1, response: [] },
+  authorizations: { user: ["*state*", "alice"] },
+  authorize: { user: ["*state*", "alice"], rule: { principal: ["peer-a", "*state*", "bob"], path: ["docs"], get: true, "set!": false, resolve: true } },
+  deauthorize: { user: ["*state*", "alice"], rule: { principal: ["peer-a", "*state*", "bob"], path: ["docs"], get: true, "set!": false, resolve: true } },
+  "synchronize!": { name: "peer-a", response: [], info: {}, interface: "https://peer-a/interface", "remote-name": "local" },
   trace:        { index: 0, path: [-1, "*state*", "mykey"] },
+  route:        { "route-target": ["peer-a"] },
 };
 
 const generalSchemeExamples: Record<string, string> = {
@@ -534,16 +640,21 @@ const generalSchemeExamples: Record<string, string> = {
   unpin:        "((path (-1 *state* mykey)))",
   resolve:      "((path (-1 *state* mykey)) (pinned? #t) (proof? #f))",
   batch:        "((queries (((function get) (arguments ((path (*state* mykey)))) ((function config))))))",
+  "set-batch": "((paths ((*state* mykey))) (values (myvalue)) (expression? #t))",
   info:         "()",
-  bridge:       "((name peer-a) (info-local ((interface \"http://peer-a/interface\") (policy ((publish push) (subscribe pull))) (role #f) (remote-name my-journal))))",
+  bridge:       "((name peer-a) (interface \"http://peer-a/interface\") (remote-name my-journal))",
+  "update-config": "((path (public bridge-accept)) (value preapproved))",
   config:       "()",
   admins:       "()",
-  "set-admins": "((admins (admin alice)))",
+  "set-admins": "((admins ((*state* admin) (*state* alice))))",
   "set-window": "((value 128))",
   "set-secret": "((secret new-secret))",
-  synchronize:  "((index 0))",
-  "synchronize!": "((name peer-a) (index -1) (response ()))",
+  authorizations: "((user (*state* alice)))",
+  authorize: "((user (*state* alice)) (rule ((principal (peer-a *state* bob)) (path (docs)) (get #t) (set! #f) (resolve #t))))",
+  deauthorize: "((user (*state* alice)) (rule ((principal (peer-a *state* bob)) (path (docs)) (get #t) (set! #f) (resolve #t))))",
+  "synchronize!": "((name peer-a) (response ()) (info ()) (interface \"https://peer-a/interface\") (remote-name local))",
   trace:        "((index 0) (path (-1 *state* mykey)))",
+  route:        "((route-target (peer-a)))",
 };
 
 const rootOperationExamples: Record<string, unknown> = {
@@ -1315,7 +1426,9 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       errorMessage.includes("JSON body must use") ||
       errorMessage.includes("Gateway JSON bodies must provide") ||
       errorMessage.includes("Gateway JSON bodies should provide") ||
-      errorMessage.includes("Scheme requests must provide")
+      errorMessage.includes("Scheme requests must provide") ||
+      errorMessage.includes("Federation context") ||
+      errorMessage.includes("Federation history")
     ) {
       return reply.code(400).send({
         error: "invalid_request",

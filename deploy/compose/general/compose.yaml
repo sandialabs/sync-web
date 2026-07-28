@@ -77,7 +77,7 @@ services:
       JOURNAL_SECRET: ${SECRET:-}
       KRATOS_PUBLIC_URL: http://identity-provider:4433
       # Peer bridges should target the gateway interface proxy, not /interface directly:
-      # bridge! name=<peer> info-local.interface=http://<peer-gateway>/api/v1/journal/interface
+      # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface remote-name=<local-name>
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
@@ -129,7 +129,7 @@ services:
       - "${HTTP_PORT:-8192}:80"
       - "${HTTPS_PORT:-8193}:443"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O- https://127.0.0.1/healthz >/dev/null 2>&1 || wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 6

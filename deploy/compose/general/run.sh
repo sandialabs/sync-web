@@ -38,7 +38,7 @@ build_admins_list() {
     OLD_IFS="$IFS"
     IFS=","
     for name in ${INTERFACE_ADMINS:-}; do
-        result="$result '$name"
+        result="$result '(*state* $name)"
     done
     IFS="$OLD_IFS"
     echo "(list$result)"
@@ -51,17 +51,15 @@ run_startup() {
     chain=$( cat "$(resolve_lisp_file log-chain.scm)" )
     tree=$( cat "$(resolve_lisp_file tree.scm)" )
     ledger=$( cat "$(resolve_lisp_file ledger.scm)" )
-    document=$( cat "$(resolve_lisp_file document.scm)" )
+    federation=$( cat "$(resolve_lisp_file federation.scm)" )
+    authorization=$( cat "$(resolve_lisp_file authorization.scm)" )
     interface=$( cat "$(resolve_lisp_file interface.scm)" )
     admins=$( build_admins_list )
     origin="${ORIGIN:-http://localhost:8192}"
     interface_url="${INTERFACE:-$origin/api/v1/journal/interface}"
     journal_name="${JOURNAL_NAME:-$interface_url}"
-    bridge_publish="${BRIDGE_PUBLISH:-push}"
-    bridge_subscribe="${BRIDGE_SUBSCRIBE:-pull}"
-    bridge_policy="((publish $bridge_publish) (subscribe $bridge_subscribe))"
-    config="((clear? $clear_flag) (root-secret \"$SECRET\") (interface-secret \"$SECRET\") (admins $admins) (window $WINDOW) (root $root) (interface \"$interface_url\") (name \"$journal_name\") (push-enabled? #t) (bridge-policy $bridge_policy))"
-    expr="($interface $config '$standard '$chain '$tree '$ledger '$document)"
+    config="((clear? $clear_flag) (root-secret \"$SECRET\") (interface-secret \"$SECRET\") (admins $admins) (window $WINDOW) (root $root) (interface \"$interface_url\") (name \"$journal_name\"))"
+    expr="($interface $config '$standard '$chain '$tree '$ledger '$federation '$authorization)"
     if [ "$clear_flag" = "#f" ]; then
         expr="(*eval* \"$SECRET\" $expr)"
     fi

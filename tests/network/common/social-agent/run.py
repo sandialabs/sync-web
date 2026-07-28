@@ -11,7 +11,8 @@ import requests
 from numpy.random import choice, randint
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler(sys.stdout))
+if not logger.handlers:
+    logger.addHandler(logging.StreamHandler(sys.stdout))
 logger.setLevel(logging.INFO)
 
 REQUEST_TIMEOUT_SECONDS = 60
@@ -36,8 +37,17 @@ METRICS_PATH = os.environ.get(
 BENCHMARK_OUTPUT_PATH = os.environ.get("BENCHMARK_OUTPUT", "")
 BENCHMARK_INTERVAL_SECONDS = 1.0
 DEFAULT_SIZE = 32
+DEFAULT_ACTIVITY = 4.0
+DEFAULT_USERS = 1
+DEFAULT_SEGMENTS = 2
 LOG_VALUE_LIMIT = 160
 DEFAULT_CLIENTS = 1
+USER_BASE_NAMES = (
+    "alice", "bob", "carol", "dave", "eve", "frank", "grace", "heidi",
+    "ivan", "judy", "mallory", "michael", "niaj", "olivia", "oscar",
+    "peggy", "rupert", "sybil", "trent", "trudy", "victor", "walter",
+    "wendy", "xavier", "yvonne", "zara",
+)
 
 
 class Metrics:
@@ -55,6 +65,7 @@ class Metrics:
         self.activity_requests_success_total = 0
         self.nodes = set()
         self.inferred_hop_requests_total = {}
+        self.user_activity = {}
 
     def record_request(self, function, duration, success):
         with self.lock:
@@ -68,11 +79,17 @@ class Metrics:
                 self.set_latency_sum += duration
                 self.set_latency_count += 1
 
-    def record_cycle(self, requests_succeeded, requests_total):
+    def record_cycle(self, username, requests_succeeded, requests_total):
         with self.lock:
             self.activity_cycles_total += 1
             self.activity_requests_total += requests_total
             self.activity_requests_success_total += requests_succeeded
+            user = self.user_activity.setdefault(
+                username, {"cycles": 0, "requests": 0, "successes": 0}
+            )
+            user["cycles"] += 1
+            user["requests"] += requests_total
+            user["successes"] += requests_succeeded
 
     def register_nodes(self, nodes):
         with self.lock:
@@ -103,6 +120,9 @@ class Metrics:
                 "activity_requests_success_total": self.activity_requests_success_total,
                 "nodes": sorted(self.nodes),
                 "inferred_hop_requests_total": dict(self.inferred_hop_requests_total),
+                "user_activity": {
+                    name: dict(values) for name, values in self.user_activity.items()
+                },
             }
 
 
@@ -120,6 +140,76 @@ def load_peer_config():
     return nodes, edges
 
 
+def peer_adjacency(nodes, edges):
+    adjacency = {node: set() for node in nodes}
+    for source, source_edges in edges.items():
+        for edge in source_edges:
+            target = edge["node"] if isinstance(edge, dict) else edge
+            adjacency[source].add(target)
+            adjacency[target].add(source)
+    return {node: sorted(peers) for node, peers in adjacency.items()}
+
+
+def user_names(count):
+    """Return deterministic fixture usernames, cycling after the base 26."""
+    names = []
+    for index in range(count):
+        base = USER_BASE_NAMES[index % len(USER_BASE_NAMES)]
+        cycle = index // len(USER_BASE_NAMES) + 1
+        names.append(base if cycle == 1 else f"{base}-{cycle}")
+    return names
+
+
+def build_user_layout(size):
+    """Split each user's fixed keys between public and private directories."""
+    public_count = (size + 1) // 2
+    return [
+        {
+            "path": ["data", "public"],
+            "keys": [f"key-{index}" for index in range(public_count)],
+            "public": True,
+        },
+        {
+            "path": ["data", "private"],
+            "keys": [f"key-{index}" for index in range(public_count, size)],
+            "public": False,
+        },
+    ]
+
+
+def simple_routes(adjacency, start, max_segments):
+    """Enumerate deterministic non-revisiting routes outward from start."""
+    routes = []
+
+    def walk(current, route, visited):
+        if len(route) >= max_segments:
+            return
+        for peer in adjacency[current]:
+            if peer in visited:
+                continue
+            next_route = [*route, peer]
+            routes.append(next_route)
+            walk(peer, next_route, {*visited, peer})
+
+    walk(start, [], {start})
+    return routes
+
+
+def route_principal(route, username):
+    return [*route, "*state*", username]
+
+
+def reverse_access_route(target, route):
+    return list(reversed([target, *route[:-1]]))
+
+
+def local_proof_path(route, state_path, origin_index=-1):
+    path = [origin_index]
+    for peer in route:
+        path.extend([peer, -1])
+    return [*path, *state_path]
+
+
 def local_gateway_base(nodes):
     local_router_host = nodes[NODE_NAME]["router_host"]
     return os.environ.get(
@@ -127,8 +217,7 @@ def local_gateway_base(nodes):
     )
 
 
-def acquire_api_token(nodes):
-    global API_TOKEN
+def acquire_api_token(nodes, username=SYNC_USERNAME, password=SYNC_PASSWORD):
     local_router_host = nodes[NODE_NAME]["router_host"]
     base = f"http://{local_router_host}"
     delay = 2
@@ -143,7 +232,7 @@ def acquire_api_token(nodes):
 
             login_resp = requests.post(
                 f"{base}/auth/.ory/self-service/login?flow={flow_id}",
-                json={"identifier": SYNC_USERNAME, "password": SYNC_PASSWORD, "method": "password"},
+                json={"identifier": username, "password": password, "method": "password"},
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
             login_resp.raise_for_status()
@@ -156,15 +245,47 @@ def acquire_api_token(nodes):
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
             token_resp.raise_for_status()
-            API_TOKEN = token_resp.json()["token"]
-            logger.info("API token acquired for %s", NODE_NAME)
-            return
+            token = token_resp.json()["token"]
+            logger.info("API token acquired for %s on %s", username, NODE_NAME)
+            return token
         except requests.HTTPError as e:
             logger.warning("API token acquisition failed (%s), retrying in %ds", e, delay)
         except requests.RequestException as e:
             logger.warning("API token acquisition failed (%s), retrying in %ds", e, delay)
         time.sleep(delay)
         delay = min(delay * 2, 16)
+
+
+def fixture_password(username):
+    """Return the deterministic disposable password for a fixture user."""
+    return f"{username}-pass"
+
+
+def ensure_local_identity(username):
+    """Create a disposable local Kratos identity, accepting an existing user."""
+    node_index = NODE_NAME.rsplit("-", 1)[-1]
+    base = f"http://identity-provider-{node_index}:4434/admin/identities"
+    existing = requests.get(
+        base,
+        params={"credentials_identifier": username},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    existing.raise_for_status()
+    if existing.json():
+        return
+    response = requests.post(
+        base,
+        json={
+            "schema_id": "default",
+            "traits": {"username": username},
+            "credentials": {
+                "password": {"config": {"password": fixture_password(username)}}
+            },
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    if response.status_code not in {200, 201, 409}:
+        response.raise_for_status()
 
 
 def is_indexed_path(path):
@@ -196,19 +317,35 @@ def format_log_value(value, limit=LOG_VALUE_LIMIT):
 
 
 def get_activity_seconds():
-    raw = os.environ.get("ACTIVITY", "")
+    raw = os.environ.get("ACTIVITY", str(DEFAULT_ACTIVITY))
     if raw == "":
-        return 0.0
+        return DEFAULT_ACTIVITY
     return float(raw)
 
 
 def get_size():
     raw = os.environ.get("SIZE", str(DEFAULT_SIZE))
     size = int(raw)
-    if size <= 0:
-        logger.warning("SIZE must be positive; defaulting to %s", DEFAULT_SIZE)
+    if size < 0:
+        logger.warning("SIZE must be non-negative; defaulting to %s", DEFAULT_SIZE)
         return DEFAULT_SIZE
     return size
+
+
+def get_users():
+    users = int(os.environ.get("USERS", str(DEFAULT_USERS)))
+    if users < 0:
+        logger.warning("USERS must be non-negative; defaulting to %s", DEFAULT_USERS)
+        return DEFAULT_USERS
+    return users
+
+
+def get_segments():
+    segments = int(os.environ.get("SEGMENTS", str(DEFAULT_SEGMENTS)))
+    if segments < 0:
+        logger.warning("SEGMENTS must be non-negative; defaulting to %s", DEFAULT_SEGMENTS)
+        return DEFAULT_SEGMENTS
+    return segments
 
 
 def get_clients():
@@ -254,12 +391,31 @@ def write_metrics():
         "# HELP social_agent_activity_requests_success_total Total successful activity requests inside client cycles.",
         "# TYPE social_agent_activity_requests_success_total counter",
         f"social_agent_activity_requests_success_total {stats['activity_requests_success_total']}",
+        "# HELP social_agent_user_activity_requests_total Activity requests attempted per fixture user.",
+        "# TYPE social_agent_user_activity_requests_total counter",
+        "# HELP social_agent_user_activity_requests_success_total Successful activity requests per fixture user.",
+        "# TYPE social_agent_user_activity_requests_success_total counter",
+        "# HELP social_agent_user_activity_cycles_total Activity cycles attempted per fixture user.",
+        "# TYPE social_agent_user_activity_cycles_total counter",
+    ]
+    for username, values in sorted(stats["user_activity"].items()):
+        label = _escape_label(username)
+        lines.append(
+            f'social_agent_user_activity_requests_total{{user="{label}"}} {values["requests"]}'
+        )
+        lines.append(
+            f'social_agent_user_activity_requests_success_total{{user="{label}"}} {values["successes"]}'
+        )
+        lines.append(
+            f'social_agent_user_activity_cycles_total{{user="{label}"}} {values["cycles"]}'
+        )
+    lines.extend([
         "# HELP social_agent_uptime_seconds Uptime of the social agent process.",
         "# TYPE social_agent_uptime_seconds gauge",
         f"social_agent_uptime_seconds {max(time.time() - stats['started'], 0)}",
         "# HELP social_agent_peering_node_info Known node identities for inferred peering graph visualization.",
         "# TYPE social_agent_peering_node_info gauge",
-    ]
+    ])
     for node in stats["nodes"]:
         node_label = _escape_label(node)
         lines.append(
@@ -321,6 +477,7 @@ def make_benchmark_snapshot(stats, now, previous=None):
         "activity_cycles_total": stats["activity_cycles_total"],
         "activity_requests_total": stats["activity_requests_total"],
         "activity_requests_success_total": stats["activity_requests_success_total"],
+        "user_activity": stats.get("user_activity", {}),
         "average_get_latency_seconds": get_latency_avg,
         "average_set_latency_seconds": set_latency_avg,
         "requests_per_second_lifetime": (
@@ -434,7 +591,46 @@ def benchmark_writer():
         time.sleep(BENCHMARK_INTERVAL_SECONDS)
 
 
-def call(nodes, operation, arguments=None, client_id=None):
+def wait_for_federation_ready(nodes, checks, token):
+    """Wait until every fixed route accepts its expected signed staged read."""
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {token}",
+        "content-type": "application/json",
+    }
+    url = f"{local_gateway_base(nodes)}/get"
+    for username, route, path in checks:
+        user_token = token[username] if isinstance(token, dict) else token
+        headers["authorization"] = f"Bearer {user_token}"
+        while True:
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "path": path,
+                        "$federation": {"route": route},
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                if response.ok:
+                    logger.info("Federation route %s is ready", " -> ".join(route))
+                    break
+                logger.warning(
+                    "Federation route %s is not ready yet (HTTP %s)",
+                    " -> ".join(route),
+                    response.status_code,
+                )
+            except requests.RequestException as err:
+                logger.warning(
+                    "Federation route %s is not ready yet: %s",
+                    " -> ".join(route),
+                    err,
+                )
+            time.sleep(1)
+
+
+def call(nodes, operation, arguments=None, client_id=None, token=None):
     started = time.perf_counter()
     success = False
     try:
@@ -458,7 +654,7 @@ def call(nodes, operation, arguments=None, client_id=None):
 
         headers = {"accept": "application/json"}
         if effective_operation not in public_operations:
-            headers["authorization"] = f"Bearer {API_TOKEN}"
+            headers["authorization"] = f"Bearer {token or API_TOKEN}"
 
         if effective_operation in get_only_operations:
             response = requests.get(
@@ -496,149 +692,267 @@ def call(nodes, operation, arguments=None, client_id=None):
 
 
 def run(nodes, edges):
+    global API_TOKEN
+
     size = get_size()
     activity_seconds = get_activity_seconds()
     clients = get_clients()
+    usernames = user_names(get_users())
+    segments = get_segments()
+    adjacency = peer_adjacency(nodes, edges)
+    layout = build_user_layout(size)
+    routes_by_target = {
+        target: simple_routes(adjacency, target, segments) for target in nodes
+    }
 
-    acquire_api_token(nodes)
+    API_TOKEN = acquire_api_token(nodes)
+    for username in usernames:
+        ensure_local_identity(username)
+    user_tokens = {
+        username: acquire_api_token(nodes, username, fixture_password(username))
+        for username in usernames
+    }
 
     for edge in edges.get(NODE_NAME, []):
-        if isinstance(edge, dict):
-            peer_node = edge["node"]
-            bridge_mode = edge.get("mode", "pull")
-        else:
-            peer_node = edge
-            bridge_mode = "pull"
+        peer_node = edge["node"] if isinstance(edge, dict) else edge
         peer_router_host = nodes[peer_node]["router_host"]
-        while result := call(
+        while True:
+            try:
+                result = call(
+                    nodes,
+                    "bridge",
+                    {
+                        "name": peer_node,
+                        "interface": {
+                            "*type/string*":
+                                f"http://{peer_router_host}/api/v1/journal/interface"
+                        },
+                        "remote-name": NODE_NAME,
+                    },
+                    client_id="setup",
+                )
+            except requests.RequestException as err:
+                logger.warning("Bridge with %s is not ready yet: %s", peer_node, err)
+                time.sleep(1)
+                continue
+            if result is True:
+                break
+            time.sleep(1)
+
+    call(nodes, "set-admins", {"admins": [["*state*", "admin"]]}, client_id="setup")
+
+    for username in usernames:
+        owner = ["*state*", username]
+        call(
             nodes,
-            "bridge",
+            "authorize",
             {
-                "name": peer_node,
-                "info-local": {
-                    "interface": {"*type/string*": f"http://{peer_router_host}/api/v1/journal/interface"},
-                    "policy": (
-                        {"publish": "push", "subscribe": "none"}
-                        if bridge_mode == "push"
-                        else {"publish": "none", "subscribe": "pull"}
-                    ),
-                    "role": "publisher" if bridge_mode == "push" else False,
-                    "remote-name": NODE_NAME,
+                "user": owner,
+                "rule": {
+                    "principal": ["*public*"],
+                    "path": ["data", "public"],
+                    "get": True,
+                    "set!": False,
+                    "resolve": True,
                 },
             },
             client_id="setup",
-        ):
-            if result is not True:
-                logger.warning(
-                    "Could not bridge with %s via %s, trying again",
-                    peer_node,
-                    peer_router_host,
-                )
-                time.sleep(1)
-            else:
-                break
-
-    for i in range(size):
-        call(
-            nodes,
-            "set",
-            {
-                "path": ["*state*", "admin", "data", f"key-{i}"],
-                "value": text_to_byte_vector(" ".join(choice(WORDS, NUM_WORDS))),
-            },
-            client_id="setup",
         )
+        for route in routes_by_target[NODE_NAME]:
+            call(
+                nodes,
+                "authorize",
+                {
+                    "user": owner,
+                    "rule": {
+                        "principal": route_principal(route, username),
+                        "key-index": [0, -1],
+                        "path": ["data", "private"],
+                        "get": True,
+                        "set!": True,
+                        "resolve": True,
+                    },
+                },
+                client_id="setup",
+            )
 
-    def _act(client_id):
-        successful_requests = 0
-        total_requests = 0
-        try:
-            try:
-                path = []
-                node_name = NODE_NAME
-                traversal = [NODE_NAME]
-                while choice(2) and edges.get(node_name):
-                    if not edges.get(node_name):
-                        break
-                    edge = choice(edges[node_name])
-                    node_name = edge["node"] if isinstance(edge, dict) else edge
-                    traversal.append(node_name)
-                    path += [-1, "*bridge*", node_name]
-
-                path += [-1, "*state*", "admin", "data", f"key-{randint(0, size)}"]
-
-                if len(traversal) > 1:
-                    METRICS.record_inferred_hops(
-                        list(zip(traversal[:-1], traversal[1:]))
-                    )
-
-                if choice(2):
-                    total_requests += 1
-                    result = call(nodes, "get", {"path": path}, client_id=client_id)
-                    text = byte_vector_text(result)
-
-                    if text is None:
-                        logger.warning("Cannot complete action")
-                        return
-                    successful_requests += 1
-
-                    words = text.split(" ")
-                    if not words:
-                        logger.warning("Cannot complete action")
-                        return
-                    words[randint(0, len(words) - 1)] = choice(WORDS)
-
-                    total_requests += 1
-                    set_result = call(
+        for bucket in layout:
+            for key in bucket["keys"]:
+                path = ["*state*", username, *bucket["path"], key]
+                existing = call(nodes, "get", {"path": path}, client_id="setup")
+                if byte_vector_text(existing) is None:
+                    call(
                         nodes,
                         "set",
                         {
-                            "path": ["*state*", "admin", "data", f"key-{randint(0, size)}"],
+                            "path": path,
+                            "value": text_to_byte_vector(" ".join(choice(WORDS, NUM_WORDS))),
+                        },
+                        client_id="setup",
+                    )
+
+    assignments = {username: [] for username in usernames}
+    readiness_checks = []
+    private_bucket = next(bucket for bucket in layout if not bucket["public"])
+    public_bucket = next(bucket for bucket in layout if bucket["public"])
+
+    for username in usernames:
+        for bucket in layout:
+            if bucket["public"] or not bucket["keys"]:
+                if bucket["public"]:
+                    for key in bucket["keys"]:
+                        assignments[username].append({
+                            "route": [],
+                            "state_path": ["*state*", username, *bucket["path"], key],
+                        })
+                continue
+            for key in bucket["keys"]:
+                assignments[username].append({
+                    "route": [],
+                    "state_path": ["*state*", username, *bucket["path"], key],
+                })
+
+        if private_bucket["keys"]:
+            for target, terminal_routes in routes_by_target.items():
+                for terminal_route in terminal_routes:
+                    if terminal_route[-1] != NODE_NAME:
+                        continue
+                    access_route = reverse_access_route(target, terminal_route)
+                    for key in private_bucket["keys"]:
+                        assignments[username].append({
+                            "route": access_route,
+                            "state_path": [
+                                "*state*", username, *private_bucket["path"], key
+                            ],
+                        })
+                    readiness_checks.append((
+                        username,
+                        access_route,
+                        ["*state*", username, *private_bucket["path"], private_bucket["keys"][0]],
+                    ))
+        elif public_bucket["keys"]:
+            for peer in adjacency[NODE_NAME]:
+                readiness_checks.append((
+                    username,
+                    [peer],
+                    ["*state*", username, *public_bucket["path"], public_bucket["keys"][0]],
+                ))
+
+    def act(username, client_id):
+        successful_requests = 0
+        total_requests = 0
+        token = user_tokens[username]
+        try:
+            try:
+                if not assignments[username]:
+                    return
+                assignment = assignments[username][randint(0, len(assignments[username]))]
+                route = assignment["route"]
+                state_path = assignment["state_path"]
+                federation = {"$federation": {"route": route}} if route else {}
+                if route:
+                    METRICS.record_inferred_hops(list(zip([NODE_NAME, *route[:-1]], route)))
+
+                if choice(2):
+                    total_requests += 1
+                    result = call(
+                        nodes, "get", {"path": state_path, **federation},
+                        client_id=client_id, token=token,
+                    )
+                    text = byte_vector_text(result)
+                    if text is None:
+                        return
+                    successful_requests += 1
+                    words = text.split(" ")
+                    if not words:
+                        return
+                    words[randint(0, len(words))] = choice(WORDS)
+                    total_requests += 1
+                    if call(
+                        nodes,
+                        "set",
+                        {
+                            "path": state_path,
                             "value": text_to_byte_vector(" ".join(words)),
+                            **federation,
                         },
                         client_id=client_id,
-                    )
-                    if set_result is True:
+                        token=token,
+                    ) is True:
                         successful_requests += 1
                 else:
-                    if "*bridge*" in path:
+                    history_path = [-1, *state_path]
+                    total_requests += 1
+                    if route:
                         total_requests += 1
-                        target = call(nodes, "get", {"path": path}, client_id=client_id)
-                        if target in (["nothing"], ["unknown"]):
+                        origin_size = call(nodes, "size", client_id=client_id, token=token)
+                        if not isinstance(origin_size, int) or origin_size <= 0:
+                            return
+                        origin_index = origin_size - 1
+                        successful_requests += 1
+                        total_requests += 1
+                        resolved = call(
+                            nodes,
+                            "resolve",
+                            {
+                                "path": history_path,
+                                "pinned?": False,
+                                "proof?": True,
+                                "$federation": {
+                                    "route": route,
+                                    "history": [origin_index, *([-1] * len(route))],
+                                },
+                            },
+                            client_id=client_id,
+                            token=token,
+                        )
+                        proof = resolved.get("proof") if isinstance(resolved, dict) else None
+                        if proof is None:
                             return
                         successful_requests += 1
-                    total_requests += 1
-                    pin_result = call(nodes, "pin", {"path": path}, client_id=client_id)
-                    if pin_result is not True:
+                        pin_args = {
+                            "path": local_proof_path(route, state_path, origin_index),
+                            "response": proof,
+                        }
+                    else:
+                        pin_args = {"path": history_path}
+                    if call(nodes, "pin", pin_args, client_id=client_id, token=token) is not True:
                         return
                     successful_requests += 1
                     total_requests += 1
-                    unpin_result = call(
-                        nodes, "unpin", {"path": path}, client_id=client_id
-                    )
-                    if unpin_result is True:
+                    if call(
+                        nodes, "unpin", {"path": pin_args["path"]},
+                        client_id=client_id, token=token,
+                    ) is True:
                         successful_requests += 1
             except Exception as err:
                 logger.warning("Client %s activity cycle failed: %s", client_id, err)
         finally:
-            METRICS.record_cycle(successful_requests, total_requests)
+            METRICS.record_cycle(username, successful_requests, total_requests)
 
-    def _client_loop(client_id):
-        if activity_seconds <= 0:
-            while True:
-                _act(client_id)
+    if activity_seconds <= 0 or not usernames or not any(assignments.values()):
+        logger.info("Continuous activity is disabled")
+        return
 
+    wait_for_federation_ready(nodes, readiness_checks, user_tokens)
+
+    def client_loop(username, client_index):
+        client_id = f"{username}-{client_index}"
         until = datetime.now()
         while True:
-            _act(client_id)
+            act(username, client_id)
             time.sleep(max((until - datetime.now()).total_seconds(), 0))
             until += timedelta(seconds=activity_seconds)
 
     threads = []
-    for client_id in range(clients):
-        thread = Thread(target=lambda cid=client_id: _client_loop(cid), daemon=True)
-        thread.start()
-        threads.append(thread)
+    for username in usernames:
+        for client_index in range(clients):
+            thread = Thread(
+                target=lambda user=username, index=client_index: client_loop(user, index),
+                daemon=True,
+            )
+            thread.start()
+            threads.append(thread)
 
     for thread in threads:
         thread.join()

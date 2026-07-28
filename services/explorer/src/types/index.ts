@@ -12,7 +12,7 @@ export interface AppState {
 }
 
 export type JournalPath = Array<number | string>;
-export type ExplorerMode = 'stage' | 'ledger' | 'admin';
+export type ExplorerMode = 'stage' | 'ledger' | 'access' | 'admin';
 
 export interface JournalResponse<T = any> {
   content: T;
@@ -25,26 +25,36 @@ export interface PeerInfo {
   endpoint: string;
 }
 
-export type BridgeDirection = 'incoming' | 'outgoing';
-export type BridgePolicyChoice = 'push' | 'pull' | 'none';
-
 export interface AdminBridge {
   name: string;
   endpoint: string;
-  direction: BridgeDirection;
-  localPolicy: { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice };
-  remotePolicy: { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice };
-  mode: BridgePolicyChoice;
-  disabled: boolean;
   remoteName?: string;
+  initiation: 'local' | 'remote';
+  lastIndex?: number;
+  remoteIndex?: number;
 }
 
 export interface AdminConfig {
   admins: string[];
   bridges: AdminBridge[];
-  subscribers: AdminBridge[];
   localName: string | null;
+  localEndpoint: string | null;
   windowSize: number | null;
+  bridgeAccept: 'auto' | 'preapproved';
+  bridgePreapprovals: Record<string, unknown>;
+}
+
+export interface FederationContext {
+  route: string[];
+  historyIndexes?: number[];
+}
+
+export interface AuthorizationRule {
+  principal: JournalPath;
+  path: JournalPath;
+  get: boolean;
+  'set!': boolean;
+  resolve: boolean | [number, number];
 }
 
 export interface TreeNode {
@@ -68,13 +78,6 @@ export interface LedgerHop {
   kind: 'local' | 'bridge';
   name: string;
   snapshot: string;
-}
-
-export interface DocumentContent {
-  path: JournalPath;
-  content: any;
-  isPinned: boolean;
-  proof: any;
 }
 
 export interface HistoryEntry {

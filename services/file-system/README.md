@@ -20,7 +20,7 @@ The Go service implements the core WebDAV surface against the gateway-backed jou
 - `/webdav/ledger/minus/<digit>/<digit>/.../state/<path...>` — committed state at an explicit negative index.
 - `/webdav/ledger/bridge/<name>/state/<path...>` — latest committed bridge shorthand.
 - `/webdav/ledger/<local-index-digits>/bridge/<name>/<target-index-digits>/` — read-only collection for a known explicit bridge target index.
-- `/webdav/ledger/<local-index-digits>/bridge/<name>/<target-index-digits>/state/<path...>` — explicit bridge traversal. Use `minus/` before digit segments for negative local or target indexes.
+- `/webdav/ledger/<local-index-digits>/bridge/<name>/<target-index-digits>/state/<path...>` — explicit bridge traversal. Repeat `/bridge/<name>/<target-index-digits>` for multiple hops. Use `minus/` before digit segments for negative local or target indexes.
 - `/webdav/control/pin` — write-only pin/unpin directive sink.
 
 ## Configuration
@@ -34,10 +34,15 @@ Basic Auth with a Sync Web API token as the password. The username can be the sy
 username (for example, `admin`), but WebDAV does not accept the account password because
 it cannot perform the browser login flow.
 
+Bridge routes are translated into the gateway's signed `$federation` resolve context;
+the WebDAV service does not send legacy nested bridge paths as local reads. Explicit
+indexes select retained history, and unavailable historical routes return `404`.
+
 Path names are translated at the WebDAV boundary. Names that are not safe unescaped
 R7RS-style identifier symbols are UTF-8 percent-escaped before gateway calls and decoded
 again for WebDAV directory listings. The ledger stores ordinary symbol atoms such as
-`New%20folder`; it does not interpret percent escapes.
+`New%20folder`; it does not interpret percent escapes. `PROPFIND` hrefs use URL-escaped
+path segments.
 
 ## Development
 

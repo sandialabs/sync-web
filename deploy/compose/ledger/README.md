@@ -22,13 +22,12 @@ http://localhost:${JOURNAL_PORT:-8192}/interface
 
 Use a distinct `COMPOSE_PROJECT_NAME` per deployment so databases, containers, and networks do not collide.
 
-## Update installed records
+## Installed records
 
-After changing Scheme records, restart with:
-
-```sh
-JOURNAL_UPDATE=1 docker compose up -d
-```
+This 1.5 candidate supports fresh installation only. Do not set
+`JOURNAL_UPDATE=1` for an existing database; the Interface rejects the update
+atomically. Use a fresh volume unless a later release provides an explicit
+conversion path.
 
 ## Data
 

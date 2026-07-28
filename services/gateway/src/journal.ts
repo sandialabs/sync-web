@@ -6,6 +6,8 @@ export interface JournalCall {
   args?: unknown;
   authentication?: string;
   identityId?: string;
+  routeTarget?: string[];
+  historyIndexes?: number[];
 }
 
 export interface JournalClient {
@@ -91,6 +93,12 @@ export const redactAuth = (body: Record<string, unknown>): Record<string, unknow
       cloned.authentication = "***REDACTED***";
     }
   }
+  if (cloned.invocation && typeof cloned.invocation === "object") {
+    cloned.invocation = {
+      ...(cloned.invocation as Record<string, unknown>),
+      credentials: "***REDACTED***",
+    };
+  }
   return cloned;
 };
 
@@ -152,10 +160,20 @@ export const createJournalClient = (
     }
 
     if (input.authentication) {
-      requestBody.authentication = {
-        ...(input.identityId ? { identity: input.identityId } : {}),
-        credentials: { "*type/string*": input.authentication },
-      };
+      if (input.routeTarget && input.routeTarget.length > 0) {
+        requestBody.invocation = {
+          identity: input.identityId,
+          "route-source": [],
+          "route-target": input.routeTarget,
+          ...(input.historyIndexes ? { "history-indexes": input.historyIndexes } : {}),
+          credentials: { "*type/string*": input.authentication },
+        };
+      } else {
+        requestBody.authentication = {
+          ...(input.identityId ? { identity: ["*state*", input.identityId] } : {}),
+          credentials: { "*type/string*": input.authentication },
+        };
+      }
     }
 
     const controller = new AbortController();

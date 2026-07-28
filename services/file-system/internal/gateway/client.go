@@ -23,18 +23,18 @@ func New(baseURL string) *Client {
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTPClient: &http.Client{Timeout: 30 * time.Second}}
 }
 
-func (c *Client) Get(ctx context.Context, r *http.Request, path []paths.Segment, meta bool) (any, error) {
-	body := map[string]any{"path": JSONPath(path)}
-	if meta {
-		body["meta?"] = true
-	}
-	return c.post(ctx, r, "/general/get", body)
+func (c *Client) Get(ctx context.Context, r *http.Request, path []paths.Segment) (any, error) {
+	return c.post(ctx, r, "/general/get", map[string]any{"path": JSONPath(path)})
 }
 
-func (c *Client) Resolve(ctx context.Context, r *http.Request, path []paths.Segment, meta bool) (any, error) {
+func (c *Client) Resolve(ctx context.Context, r *http.Request, path []paths.Segment) (any, error) {
+	return c.ResolveFederated(ctx, r, path, nil, nil)
+}
+
+func (c *Client) ResolveFederated(ctx context.Context, r *http.Request, path []paths.Segment, route []string, history []int) (any, error) {
 	body := map[string]any{"path": JSONPath(path)}
-	if meta {
-		body["meta?"] = true
+	if len(route) > 0 {
+		body["$federation"] = map[string]any{"route": route, "history": history}
 	}
 	return c.post(ctx, r, "/general/resolve", body)
 }

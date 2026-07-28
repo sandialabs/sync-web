@@ -8,7 +8,7 @@ The journal service uses the generic `journal-sdk` image directly. The general i
 - `deploy/compose/general/run.sh`
 - the persistent `database` volume
 
-For a fresh database, `run.sh` installs the general interface from the mounted Lisp files. For an existing database, mounted Lisp files are only applied when `JOURNAL_UPDATE=1`; otherwise the durable journal state continues from the database.
+For a fresh database, `run.sh` installs the general interface from the mounted Lisp files. This 1.5 candidate's Interface is fresh-install-only: `JOURNAL_UPDATE=1` against any existing database fails atomically. Leave it disabled unless a future release provides an explicit conversion path.
 
 ## Requirements
 
@@ -61,7 +61,7 @@ podman-compose -f deploy/compose/general/compose.yaml up -d
 - `JOURNAL_NAME` (default `INTERFACE`): public journal display/peer name advertised to bridge peers
 - `PERIOD` (default `2`): journal periodicity exponent
 - `WINDOW` (default `1024`): retained historical state window
-- `JOURNAL_UPDATE` (default empty): set to `1` to update an existing journal database from the mounted Lisp files before serving
+- `JOURNAL_UPDATE` (default empty): startup update switch; unsupported for existing databases by this fresh-install-only 1.5 Interface
 - `TLS_CERT_HOST_PATH` (default `./tls/tls.crt`): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (default `./tls/tls.key`): host key file mounted into router
 - `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files

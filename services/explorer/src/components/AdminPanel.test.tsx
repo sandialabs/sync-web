@@ -7,62 +7,86 @@ const createJournalService = (overrides: Partial<JournalService> = {}) => ({
   getAdminConfig: jest.fn().mockResolvedValue({
     admins: ['admin'],
     bridges: [],
-    subscribers: [],
     localName: 'journal-0',
+    localEndpoint: 'http://journal-0/interface',
     windowSize: 4,
+    bridgeAccept: 'auto',
+    bridgePreapprovals: {},
   }),
   saveBridge: jest.fn().mockResolvedValue(true),
   deleteBridge: jest.fn().mockResolvedValue(true),
+  updateConfig: jest.fn().mockResolvedValue(true),
   setAdmins: jest.fn().mockResolvedValue(true),
   setWindowSize: jest.fn().mockResolvedValue(true),
   ...overrides,
 }) as unknown as JournalService;
 
 describe('AdminPanel', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+  beforeEach(() => jest.clearAllMocks());
 
-  it('prefills remote name from local config and creates an outgoing bridge', async () => {
+  it('prefills the reciprocal name and creates a bridge', async () => {
     const journalService = createJournalService();
     render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
 
-    const bridgeNameInput = await screen.findByPlaceholderText('Bridge name');
-
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'outgoing' } });
+    const bridgeNameInput = await screen.findByPlaceholderText('peer');
     fireEvent.change(bridgeNameInput, { target: { value: 'beagle' } });
-    fireEvent.change(screen.getByPlaceholderText('Remote endpoint'), {
+    fireEvent.change(screen.getByPlaceholderText('https://peer.example/api/v1/journal/interface'), {
       target: { value: 'https://beagle.sync-web.org/api/v1/journal/interface' },
     });
 
-    expect(screen.getByPlaceholderText('Remote name')).toHaveValue('journal-0');
+    await waitFor(() => expect(
+      screen.getByPlaceholderText('Name peer uses for this journal'),
+    ).toHaveValue('journal-0'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add bridge' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(journalService.saveBridge).toHaveBeenCalledWith({
+      name: 'beagle',
+      endpoint: 'https://beagle.sync-web.org/api/v1/journal/interface',
+      remoteName: 'journal-0',
+    }));
+  });
 
-    await waitFor(() => {
-      expect(journalService.saveBridge).toHaveBeenCalledWith({
-        name: 'beagle',
-        endpoint: 'https://beagle.sync-web.org/api/v1/journal/interface',
-        direction: 'outgoing',
-        policy: { publish: 'push', subscribe: 'pull' },
-        remoteName: 'journal-0',
-      });
+  it('shows and saves an allowed bridge when preapproval is required', async () => {
+    const journalService = createJournalService({
+      getAdminConfig: jest.fn().mockResolvedValue({
+        admins: ['admin'],
+        bridges: [],
+        localName: 'journal-0',
+        localEndpoint: 'http://journal-0/interface',
+        windowSize: 4,
+        bridgeAccept: 'preapproved',
+        bridgePreapprovals: {},
+      }),
+    } as Partial<JournalService>);
+    render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
+
+    const journalId = 'ab'.repeat(32);
+    fireEvent.change(await screen.findByPlaceholderText('64 hexadecimal characters'), {
+      target: { value: journalId },
     });
+    const peerInputs = screen.getAllByPlaceholderText('peer');
+    fireEvent.change(peerInputs[peerInputs.length - 1], { target: { value: 'beagle' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Allow bridge' }));
+
+    await waitFor(() => expect(journalService.updateConfig).toHaveBeenCalledWith(
+      ['private', 'bridge-preapproval', 'beagle'],
+      { '*type/byte-vector*': journalId },
+    ));
   });
 
   it('rejects non-http remote endpoint URLs before saving', async () => {
     const journalService = createJournalService();
     render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
 
-    const bridgeNameInput = await screen.findByPlaceholderText('Bridge name');
-
-    fireEvent.change(bridgeNameInput, { target: { value: 'beagle' } });
-    fireEvent.change(screen.getByPlaceholderText('Remote endpoint'), {
+    fireEvent.change(await screen.findByPlaceholderText('peer'), {
+      target: { value: 'beagle' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('https://peer.example/api/v1/journal/interface'), {
       target: { value: 'ftp://beagle.sync-web.org/api/v1/journal/interface' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add bridge' }));
 
-    expect(await screen.findByText('Remote endpoint must be an http:// or https:// URL.')).toBeInTheDocument();
+    expect(await screen.findByText('Peer endpoint must be an HTTP or HTTPS URL.')).toBeInTheDocument();
     expect(journalService.saveBridge).not.toHaveBeenCalled();
   });
 });

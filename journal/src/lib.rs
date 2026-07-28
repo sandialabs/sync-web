@@ -1,5 +1,8 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 
+use crate::cache::{
+    ResolveSource, ResolvedNode, resolve_branch_with, resolve_node_with, resolve_stump_with,
+};
 pub use crate::config::Config;
 use crate::evaluator::{Evaluator, Primitive, Type, json2lisp, lisp2json, obj2str};
 use crate::extensions::crypto::{
@@ -7,11 +10,12 @@ use crate::extensions::crypto::{
 };
 use crate::extensions::system::{primitive_s7_system_time_unix, primitive_s7_system_time_utc};
 use crate::persistor::{MemoryPersistor, PERSISTOR, Persistor};
-use crate::cache::{
-    strict_cache_get, strict_cache_put, OverlayPersistor, ResolvedNode, ResolveSource,
-    resolve_branch_with, resolve_node_with, resolve_stump_with,
-};
 pub use crate::persistor::{SIZE, Word};
+use crate::scenario_context::ScenarioContext;
+use crate::serialization::{
+    primitive_s7_sync_deserialize, primitive_s7_sync_serialize, serialization_trace_active,
+    serialization_trace_child, serialization_trace_pair,
+};
 use libc;
 use log::{debug, info, warn};
 use once_cell::sync::Lazy;
@@ -22,12 +26,17 @@ use std::time::Instant;
 
 use evaluator as s7;
 use sha2::{Digest, Sha256};
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, c_void};
+use std::os::raw::c_char;
 
-mod config;
 mod cache;
+mod config;
 pub mod evaluator;
 mod persistor;
+mod scenario_context;
+mod serialization;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 mod extensions {
     pub mod crypto;
     pub mod system;
@@ -48,11 +57,11 @@ pub(crate) struct Session {
     pub(crate) state: Word,
     pub(crate) persistor: MemoryPersistor,
     pub(crate) cache: Arc<Mutex<HashMap<(String, String, Vec<u8>), Vec<u8>>>>,
-    pub(crate) strict_env_loc: Option<s7::s7_int>,
-    pub(crate) strict_loader_locs: HashMap<Word, s7::s7_int>,
-    pub(crate) strict_overlay_persistor: Option<MemoryPersistor>,
-    pub(crate) strict_overlay_handles: HashSet<Word>,
+    pub(crate) serialization_query_locs: HashMap<String, s7::s7_int>,
+    pub(crate) serialization_env_loc: Option<s7::s7_int>,
+    pub(crate) sync_let_boundaries: Vec<s7::s7_int>,
     pub(crate) external_called: bool,
+    pub(crate) scenario: Option<ScenarioContext>,
 }
 
 impl Session {
@@ -67,17 +76,35 @@ impl Session {
             state,
             persistor,
             cache,
-            strict_env_loc: None,
-            strict_loader_locs: HashMap::new(),
-            strict_overlay_persistor: None,
-            strict_overlay_handles: HashSet::new(),
+            serialization_query_locs: HashMap::new(),
+            serialization_env_loc: None,
+            sync_let_boundaries: Vec::new(),
             external_called: false,
+            scenario: None,
         }
     }
 }
 
 pub(crate) static SESSIONS: Lazy<RwLock<HashMap<usize, Session>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+
+pub(crate) fn scenario_random_bytes(sc: *mut s7::s7_scheme, length: usize) -> Option<Vec<u8>> {
+    SESSIONS
+        .read()
+        .expect("Failed to acquire sessions lock")
+        .get(&(sc as usize))
+        .and_then(|session| session.scenario.as_ref())
+        .map(|scenario| scenario.random_bytes(length))
+}
+
+pub(crate) fn scenario_unix_time(sc: *mut s7::s7_scheme) -> Option<i64> {
+    SESSIONS
+        .read()
+        .expect("Failed to acquire sessions lock")
+        .get(&(sc as usize))
+        .and_then(|session| session.scenario.as_ref())
+        .map(ScenarioContext::unix_time)
+}
 
 struct CallOnDrop<F: FnMut()>(F);
 
@@ -249,6 +276,15 @@ impl Journal {
     }
 
     fn evaluate_record(&self, record: Word, query: &str) -> String {
+        self.evaluate_record_with_context(record, query, None)
+    }
+
+    pub(crate) fn evaluate_record_with_context(
+        &self,
+        record: Word,
+        query: &str,
+        scenario: Option<ScenarioContext>,
+    ) -> String {
         let mut runs = 0;
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
@@ -319,6 +355,14 @@ impl Journal {
                     primitive_s7_sync_all(),
                     primitive_s7_sync_call(),
                     primitive_s7_sync_eval(),
+                    primitive_s7_sync_serialize(),
+                    primitive_s7_sync_deserialize(),
+                    primitive_s7_sync_safe_setter(),
+                    primitive_s7_sync_safe_setter_set(),
+                    primitive_s7_sync_let_active(),
+                    primitive_s7_sync_let_eval(),
+                    primitive_s7_sync_let(),
+                    primitive_s7_sync_let_return(),
                     primitive_s7_sync_remote(),
                     primitive_s7_sync_http(),
                     primitive_s7_crypto_generate(),
@@ -328,6 +372,53 @@ impl Journal {
                     primitive_s7_system_time_utc(),
                 ],
             );
+
+            let sync_let = CString::new(
+                "(define-macro (sync-let bindings . body)\
+                   (if (or (not (list? bindings)) (null? body))\
+                       (error 'syntax-error \"sync-let requires a binding list and body\"))\
+                   (for-each\
+                    (lambda (binding)\
+                      (if (not (and (list? binding) (= (length binding) 2)\
+                                    (symbol? (car binding))))\
+                          (error 'syntax-error \"Malformed sync-let binding: ~S\" binding)))\
+                    bindings)\
+                   `(%sync-let-return\
+                     (%sync-let ',(map car bindings)\
+                                (list ,@(map cadr bindings))\
+                                (expression->byte-vector '(begin ,@body))))))",
+            )
+            .expect("Failed to construct sync-let macro");
+            unsafe {
+                let safe_setter = s7::s7_let_ref(
+                    evaluator.sc,
+                    s7::s7_rootlet(evaluator.sc),
+                    s7::s7_make_symbol(evaluator.sc, c"%sync-safe-setter".as_ptr()),
+                );
+                let safe_setter_set = s7::s7_let_ref(
+                    evaluator.sc,
+                    s7::s7_rootlet(evaluator.sc),
+                    s7::s7_make_symbol(evaluator.sc, c"%sync-safe-setter-set!".as_ptr()),
+                );
+                s7::s7_set_setter(evaluator.sc, safe_setter, safe_setter_set);
+                s7::s7_eval_c_string(evaluator.sc, sync_let.as_ptr());
+                for name in [
+                    c"%sync-safe-setter-set!",
+                    c"%sync-let-body",
+                    c"%sync-let-environment",
+                    c"%sync-let-eval",
+                    c"%sync-let-ok",
+                    c"%sync-let-error",
+                    c"%sync-let-list",
+                ] {
+                    s7::s7_define(
+                        evaluator.sc,
+                        s7::s7_rootlet(evaluator.sc),
+                        s7::s7_make_symbol(evaluator.sc, name.as_ptr()),
+                        s7::s7_undefined(evaluator.sc),
+                    );
+                }
+            }
 
             let persistor_initial = MemoryPersistor::new();
 
@@ -341,29 +432,25 @@ impl Journal {
             SESSIONS
                 .write()
                 .expect("Failed to acquire sessions lock")
-                .insert(
-                    evaluator.sc as usize,
-                    Session::new(record, state_old, persistor_initial, cache.clone()),
-                );
+                .insert(evaluator.sc as usize, {
+                    let mut session =
+                        Session::new(record, state_old, persistor_initial, cache.clone());
+                    session.scenario = scenario.clone();
+                    session
+                });
 
             let _session_dropper = CallOnDrop(|| {
-                let mut session = SESSIONS
+                let removed = SESSIONS
                     .write()
-                    .expect("Failed to acquire sessions lock for cleanup");
-                if let Some(session) = session.remove(&(evaluator.sc as usize)) {
-                    if let Some(loc) = session.strict_env_loc {
-                        unsafe {
-                            s7::s7_gc_unprotect_at(evaluator.sc, loc);
+                    .expect("Failed to acquire sessions lock for cleanup")
+                    .remove(&(evaluator.sc as usize));
+                if let Some(session) = removed {
+                    unsafe {
+                        if let Some(location) = session.serialization_env_loc {
+                            s7::s7_gc_unprotect_at(evaluator.sc, location);
                         }
-                    }
-                    for loc in session.strict_loader_locs.into_values() {
-                        unsafe {
-                            s7::s7_gc_unprotect_at(evaluator.sc, loc);
-                        }
-                    }
-                    if let Some(overlay) = session.strict_overlay_persistor {
-                        for handle in session.strict_overlay_handles {
-                            let _ = overlay.root_delete(handle);
+                        for location in session.serialization_query_locs.into_values() {
+                            s7::s7_gc_unprotect_at(evaluator.sc, location);
                         }
                     }
                 }
@@ -378,16 +465,12 @@ impl Journal {
             let result = evaluator.evaluate(expr.as_str());
             runs += 1;
 
-            let (persistor, overlay_persistor, external_called) = {
+            let (persistor, external_called) = {
                 let session = SESSIONS.read().expect("Failed to acquire sessions lock");
                 let session = session
                     .get(&(evaluator.sc as usize))
                     .expect("Session not found in SESSIONS map");
-                (
-                    session.persistor.clone(),
-                    session.strict_overlay_persistor.clone(),
-                    session.external_called,
-                )
+                (session.persistor.clone(), session.external_called)
             };
 
             let (output, state_new) = match result.starts_with("(error '") {
@@ -445,21 +528,12 @@ impl Journal {
                         .expect("Failed to get record state for comparison")
                 {
                     true => {
-                        {
                             let _lock2 = match _lock1 {
                                 Some(_) => None,
-                                None => {
-                                    Some(LOCK.lock().expect("Failed to acquire secondary lock"))
-                                }
+                            None => Some(LOCK.lock().expect("Failed to acquire secondary lock")),
                             };
 
-                            let overlay_source = OverlayPersistor {
-                                primary: persistor.clone(),
-                                overlay: overlay_persistor.clone(),
-                            };
-                            // Commits must see both the session graph and any cache-backed
-                            // overlay roots attached by strict cache hits in this session.
-                            match PERSISTOR.root_set(record, state_old, state_new, &overlay_source) {
+                            match PERSISTOR.root_set(record, state_old, state_new, &persistor) {
                                 Ok(_) => {
                                     warn_on_error_result(query, output.as_str());
                                     debug!(
@@ -480,7 +554,6 @@ impl Journal {
                                 }
                             }
                         }
-                    }
                     false => {
                         info!(
                             "Rerunning (x{}) due to concurrency collision: {}",
@@ -659,11 +732,7 @@ fn primitive_s7_sync_state() -> Primitive {
     unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
         unsafe {
             if !s7::s7_is_null(sc, args) {
-                return s7::s7_wrong_number_of_args_error(
-                    sc,
-                    c"sync-state".as_ptr(),
-                    args,
-                );
+                return s7::s7_wrong_number_of_args_error(sc, c"sync-state".as_ptr(), args);
             }
 
             let state = {
@@ -791,11 +860,8 @@ fn primitive_s7_sync_is_stub() -> Primitive {
             let arg = s7::s7_car(args);
             if sync_is_node(arg) {
                 let word = sync_heap_read(s7::s7_c_object_value(arg));
-                let (persistor, overlay) = session_storage_for(sc);
-                s7::s7_make_boolean(
-                    sc,
-                    resolve_stump_with(&persistor, overlay.as_ref(), word).is_some(),
-                )
+                let persistor = session_persistor_for(sc);
+                s7::s7_make_boolean(sc, resolve_stump_with(&persistor, word).is_some())
             } else if s7::s7_is_byte_vector(arg) {
                 s7::s7_make_boolean(sc, false)
             } else {
@@ -916,6 +982,7 @@ fn primitive_s7_sync_cons() -> Primitive {
 
                         match persistor.branch_set(left, right, digest) {
                             Ok(pair) => {
+                                serialization_trace_pair(sc, pair, left, right);
                                 s7::s7_make_c_object(sc, SYNC_NODE_TAG, sync_heap_make(pair))
                             }
                             Err(_) => {
@@ -953,7 +1020,7 @@ fn primitive_s7_sync_car() -> Primitive {
                     c"a sync-pair".as_ptr(),
                 );
             }
-            sync_cxr(sc, args, c"sync-car", |children| children.0)
+            sync_cxr(sc, args, c"sync-car", true, |children| children.0)
         }
     }
 
@@ -979,7 +1046,7 @@ fn primitive_s7_sync_cdr() -> Primitive {
                     c"a sync-pair".as_ptr(),
                 );
             }
-            sync_cxr(sc, args, c"sync-cdr", |children| children.1)
+            sync_cxr(sc, args, c"sync-cdr", false, |children| children.1)
         }
     }
 
@@ -1243,15 +1310,32 @@ fn primitive_s7_sync_call() -> Primitive {
             match PERSISTOR.root_get(record) {
                 Ok(_) => {
                     let message = obj2str(sc, message_expr);
+                    let scenario = SESSIONS
+                        .read()
+                        .expect("Failed to acquire sessions lock")
+                        .get(&(sc as usize))
+                        .and_then(|session| session.scenario.clone());
                     if s7::s7_boolean(sc, blocking) {
-                        let result = JOURNAL.evaluate_record(record, message.as_str());
+                        let result = JOURNAL.evaluate_record_with_context(
+                            record,
+                            message.as_str(),
+                            scenario,
+                        );
                         let c_result = CString::new(format!("(quote {})", result))
                             .expect("Failed to create C string from journal evaluation result");
                         s7::s7_eval_c_string(sc, c_result.as_ptr())
                     } else {
+                        if scenario.is_some() {
+                            JOURNAL.evaluate_record_with_context(
+                                record,
+                                message.as_str(),
+                                scenario,
+                            );
+                    } else {
                         tokio::spawn(async move {
                             JOURNAL.evaluate_record(record, message.as_str());
                         });
+                        }
                         s7::s7_make_boolean(sc, true)
                     }
                 }
@@ -1278,167 +1362,773 @@ fn primitive_s7_sync_call() -> Primitive {
     )
 }
 
+const SYNC_LET_ALLOWED: &[&str] = &[
+    "*", "+", "-", "/", "<", "<=", "=", ">", ">=", "and", "append", "apply",
+    "apply-values", "ash", "assq", "assoc", "begin", "boolean?", "byte-vector?",
+    "byte-vector->expression", "byte-vector->hex-string", "byte-vector-length",
+    "byte-vector-ref", "byte-vector-set!", "caadar", "caadr", "caar", "cadar", "cadr", "caddr",
+    "car", "case", "catch", "cdadar", "cddar", "cddr", "cdr", "char?", "complex?",
+    "cond", "cons", "define", "define*", "do", "else", "eq?", "equal?", "eqv?",
+    "error", "even?", "expt", "expression->byte-vector", "for-each", "if", "integer?",
+    "keyword?", "lambda", "lambda*", "length", "let", "let*", "letrec", "letrec*",
+    "list", "list-tail", "list-values", "list?", "logand", "macro?", "make-list", "map",
+    "max", "member", "memq", "min", "modulo", "negative?", "not", "null?",
+    "number->string", "number?", "odd?", "or", "pair?", "positive?", "procedure?",
+    "proper-list?", "quasiquote", "quote", "rational?", "real?", "remainder", "reverse",
+    "set!", "string->symbol", "string?", "string=?", "string-length", "string-ref",
+    "substring", "subvector", "symbol->string", "symbol?", "sync-car", "sync-cdr",
+    "sync-cons", "sync-cut", "sync-deserialize", "sync-digest", "sync-eval", "sync-hash",
+    "sync-let-active?", "sync-let-eval", "sync-node?", "sync-null", "sync-null?",
+    "sync-pair?", "sync-serialize", "sync-stub", "sync-stub?", "throw", "unquote",
+    "unquote-splicing", "vector", "vector-length", "vector-ref", "vector-set!", "vector?",
+    "zero?",
+];
+
+const SERIALIZATION_QUERY_ADDITIONAL: &[&str] = &[
+    "ash", "cadr", "caddr", "expt", "list-values", "logand", "make-list",
+    "subvector",
+];
+enum SyncLetCopyTask {
+    Visit(s7::s7_pointer),
+    FinishVector { address: usize, length: s7::s7_int },
+    FinishList { addresses: Vec<usize>, length: usize },
+}
+
+struct SyncLetProtected {
+    value: s7::s7_pointer,
+    location: s7::s7_int,
+}
+
+unsafe fn sync_let_protect(
+    sc: *mut s7::s7_scheme,
+    value: s7::s7_pointer,
+) -> SyncLetProtected {
+    unsafe {
+        SyncLetProtected {
+            value,
+            location: s7::s7_gc_protect(sc, value),
+        }
+    }
+}
+
+unsafe fn sync_let_unprotect(sc: *mut s7::s7_scheme, protected: SyncLetProtected) {
+    unsafe {
+        s7::s7_gc_unprotect_at(sc, protected.location);
+    }
+}
+
+unsafe fn sync_let_copy_cleanup(
+    sc: *mut s7::s7_scheme,
+    results: &mut Vec<SyncLetProtected>,
+) {
+    unsafe {
+        for result in results.drain(..) {
+            sync_let_unprotect(sc, result);
+        }
+    }
+}
+
+unsafe fn sync_let_copy(
+    sc: *mut s7::s7_scheme,
+    value: s7::s7_pointer,
+    visiting: &mut HashSet<usize>,
+    allowed_syntax: Option<&HashSet<usize>>,
+) -> Result<SyncLetProtected, String> {
+    unsafe {
+        let mut tasks = vec![SyncLetCopyTask::Visit(value)];
+        let mut results = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                SyncLetCopyTask::Visit(value) => {
+                    if value == s7::s7_undefined(sc)
+                        || value == s7::s7_unspecified(sc)
+                        || value == s7::s7_eof_object(sc)
+                    {
+                        sync_let_copy_cleanup(sc, &mut results);
+                        return Err(
+                            "sync-let does not accept undefined, unspecified, or eof values"
+                                .to_string(),
+                        );
+                    }
+                    if s7::s7_is_syntax(value) {
+                        if allowed_syntax
+                            .is_some_and(|allowed| allowed.contains(&(value as usize)))
+                        {
+                            results.push(sync_let_protect(sc, value));
+                            continue;
+                        }
+                        sync_let_copy_cleanup(sc, &mut results);
+                        return Err("sync-let body contains unavailable syntax".to_string());
+                    }
+                    if sync_is_node(value)
+                        || s7::s7_is_null(sc, value)
+                        || s7::s7_is_boolean(value)
+                        || s7::s7_is_number(value)
+                        || s7::s7_is_character(value)
+                        || s7::s7_is_symbol(value)
+                        || s7::s7_is_keyword(value)
+                    {
+                        results.push(sync_let_protect(sc, value));
+                        continue;
+                    }
+                    if s7::s7_is_string(value) {
+                        results.push(sync_let_protect(
+                            sc,
+                            s7::s7_make_string_with_length(
+                                sc,
+                                s7::s7_string(value),
+                                s7::s7_string_length(value),
+                            ),
+                        ));
+                        continue;
+                    }
+                    if s7::s7_is_byte_vector(value) {
+                        let length = s7::s7_vector_length(value);
+                        let copy = sync_let_protect(
+                            sc,
+                            s7::s7_make_byte_vector(sc, length, 1, std::ptr::null_mut()),
+                        );
+                        for index in 0..length {
+                            s7::s7_byte_vector_set(
+                                copy.value,
+                                index,
+                                s7::s7_byte_vector_ref(value, index),
+                            );
+                        }
+                        results.push(copy);
+                        continue;
+                    }
+                    if s7::s7_is_vector(value) {
+                        let address = value as usize;
+                        if !visiting.insert(address) {
+                            sync_let_copy_cleanup(sc, &mut results);
+                            return Err("sync-let does not accept cyclic vectors".to_string());
+                        }
+                        let length = s7::s7_vector_length(value);
+                        tasks.push(SyncLetCopyTask::FinishVector { address, length });
+                        for index in (0..length).rev() {
+                            tasks.push(SyncLetCopyTask::Visit(s7::s7_vector_ref(
+                                sc, value, index,
+                            )));
+                        }
+                        continue;
+                    }
+                    if s7::s7_is_pair(value) {
+                        let mut source = value;
+                        let mut addresses = Vec::new();
+                        let mut items = Vec::new();
+                        while s7::s7_is_pair(source) {
+                            let address = source as usize;
+                            if !visiting.insert(address) {
+                                sync_let_copy_cleanup(sc, &mut results);
+                                return Err("sync-let does not accept cyclic lists".to_string());
+                            }
+                            addresses.push(address);
+                            items.push(s7::s7_car(source));
+                            source = s7::s7_cdr(source);
+                        }
+                        if !s7::s7_is_null(sc, source) {
+                            sync_let_copy_cleanup(sc, &mut results);
+                            return Err("sync-let accepts only proper lists".to_string());
+                        }
+                        let length = items.len();
+                        tasks.push(SyncLetCopyTask::FinishList { addresses, length });
+                        for item in items.into_iter().rev() {
+                            tasks.push(SyncLetCopyTask::Visit(item));
+                        }
+                        continue;
+                    }
+                    sync_let_copy_cleanup(sc, &mut results);
+                    return Err("sync-let values must be inert data or sync nodes".to_string());
+                }
+                SyncLetCopyTask::FinishVector { address, length } => {
+                    let copy = sync_let_protect(sc, s7::s7_make_vector(sc, length));
+                    for index in (0..length).rev() {
+                        let item = results.pop().expect("sync-let vector copy result missing");
+                        s7::s7_vector_set(sc, copy.value, index, item.value);
+                        sync_let_unprotect(sc, item);
+                    }
+                    visiting.remove(&address);
+                    results.push(copy);
+                }
+                SyncLetCopyTask::FinishList { addresses, length } => {
+                    let mut copy: Option<SyncLetProtected> = None;
+                    for _ in 0..length {
+                        let item = results.pop().expect("sync-let list copy result missing");
+                        let cell = sync_let_protect(
+                            sc,
+                            s7::s7_cons(
+                                sc,
+                                item.value,
+                                copy.as_ref().map_or(s7::s7_nil(sc), |value| value.value),
+                            ),
+                        );
+                        sync_let_unprotect(sc, item);
+                        if let Some(previous) = copy {
+                            sync_let_unprotect(sc, previous);
+                        }
+                        copy = Some(cell);
+                    }
+                    for address in addresses {
+                        visiting.remove(&address);
+                    }
+                    results.push(copy.unwrap_or_else(|| sync_let_protect(sc, s7::s7_nil(sc))));
+                }
+            }
+        }
+        if results.len() != 1 {
+            sync_let_copy_cleanup(sc, &mut results);
+            return Err("sync-let boundary copy produced an invalid result".to_string());
+        }
+        Ok(results.pop().expect("sync-let copy result missing"))
+    }
+}
+
+unsafe fn sync_let_failure(
+    sc: *mut s7::s7_scheme,
+    message: &str,
+) -> s7::s7_pointer {
+    unsafe {
+        let message = CString::new(message).unwrap_or_else(|_| {
+            CString::new("sync-let boundary error").expect("static string contains no null")
+        });
+        let message = sync_let_protect(sc, s7::s7_make_string(sc, message.as_ptr()));
+        let info = sync_let_protect(sc, s7::s7_list(sc, 1, message.value));
+        let error_args = sync_let_protect(
+            sc,
+            s7::s7_list(
+                sc,
+                2,
+                s7::s7_make_symbol(sc, c"sync-web-error".as_ptr()),
+                info.value,
+            ),
+        );
+        let boundary = sync_let_protect(
+            sc,
+            s7::s7_list(
+                sc,
+                2,
+                s7::s7_make_symbol(sc, c"%sync-let-error".as_ptr()),
+                error_args.value,
+            ),
+        );
+        let result = boundary.value;
+        sync_let_unprotect(sc, boundary);
+        sync_let_unprotect(sc, error_args);
+        sync_let_unprotect(sc, info);
+        sync_let_unprotect(sc, message);
+        result
+    }
+}
+
+fn primitive_s7_sync_let() -> Primitive {
+    unsafe extern "C" fn code(
+        sc: *mut s7::s7_scheme,
+        args: s7::s7_pointer,
+    ) -> s7::s7_pointer {
+        unsafe {
+            let names = s7::s7_car(args);
+            let values = s7::s7_cadr(args);
+            let body = s7::s7_caddr(args);
+            if !s7::s7_is_proper_list(sc, names)
+                || !s7::s7_is_proper_list(sc, values)
+                || s7::s7_list_length(sc, names) != s7::s7_list_length(sc, values)
+            {
+                return sync_let_failure(sc, "sync-let binding names and values must be equal lists");
+            }
+
+            let environment = sync_let_env(sc);
+            let mut names_cursor = names;
+            let mut values_cursor = values;
+            let mut seen = HashSet::new();
+            while !s7::s7_is_null(sc, names_cursor) {
+                let name = s7::s7_car(names_cursor);
+                if !s7::s7_is_symbol(name) || !seen.insert(name as usize) {
+                    sync_let_unprotect(sc, environment);
+                    return sync_let_failure(sc, "sync-let binding names must be distinct symbols");
+                }
+                if s7::s7_is_syntax(s7::s7_let_ref(sc, s7::s7_rootlet(sc), name)) {
+                    sync_let_unprotect(sc, environment);
+                    return sync_let_failure(sc, "sync-let binding names cannot shadow syntax");
+                }
+                let value = match sync_let_copy(
+                    sc,
+                    s7::s7_car(values_cursor),
+                    &mut HashSet::new(),
+                    None,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        sync_let_unprotect(sc, environment);
+                        return sync_let_failure(sc, error.as_str());
+                    }
+                };
+                s7::s7_varlet(sc, environment.value, name, value.value);
+                sync_let_unprotect(sc, value);
+                names_cursor = s7::s7_cdr(names_cursor);
+                values_cursor = s7::s7_cdr(values_cursor);
+            }
+
+            if !s7::s7_is_byte_vector(body) {
+                sync_let_unprotect(sc, environment);
+                return sync_let_failure(sc, "sync-let body must be encoded code");
+            }
+            let bytes = (0..s7::s7_vector_length(body))
+                .map(|index| s7::s7_byte_vector_ref(body, index))
+                .collect::<Vec<_>>();
+            let body = sync_let_protect(
+                sc,
+                s7::s7_make_string_with_length(
+                    sc,
+                    bytes.as_ptr() as *const c_char,
+                    bytes.len() as s7::s7_int,
+                ),
+            );
+            let wrapper_environment = sync_let_protect(
+                sc,
+                s7::s7_sublet(sc, s7::s7_rootlet(sc), s7::s7_nil(sc)),
+            );
+            let ok = sync_let_protect(
+                sc,
+                s7::s7_make_symbol(sc, c"%sync-let-ok".as_ptr()),
+            );
+            let error_tag = sync_let_protect(
+                sc,
+                s7::s7_make_symbol(sc, c"%sync-let-error".as_ptr()),
+            );
+            s7::s7_varlet(
+                sc,
+                wrapper_environment.value,
+                s7::s7_make_symbol(sc, c"%sync-let-body".as_ptr()),
+                body.value,
+            );
+            s7::s7_varlet(
+                sc,
+                wrapper_environment.value,
+                s7::s7_make_symbol(sc, c"%sync-let-environment".as_ptr()),
+                environment.value,
+            );
+            s7::s7_varlet(
+                sc,
+                wrapper_environment.value,
+                s7::s7_make_symbol(sc, c"%sync-let-eval".as_ptr()),
+                s7::s7_let_ref(
+                    sc,
+                    s7::s7_rootlet(sc),
+                    s7::s7_make_symbol(sc, c"eval-string".as_ptr()),
+                ),
+            );
+            s7::s7_varlet(
+                sc,
+                wrapper_environment.value,
+                s7::s7_make_symbol(sc, c"%sync-let-ok".as_ptr()),
+                ok.value,
+            );
+            s7::s7_varlet(
+                sc,
+                wrapper_environment.value,
+                s7::s7_make_symbol(sc, c"%sync-let-error".as_ptr()),
+                error_tag.value,
+            );
+            s7::s7_varlet(
+                sc,
+                wrapper_environment.value,
+                s7::s7_make_symbol(sc, c"%sync-let-list".as_ptr()),
+                s7::s7_let_ref(
+                    sc,
+                    s7::s7_rootlet(sc),
+                    s7::s7_make_symbol(sc, c"list".as_ptr()),
+                ),
+            );
+            let wrapper = CString::new(
+                "(catch #t\
+                   (lambda ()\
+                     (%sync-let-list %sync-let-ok\
+                       (%sync-let-eval %sync-let-body %sync-let-environment)))\
+                   (lambda args (%sync-let-list %sync-let-error args)))",
+            )
+            .expect("Failed to construct sync-let wrapper");
+            SESSIONS
+                .write()
+                .expect("Failed to acquire sessions lock")
+                .get_mut(&(sc as usize))
+                .expect("Session not found for sync-let")
+                .sync_let_boundaries
+                .push(environment.location);
+            let tagged = sync_let_protect(
+                sc,
+                s7::s7_eval_c_string_with_environment(
+                    sc,
+                    wrapper.as_ptr(),
+                    wrapper_environment.value,
+                ),
+            );
+            SESSIONS
+                .write()
+                .expect("Failed to acquire sessions lock")
+                .get_mut(&(sc as usize))
+                .expect("Session not found for sync-let")
+                .sync_let_boundaries
+                .pop();
+            sync_let_unprotect(sc, body);
+            sync_let_unprotect(sc, wrapper_environment);
+            if s7::s7_is_pair(tagged.value)
+                && s7::s7_list_length(sc, tagged.value) == 2
+                && s7::s7_car(tagged.value) == error_tag.value
+            {
+                let error_args = s7::s7_cadr(tagged.value);
+                let copied_error = match sync_let_copy(
+                    sc,
+                    error_args,
+                    &mut HashSet::new(),
+                    None,
+                ) {
+                    Ok(copied) => copied,
+                    Err(_) => {
+                        sync_let_unprotect(sc, tagged);
+                        sync_let_unprotect(sc, error_tag);
+                        sync_let_unprotect(sc, ok);
+                        sync_let_unprotect(sc, environment);
+                        return sync_let_failure(sc, "sync-let error contained a non-inert value");
+                    }
+                };
+                if !s7::s7_is_proper_list(sc, copied_error.value)
+                    || s7::s7_list_length(sc, copied_error.value) != 2
+                {
+                    sync_let_unprotect(sc, copied_error);
+                    sync_let_unprotect(sc, tagged);
+                    sync_let_unprotect(sc, error_tag);
+                    sync_let_unprotect(sc, ok);
+                    sync_let_unprotect(sc, environment);
+                    return sync_let_failure(sc, "sync-let error has an invalid boundary shape");
+                }
+                s7::s7_set_car(s7::s7_cdr(tagged.value), copied_error.value);
+                let result = tagged.value;
+                sync_let_unprotect(sc, copied_error);
+                sync_let_unprotect(sc, tagged);
+                sync_let_unprotect(sc, error_tag);
+                sync_let_unprotect(sc, ok);
+                sync_let_unprotect(sc, environment);
+                return result;
+            }
+
+            if !s7::s7_is_pair(tagged.value)
+                || s7::s7_list_length(sc, tagged.value) != 2
+                || s7::s7_car(tagged.value) != ok.value
+            {
+                sync_let_unprotect(sc, tagged);
+                sync_let_unprotect(sc, error_tag);
+                sync_let_unprotect(sc, ok);
+                sync_let_unprotect(sc, environment);
+                return sync_let_failure(sc, "sync-let evaluation returned an invalid boundary result");
+            }
+            let copied = match sync_let_copy(
+                sc,
+                s7::s7_cadr(tagged.value),
+                &mut HashSet::new(),
+                None,
+            ) {
+                Ok(copied) => copied,
+                Err(error) => {
+                    sync_let_unprotect(sc, tagged);
+                    sync_let_unprotect(sc, error_tag);
+                    sync_let_unprotect(sc, ok);
+                    sync_let_unprotect(sc, environment);
+                    return sync_let_failure(sc, error.as_str());
+                }
+            };
+            s7::s7_set_car(s7::s7_cdr(tagged.value), copied.value);
+            let result = tagged.value;
+            sync_let_unprotect(sc, copied);
+            sync_let_unprotect(sc, tagged);
+            sync_let_unprotect(sc, error_tag);
+            sync_let_unprotect(sc, ok);
+            sync_let_unprotect(sc, environment);
+            result
+        }
+    }
+
+    Primitive::new(
+        code,
+        c"%sync-let",
+        c"internal sync-let copied-data sandbox evaluator",
+        3,
+        0,
+        false,
+    )
+}
+
+fn primitive_s7_sync_let_return() -> Primitive {
+    unsafe extern "C" fn code(
+        sc: *mut s7::s7_scheme,
+        args: s7::s7_pointer,
+    ) -> s7::s7_pointer {
+        unsafe {
+            let boundary = s7::s7_car(args);
+            if !s7::s7_is_proper_list(sc, boundary)
+                || s7::s7_list_length(sc, boundary) != 2
+            {
+                return sync_error(sc, "sync-let returned an invalid internal boundary shape");
+            }
+            let tag = s7::s7_car(boundary);
+            let ok = s7::s7_make_symbol(sc, c"%sync-let-ok".as_ptr());
+            let error = s7::s7_make_symbol(sc, c"%sync-let-error".as_ptr());
+            if tag == ok {
+                return s7::s7_cadr(boundary);
+            }
+            if tag != error {
+                return sync_error(sc, "sync-let returned an invalid internal boundary tag");
+            }
+            let error_args = s7::s7_cadr(boundary);
+            if !s7::s7_is_proper_list(sc, error_args)
+                || s7::s7_list_length(sc, error_args) != 2
+            {
+                return sync_error(sc, "sync-let error has an invalid boundary shape");
+            }
+            s7::s7_error(sc, s7::s7_car(error_args), s7::s7_cadr(error_args))
+        }
+    }
+
+    Primitive::new(
+        code,
+        c"%sync-let-return",
+        c"internal sync-let boundary result transfer",
+        1,
+        0,
+        false,
+    )
+}
+
+unsafe fn active_shared_boundary(sc: *mut s7::s7_scheme) -> Option<s7::s7_pointer> {
+    unsafe {
+        let location = SESSIONS
+            .read()
+            .expect("Failed to acquire sessions lock")
+            .get(&(sc as usize))
+            .and_then(|session| {
+                if serialization_trace_active(sc) {
+                    session.serialization_env_loc
+                } else {
+                    session.sync_let_boundaries.last().copied()
+                }
+            })?;
+        Some(s7::s7_gc_protected_at(sc, location))
+    }
+}
+
+unsafe fn shared_boundary_contains(
+    sc: *mut s7::s7_scheme,
+    boundary: s7::s7_pointer,
+    procedure: s7::s7_pointer,
+) -> bool {
+    unsafe {
+        let mut environment = s7::s7_funclet(sc, procedure);
+        while !environment.is_null()
+            && s7::s7_is_let(environment)
+            && environment != boundary
+        {
+            environment = s7::s7_outlet(sc, environment);
+        }
+        environment == boundary
+    }
+}
+
+fn primitive_s7_sync_safe_setter() -> Primitive {
+    unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
+        unsafe {
+            let target = s7::s7_car(args);
+            if !s7::s7_is_procedure(target) {
+                return s7::s7_f(sc);
+            }
+            let Some(boundary) = active_shared_boundary(sc) else {
+                return s7::s7_f(sc);
+            };
+            if !shared_boundary_contains(sc, boundary, target) {
+                return s7::s7_f(sc);
+            }
+            s7::s7_setter(sc, target)
+        }
+    }
+
+    Primitive::new(
+        code,
+        c"%sync-safe-setter",
+        c"internal getter for shared-computation procedure setters",
+        1,
+        0,
+        false,
+    )
+}
+
+fn primitive_s7_sync_safe_setter_set() -> Primitive {
+    unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
+        unsafe {
+            let target = s7::s7_car(args);
+            let setter = s7::s7_cadr(args);
+            if !s7::s7_is_procedure(target) || !s7::s7_is_procedure(setter) {
+                return sync_error(sc, "safe setter requires two procedures");
+            }
+            let Some(boundary) = active_shared_boundary(sc) else {
+                return sync_error(sc, "safe setter shared boundary is unavailable");
+            };
+            if !shared_boundary_contains(sc, boundary, target)
+                || !shared_boundary_contains(sc, boundary, setter)
+            {
+                return sync_error(
+                    sc,
+                    "safe setter rejects procedures outside the active shared boundary",
+                );
+            }
+            s7::s7_set_setter(sc, target, setter)
+        }
+    }
+
+    Primitive::new(
+        code,
+        c"%sync-safe-setter-set!",
+        c"internal setter for shared-computation procedure setters",
+        2,
+        0,
+        false,
+    )
+}
+
+fn primitive_s7_sync_let_active() -> Primitive {
+    unsafe extern "C" fn code(sc: *mut s7::s7_scheme, _args: s7::s7_pointer) -> s7::s7_pointer {
+        let active = SESSIONS
+            .read()
+            .expect("Failed to acquire sessions lock")
+            .get(&(sc as usize))
+            .is_some_and(|session| !session.sync_let_boundaries.is_empty());
+        unsafe { s7::s7_make_boolean(sc, active) }
+    }
+
+    Primitive::new(
+        code,
+        c"sync-let-active?",
+        c"(sync-let-active?) report whether shared computation is active",
+        0,
+        0,
+        false,
+    )
+}
+
+fn primitive_s7_sync_let_eval() -> Primitive {
+    unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
+        unsafe {
+            let location = SESSIONS
+                .read()
+                .expect("Failed to acquire sessions lock")
+                .get(&(sc as usize))
+                .and_then(|session| session.sync_let_boundaries.last().copied());
+            let Some(location) = location else {
+                return sync_error(sc, "sync-let-eval is available only inside sync-let");
+            };
+            let source = obj2str(sc, s7::s7_car(args));
+            let source = match CString::new(source) {
+                Ok(source) => source,
+                Err(_) => return sync_error(sc, "sync-let-eval expression contains a null byte"),
+            };
+            s7::s7_eval_c_string_with_environment(
+                sc,
+                source.as_ptr(),
+                s7::s7_gc_protected_at(sc, location),
+            )
+        }
+    }
+
+    Primitive::new(
+        code,
+        c"sync-let-eval",
+        c"(sync-let-eval expression) evaluate copied code in the current sync-let",
+        1,
+        0,
+        false,
+    )
+}
+
 fn primitive_s7_sync_eval() -> Primitive {
     unsafe extern "C" fn code(sc: *mut s7::s7_scheme, args: s7::s7_pointer) -> s7::s7_pointer {
         unsafe {
+            let eval_env = s7::s7_gc_protect_via_stack(sc, s7::s7_curlet(sc));
             let expression = s7::s7_gc_protect_via_stack(sc, s7::s7_car(args));
-            let strict = if s7::s7_is_null(sc, s7::s7_cdr(args)) {
-                true
-            } else {
-                let strict = s7::s7_cadr(args);
-                if !s7::s7_is_boolean(strict) {
-                    s7::s7_gc_unprotect_via_stack(sc, expression);
-                    return s7::s7_wrong_type_arg_error(
-                        sc,
-                        c"sync-eval".as_ptr(),
-                        2,
-                        strict,
-                        c"a boolean".as_ptr(),
-                    );
-                }
-                s7::s7_boolean(sc, strict)
-            };
             if !sync_is_node(expression) {
+                let value = expression;
                 s7::s7_gc_unprotect_via_stack(sc, expression);
+                s7::s7_gc_unprotect_via_stack(sc, eval_env);
                 return s7::s7_wrong_type_arg_error(
-                    sc,
-                    c"sync-eval".as_ptr(),
-                    1,
-                    expression,
-                    c"a sync-node".as_ptr(),
+                    sc, c"sync-eval".as_ptr(), 1, value, c"a sync-node".as_ptr(),
                 );
             }
-
-            let expression_word = sync_heap_read(s7::s7_c_object_value(expression));
-            if strict {
-                if let Some(result) = strict_cache_get(sc, expression_word) {
-                    s7::s7_gc_unprotect_via_stack(sc, expression);
-                    return result;
-                }
-                let header_word = match sync_branch_children(sc, expression_word) {
-                    Ok((left, _)) => left,
-                    Err(err) => {
-                        s7::s7_gc_unprotect_via_stack(sc, expression);
-                        return sync_error(
-                            sc,
-                            format!("sync-eval first argument should be a sync-node with a byte-vector header ({})", err).as_str(),
-                        );
-                    }
-                };
-                let eval_env = strict_sync_eval_env_cached(sc);
-                let loader = match strict_loader_lookup(sc, header_word) {
-                    Some(loader) => loader,
-                    None => {
-                        let header = s7::s7_gc_protect_via_stack(
-                            sc,
-                            sync_cxr(
-                                sc,
-                                s7::s7_list(sc, 1, expression),
-                                c"sync-eval",
-                                |children| children.0,
-                            ),
-                        );
-                        if !s7::s7_is_byte_vector(header) {
-                            s7::s7_gc_unprotect_via_stack(sc, header);
-                            s7::s7_gc_unprotect_via_stack(sc, expression);
-                            return sync_error(sc, "sync-eval first argument should be a sync-node with a byte-vector header");
-                        }
-                        let mut bytes = vec![39];
-                        for i in 0..s7::s7_vector_length(header) {
-                            bytes.push(s7::s7_byte_vector_ref(header, i));
-                        }
-                        bytes.push(0);
-                        let loader_expr = match CString::from_vec_with_nul(bytes) {
-                            Ok(c_string) => s7::s7_gc_protect_via_stack(sc, s7::s7_eval_c_string(sc, c_string.as_ptr())),
-                            Err(_) => {
-                                s7::s7_gc_unprotect_via_stack(sc, header);
-                                s7::s7_gc_unprotect_via_stack(sc, expression);
-                                return s7::s7_error(
-                                    sc,
-                                    s7::s7_make_symbol(sc, c"encoding-error".as_ptr()),
-                                    s7::s7_list(
-                                        sc,
-                                        1,
-                                        s7::s7_make_string(sc, c"Byte vector string is malformed".as_ptr()),
-                                    ),
-                                );
-                            }
-                        };
-                        let loader = s7::s7_gc_protect_via_stack(sc, s7::s7_eval(sc, loader_expr, eval_env));
-                        let cached = strict_loader_cache_store(sc, header_word, loader);
-                        s7::s7_gc_unprotect_via_stack(sc, loader);
-                        s7::s7_gc_unprotect_via_stack(sc, loader_expr);
-                        s7::s7_gc_unprotect_via_stack(sc, header);
-                        cached
-                    }
-                };
-                let result = s7::s7_gc_protect_via_stack(
+            let header = s7::s7_gc_protect_via_stack(
+                sc,
+                sync_cxr(
                     sc,
-                    s7::s7_apply_function(sc, loader, s7::s7_list(sc, 1, expression)),
-                );
-                let cached = strict_cache_put(sc, expression_word, result);
-                s7::s7_gc_unprotect_via_stack(sc, expression);
-                s7::s7_gc_unprotect_via_stack(sc, result);
-                return cached;
-            } else {
-                let header = s7::s7_gc_protect_via_stack(
-                    sc,
-                    sync_cxr(
-                        sc,
-                        s7::s7_list(sc, 1, expression),
-                        c"sync-eval",
-                        |children| children.0,
-                    ),
-                );
-                if !s7::s7_is_byte_vector(header) {
-                    s7::s7_gc_unprotect_via_stack(sc, header);
-                    s7::s7_gc_unprotect_via_stack(sc, expression);
-                    return sync_error(sc, "sync-eval first argument should be a sync-node with a byte-vector header");
-                }
-                let mut bytes = vec![39];
-                for i in 0..s7::s7_vector_length(header) {
-                    bytes.push(s7::s7_byte_vector_ref(header, i));
-                }
-                bytes.push(0);
-                let loader_expr = match CString::from_vec_with_nul(bytes) {
-                    Ok(c_string) => s7::s7_gc_protect_via_stack(sc, s7::s7_eval_c_string(sc, c_string.as_ptr())),
-                    Err(_) => {
-                        s7::s7_gc_unprotect_via_stack(sc, header);
-                        s7::s7_gc_unprotect_via_stack(sc, expression);
-                        return s7::s7_error(
-                            sc,
-                            s7::s7_make_symbol(sc, c"encoding-error".as_ptr()),
-                            s7::s7_list(
-                                sc,
-                                1,
-                                s7::s7_make_string(sc, c"Byte vector string is malformed".as_ptr()),
-                            ),
-                        );
-                    }
-                };
-                let eval_env = s7::s7_gc_protect_via_stack(sc, s7::s7_curlet(sc));
-                let loader = s7::s7_gc_protect_via_stack(sc, s7::s7_eval(sc, loader_expr, eval_env));
-                let result = s7::s7_gc_protect_via_stack(
-                    sc,
-                    s7::s7_apply_function(sc, loader, s7::s7_list(sc, 1, expression)),
-                );
-                s7::s7_gc_unprotect_via_stack(sc, eval_env);
-                s7::s7_gc_unprotect_via_stack(sc, loader);
-                s7::s7_gc_unprotect_via_stack(sc, loader_expr);
+                    s7::s7_list(sc, 1, expression),
+                    c"sync-eval",
+                    true,
+                    |children| children.0,
+                ),
+            );
+            if !s7::s7_is_byte_vector(header) {
                 s7::s7_gc_unprotect_via_stack(sc, header);
                 s7::s7_gc_unprotect_via_stack(sc, expression);
-                s7::s7_gc_unprotect_via_stack(sc, result);
-                return result;
+                s7::s7_gc_unprotect_via_stack(sc, eval_env);
+                return sync_error(
+                    sc,
+                    "sync-eval first argument should be a sync-node with a byte-vector header",
+                );
+            }
+            let mut bytes = vec![39];
+            for index in 0..s7::s7_vector_length(header) {
+                bytes.push(s7::s7_byte_vector_ref(header, index));
+            }
+            bytes.push(0);
+            let code = match CString::from_vec_with_nul(bytes) {
+                Ok(code) => code,
+                Err(_) => {
+                    s7::s7_gc_unprotect_via_stack(sc, header);
+                    s7::s7_gc_unprotect_via_stack(sc, expression);
+                    s7::s7_gc_unprotect_via_stack(sc, eval_env);
+                    return s7::s7_error(
+                        sc,
+                        s7::s7_make_symbol(sc, c"encoding-error".as_ptr()),
+                        s7::s7_list(
+                            sc,
+                            1,
+                            s7::s7_make_string(sc, c"Byte vector string is malformed".as_ptr()),
+                        ),
+                    );
+                }
             };
+            let loader_expression = s7::s7_gc_protect_via_stack(
+                sc,
+                s7::s7_eval_c_string_with_environment(sc, code.as_ptr(), eval_env),
+            );
+            let loader = s7::s7_gc_protect_via_stack(
+                sc,
+                s7::s7_eval(sc, loader_expression, eval_env),
+            );
+            let result = s7::s7_gc_protect_via_stack(
+                sc,
+                s7::s7_apply_function(sc, loader, s7::s7_list(sc, 1, expression)),
+            );
+            s7::s7_gc_unprotect_via_stack(sc, result);
+            s7::s7_gc_unprotect_via_stack(sc, loader);
+            s7::s7_gc_unprotect_via_stack(sc, loader_expression);
+            s7::s7_gc_unprotect_via_stack(sc, header);
+            s7::s7_gc_unprotect_via_stack(sc, expression);
+            s7::s7_gc_unprotect_via_stack(sc, eval_env);
+            result
         }
     }
 
     Primitive::new(
         code,
         c"sync-eval",
-        c"(sync-eval node (strict? #t)) evaluate a sync-node strictly, or load it when strict? is #f",
+        c"(sync-eval node) load a sync-node in the current environment",
         1,
-        3,
+        0,
         false,
     )
 }
@@ -1464,6 +2154,16 @@ fn primitive_s7_sync_http() -> Primitive {
             } else {
                 String::from("")
             };
+
+            if SESSIONS
+                .read()
+                .expect("Failed to acquire session lock")
+                .get(&(sc as usize))
+                .and_then(|session| session.scenario.as_ref())
+                .is_some()
+            {
+                return sync_error(sc, "sync-http is not supported by the scenario harness");
+            }
 
             let cache_mutex = {
                 let session = SESSIONS.read().expect("Failed to acquire sessions lock");
@@ -1575,23 +2275,46 @@ fn primitive_s7_sync_remote() -> Primitive {
                     vec2s7(bytes.to_vec())
                 }
                 None => {
-                    let result = tokio::task::block_in_place(move || {
+                    let scenario = {
+                        let sessions = SESSIONS.read().expect("Failed to acquire session lock");
+                        let session = sessions
+                            .get(&(sc as usize))
+                            .expect("Failed to get session from map");
+                        session
+                            .scenario
+                            .as_ref()
+                            .map(|scenario| (scenario.clone(), session.record))
+                    };
+                    let result: Result<Vec<u8>, String> = if let Some((scenario, source)) = scenario
+                    {
+                        scenario.transport.remote(
+                            scenario.action,
+                            source,
+                            url[1..url.len() - 1].to_string(),
+                            body,
+                        )
+                    } else {
+                        tokio::task::block_in_place(move || {
                         tokio::runtime::Handle::current().block_on(async move {
                             JOURNAL
                                 .client
                                 .post(&url[1..url.len() - 1])
                                 .body(body)
                                 .send()
-                                .await?
+                                    .await
+                                    .map_err(|error| error.to_string())?
                                 .bytes()
                                 .await
+                                    .map(|bytes| bytes.to_vec())
+                                    .map_err(|error| error.to_string())
                         })
-                    });
+                        })
+                    };
 
                     match result {
                         Ok(bytes) => {
                             cache.insert(key, bytes.to_vec());
-                            vec2s7(bytes.to_vec())
+                            vec2s7(bytes)
                         }
                         Err(_) => {
                             sync_error(sc, "Journal is unable to query remote peer (sync-remote)")
@@ -1652,12 +2375,13 @@ unsafe fn sync_cxr(
     sc: *mut s7::s7_scheme,
     args: s7::s7_pointer,
     name: &CStr,
+    left_side: bool,
     selector: fn((Word, Word)) -> Word,
 ) -> s7::s7_pointer {
     unsafe {
         let node = s7::s7_car(args);
         let word = sync_heap_read(s7::s7_c_object_value(node));
-        let (persistor, overlay) = session_storage_for(sc);
+        let persistor = session_persistor_for(sc);
 
         let child_return = |word| {
             let node_return = |word| s7::s7_make_c_object(sc, SYNC_NODE_TAG, sync_heap_make(word));
@@ -1674,7 +2398,7 @@ unsafe fn sync_cxr(
                 return node_return(word);
             }
 
-            match resolve_node_with(&persistor, overlay.as_ref(), word) {
+            match resolve_node_with(&persistor, word) {
                 Some(ResolvedNode::Branch((left, right, digest), ResolveSource::Global)) => {
                     persistor
                         .branch_set(left, right, digest)
@@ -1708,8 +2432,12 @@ unsafe fn sync_cxr(
         };
 
         match sync_is_node(node) {
-            true => match resolve_branch_with(&persistor, overlay.as_ref(), word) {
-                Some(((left, right, _), _)) => child_return(selector((left, right))),
+            true => match resolve_branch_with(&persistor, word) {
+                Some(((left, right, _), _)) => {
+                    let child = selector((left, right));
+                    serialization_trace_child(sc, word, child, left_side);
+                    child_return(child)
+                }
                 None => sync_error(
                     sc,
                     format!(
@@ -1727,12 +2455,12 @@ unsafe fn sync_cxr(
 }
 
 unsafe fn sync_digest(sc: *mut s7::s7_scheme, word: Word) -> Result<Word, String> {
-    let (persistor, overlay) = session_storage_for(sc);
+    let persistor = session_persistor_for(sc);
 
     if word == NULL {
         Ok(NULL)
     } else {
-        match resolve_node_with(&persistor, overlay.as_ref(), word) {
+        match resolve_node_with(&persistor, word) {
             Some(ResolvedNode::Branch((_, _, digest), _)) => Ok(digest),
             Some(ResolvedNode::Leaf(_, _)) => Ok(word),
             Some(ResolvedNode::Stump(digest, _)) => Ok(digest),
@@ -1742,9 +2470,9 @@ unsafe fn sync_digest(sc: *mut s7::s7_scheme, word: Word) -> Result<Word, String
 }
 
 unsafe fn sync_branch_children(sc: *mut s7::s7_scheme, word: Word) -> Result<(Word, Word), String> {
-    let (persistor, overlay) = session_storage_for(sc);
+    let persistor = session_persistor_for(sc);
 
-    if let Some(((left, right, _), _)) = resolve_branch_with(&persistor, overlay.as_ref(), word) {
+    if let Some(((left, right, _), _)) = resolve_branch_with(&persistor, word) {
         Ok((left, right))
     } else {
         Err("Node is not a sync-pair".to_string())
@@ -1760,123 +2488,186 @@ pub(crate) fn session_persistor_for(sc: *mut s7::s7_scheme) -> MemoryPersistor {
         .clone()
 }
 
-fn session_storage_for(sc: *mut s7::s7_scheme) -> (MemoryPersistor, Option<MemoryPersistor>) {
-    let session = SESSIONS.read().expect("Failed to acquire SESSIONS lock");
-    let session = session
-        .get(&(sc as usize))
-        .expect("Session not found for given context");
-    (
-        session.persistor.clone(),
-        session.strict_overlay_persistor.clone(),
-    )
-}
-
-unsafe fn strict_sync_eval_env(sc: *mut s7::s7_scheme) -> s7::s7_pointer {
-    unsafe {
-        let unsafe_names = [
-            c"curlet",
-            c"cutlet",
-            c"funclet",
-            c"inlet",
-            c"load",
-            c"open-input-string",
-            c"openlet",
-            c"owlet",
-            c"outlet",
-            c"read",
-            c"varlet",
-            c"sync-all",
-            c"sync-call",
-            c"sync-create",
-            c"sync-delete",
-            c"sync-state",
-            c"sync-http",
-            c"sync-remote",
-            c"random-byte-vector",
-        ];
-        let mut form = String::from("(let ((e (sublet (rootlet))))");
-        for name in unsafe_names {
-            let symbol = name.to_string_lossy();
-            form.push_str(&format!(
-                " (varlet e '{0} (lambda args (error 'unsafe-error \"{0} unavailable in strict sync-eval\")))",
-                symbol
-            ));
-        }
-        form.push_str(" e)");
-        let c_form = CString::new(form).expect("Failed to build strict sync-eval environment form");
-        s7::s7_eval_c_string(sc, c_form.as_ptr())
-    }
-}
-
-unsafe fn strict_sync_eval_env_cached(sc: *mut s7::s7_scheme) -> s7::s7_pointer {
-    unsafe {
-        if let Some(loc) = {
-            let sessions = SESSIONS.read().expect("Failed to acquire sessions lock");
-            sessions
-                .get(&(sc as usize))
-                .and_then(|session| session.strict_env_loc)
-        } {
-            return s7::s7_gc_protected_at(sc, loc);
-        }
-
-        let env = strict_sync_eval_env(sc);
-        let loc = s7::s7_gc_protect(sc, env);
-
-        let existing = {
-            let mut sessions = SESSIONS.write().expect("Failed to acquire sessions lock");
-            let session = sessions
-                .get_mut(&(sc as usize))
-                .expect("Session not found for strict env caching");
-            match session.strict_env_loc {
-                Some(existing) => Some(existing),
-                None => {
-                    session.strict_env_loc = Some(loc);
-                    None
-                }
-            }
-        };
-
-        if let Some(existing) = existing {
-            s7::s7_gc_unprotect_at(sc, loc);
-            s7::s7_gc_protected_at(sc, existing)
-        } else {
-            env
-        }
-    }
-}
-
-unsafe fn strict_loader_lookup(sc: *mut s7::s7_scheme, header_word: Word) -> Option<s7::s7_pointer> {
-    unsafe {
-        let loc = {
-            let sessions = SESSIONS.read().expect("Failed to acquire sessions lock");
-            sessions
-                .get(&(sc as usize))
-                .and_then(|session| session.strict_loader_locs.get(&header_word).copied())
-        }?;
-        Some(s7::s7_gc_protected_at(sc, loc))
-    }
-}
-
-unsafe fn strict_loader_cache_store(
+pub(crate) unsafe fn session_serialization_query_get(
     sc: *mut s7::s7_scheme,
-    header_word: Word,
-    loader: s7::s7_pointer,
+    source: &str,
+) -> Option<s7::s7_pointer> {
+    unsafe {
+        SESSIONS
+            .read()
+            .expect("Failed to acquire SESSIONS lock")
+            .get(&(sc as usize))
+            .and_then(|session| session.serialization_query_locs.get(source))
+            .map(|location| s7::s7_gc_protected_at(sc, *location))
+    }
+}
+
+pub(crate) unsafe fn session_serialization_query_store(
+    sc: *mut s7::s7_scheme,
+    source: String,
+    expression: s7::s7_pointer,
 ) -> s7::s7_pointer {
     unsafe {
-        let loc = s7::s7_gc_protect(sc, loader);
-        let existing = {
-            let mut sessions = SESSIONS.write().expect("Failed to acquire sessions lock");
-            let session = sessions
-                .get_mut(&(sc as usize))
-                .expect("Session not found for strict loader caching");
-            session.strict_loader_locs.insert(header_word, loc)
-        };
+        let location = s7::s7_gc_protect(sc, expression);
+        SESSIONS
+            .write()
+            .expect("Failed to acquire SESSIONS lock")
+            .get_mut(&(sc as usize))
+            .expect("Session not found for given context")
+            .serialization_query_locs
+            .insert(source, location);
+        expression
+    }
+}
 
-        if let Some(existing) = existing {
-            s7::s7_gc_unprotect_at(sc, loc);
-            s7::s7_gc_protected_at(sc, existing)
-        } else {
-            loader
+pub(crate) unsafe fn serialization_query_environment(
+    sc: *mut s7::s7_scheme,
+) -> (s7::s7_pointer, s7::s7_int) {
+    unsafe {
+        let existing = SESSIONS
+            .read()
+            .expect("Failed to acquire SESSIONS lock")
+            .get(&(sc as usize))
+            .and_then(|session| session.serialization_env_loc);
+        let base = match existing {
+            Some(location) => s7::s7_gc_protected_at(sc, location),
+            None => {
+                let environment = sync_let_env(sc);
+                SESSIONS
+                    .write()
+                    .expect("Failed to acquire SESSIONS lock")
+                    .get_mut(&(sc as usize))
+                    .expect("Session not found for given context")
+                    .serialization_env_loc = Some(environment.location);
+                environment.value
+            }
+        };
+        let environment = s7::s7_sublet(sc, base, s7::s7_nil(sc));
+        let environment_location = s7::s7_gc_protect(sc, environment);
+        for name in SYNC_LET_ALLOWED
+            .iter()
+            .chain(SERIALIZATION_QUERY_ADDITIONAL.iter())
+        {
+            let name = CString::new(*name).expect("serialization capability contains a null byte");
+            let symbol = s7::s7_make_symbol(sc, name.as_ptr());
+            s7::s7_define(
+                sc,
+                environment,
+                symbol,
+                s7::s7_let_ref(sc, s7::s7_rootlet(sc), symbol),
+            );
         }
+        s7::s7_define(
+            sc,
+            environment,
+            s7::s7_make_symbol(sc, c"setter".as_ptr()),
+            s7::s7_let_ref(
+                sc,
+                s7::s7_rootlet(sc),
+                s7::s7_make_symbol(sc, c"%sync-safe-setter".as_ptr()),
+            ),
+        );
+        for name in [
+            c"sync-serialize",
+            c"sync-deserialize",
+            c"sync-let-active?",
+            c"sync-let-eval",
+        ] {
+            s7::s7_define(
+                sc,
+                environment,
+                s7::s7_make_symbol(sc, name.as_ptr()),
+                s7::s7_undefined(sc),
+            );
+        }
+        (environment, environment_location)
+    }
+}
+
+pub(crate) unsafe fn serialization_error_copy(
+    sc: *mut s7::s7_scheme,
+    error_args: s7::s7_pointer,
+) -> Option<(s7::s7_pointer, s7::s7_pointer)> {
+    unsafe {
+        let copied = sync_let_copy(sc, error_args, &mut HashSet::new(), None).ok()?;
+        if !s7::s7_is_proper_list(sc, copied.value)
+            || s7::s7_list_length(sc, copied.value) != 2
+        {
+            sync_let_unprotect(sc, copied);
+            return None;
+        }
+        let error_type = s7::s7_gc_protect_via_stack(sc, s7::s7_car(copied.value));
+        let error_info = s7::s7_gc_protect_via_stack(sc, s7::s7_cadr(copied.value));
+        sync_let_unprotect(sc, copied);
+        Some((error_type, error_info))
+    }
+}
+
+struct SyncLetMask {
+    sc: *mut s7::s7_scheme,
+    environment: s7::s7_pointer,
+}
+
+unsafe extern "C" fn sync_let_mask_symbol(
+    name: *const c_char,
+    data: *mut c_void,
+) -> bool {
+    unsafe {
+        let mask = &mut *(data as *mut SyncLetMask);
+        let symbol = s7::s7_make_symbol(mask.sc, name);
+        s7::s7_define(
+            mask.sc,
+            mask.environment,
+            symbol,
+            s7::s7_undefined(mask.sc),
+        );
+        false
+    }
+}
+
+unsafe fn sync_let_env(sc: *mut s7::s7_scheme) -> SyncLetProtected {
+    unsafe {
+        let environment = sync_let_protect(
+            sc,
+            s7::s7_sublet(sc, s7::s7_rootlet(sc), s7::s7_nil(sc)),
+        );
+        let capabilities = SYNC_LET_ALLOWED
+            .iter()
+            .map(|name| {
+                let name = CString::new(*name)
+                    .expect("sync-let capability contains a null byte");
+                let symbol = sync_let_protect(sc, s7::s7_make_symbol(sc, name.as_ptr()));
+                let mut value = s7::s7_let_ref(sc, s7::s7_rootlet(sc), symbol.value);
+                if value == s7::s7_undefined(sc) {
+                    value = s7::s7_symbol_value(sc, symbol.value);
+                }
+                (symbol, sync_let_protect(sc, value))
+            })
+            .collect::<Vec<_>>();
+        let mut mask = SyncLetMask {
+            sc,
+            environment: environment.value,
+        };
+        s7::s7_for_each_symbol(
+            sc,
+            Some(sync_let_mask_symbol),
+            &mut mask as *mut SyncLetMask as *mut c_void,
+        );
+        for (symbol, value) in capabilities {
+            s7::s7_define(sc, environment.value, symbol.value, value.value);
+            sync_let_unprotect(sc, value);
+            sync_let_unprotect(sc, symbol);
+        }
+        s7::s7_define(
+            sc,
+            environment.value,
+            s7::s7_make_symbol(sc, c"setter".as_ptr()),
+            s7::s7_let_ref(
+                sc,
+                s7::s7_rootlet(sc),
+                s7::s7_make_symbol(sc, c"%sync-safe-setter".as_ptr()),
+            ),
+        );
+        environment
     }
 }

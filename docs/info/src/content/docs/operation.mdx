@@ -82,8 +82,14 @@ The default stack includes:
 
 The compose stack does not use a separate immutable `general` image. Instead,
 `journal-sdk` starts through `deploy/compose/general/run.sh`, which reads mounted
-`records/lisp/*.scm` files. Fresh databases install from those files; existing
-databases only absorb changed Lisp inputs when `JOURNAL_UPDATE=1`.
+`records/lisp/*.scm` files. This 1.5 candidate supports fresh database
+installation only. Its installer rejects every nonfresh root atomically, so
+`JOURNAL_UPDATE=1` cannot update an existing database with this release line.
+
+The 1.5 Tree-native value layout removes the released Document wrapper and all
+record-code migration machinery. Do not apply this candidate in place to a
+supported 1.4.3 database—or to an earlier 1.5 development database—until a
+separate reset or conversion policy is explicitly selected.
 
 ## Routing
 
@@ -97,7 +103,7 @@ It serves runtime query routes and UI routes:
 | `/interface` | Scheme or JSON request endpoint selected by request `Content-Type`. |
 | `/docs` | Gateway Swagger/OpenAPI documentation and route orientation. |
 | `/api/v1/...` | Versioned gateway API endpoints proxied to gateway service. |
-| `/explorer/` | Browser UI with dedicated `Ledger`, `Stage`, and admin-only `Admin` modes for committed browsing, local staged editing, and application-level journal administration. |
+| `/explorer/` | Browser UI with `Ledger`, `Stage`, Self-local `Access`, and admin-only Self-local `Admin` modes. |
 | `/workbench/` | Developer-oriented query workspace with API aids. |
 | `/webdav/` | WebDAV file-system projection: `/stage` (mutable), `/ledger/state` (current committed, index optional), `/control/pin` (pin directives). |
 
@@ -115,8 +121,9 @@ Permission boundaries are central to safe operation, so operators should treat f
 
 | Family | Description | Functions |
 | --- | --- | --- |
-| Public (no authentication) | Read-mostly methods intended for external visibility without secrets. | `size`, `synchronize`, `info`, `config`, `get`, `trace` |
-| Restricted (interface secret) | Stateful or sensitive operations that require interface authentication. | `resolve`, `set!`, `pin!`, `unpin!`, `bridge!`, `bridge-synchronize!`, `*step!*`, `*secret*`, `*admins-get*`, `*admins-set*`, `*window-set*` |
+| Public bridge/control | Direct protocol operations with no signed application invocation. | `size`, `info`, `route`, `synchronize!`, constrained `trace` |
+| Authenticated application | Local calls use session/API-token authentication; signed federation is allowed only for three methods. | `get`, `set!`, `resolve` |
+| Local retention/policy/admin | Authenticated and always executed at Self; federation context is rejected. | `pin!`, `unpin!`, batching, authorization, config, bridge, admin, window, and secret operations |
 | Root/Admin | Root commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
 
 ### Function Reference
@@ -129,27 +136,28 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 | Function | Purpose |
 | --- | --- |
 | `size` | Current permanent-chain size |
-| `synchronize` | Serialize digest/proof data for bridge sync |
-| `info` | Public node metadata (for example public key and window) |
-| `config` | Full current config expression |
-| `get` | Read staged state content |
-| `trace` | Return serialized proof/path view rooted at an index |
+| `synchronize!` | Accept a reciprocal signed-head exchange and return the receiver's signed head |
+| `info` | Return the public root-signed journal descriptor |
+| `route` | Follow committed bridge control state and return terminal routing/authentication material |
+| `trace` | Return only authorized public crypto/bridge proof structure rooted at an index |
 
 #### Restricted Functions
 
 | Function | Purpose |
 | --- | --- |
-| `resolve` | Resolve committed content, optionally with pin/proof detail |
-| `set!` | Stage a write |
-| `pin!` | Persist proof/data in permanent chain |
-| `unpin!` | Remove persisted pin |
-| `bridge!` | Register bridge/publication target with local bridge info and optional prefetched remote info |
-| `bridge-synchronize!` | Merge a prepared bridge synchronization response |
-| `*step!*` | Run interface stepping, including bridge synchronization |
-| `*secret*` | Rotate interface secret |
-| `*admins-get*` | Read the interface admin username list |
-| `*admins-set*` | Replace the interface admin username list |
-| `*window-set*` | Update the public ledger retention window |
+| `get` | Read current Stage, locally or through a signed working route |
+| `set!` | Stage a write locally or through a signed working route |
+| `resolve` | Resolve exact committed content locally or through a signed route/history cursor |
+| `pin!` / `unpin!` | Mutate only Self's retained permanent proof state |
+| `authorize!` / `deauthorize!` / `authorizations` | Manage Self-local path-scoped `get`/`set!`/`resolve` grants |
+| `bridge!` / `delete-bridge!` | Manage reciprocal bridges locally |
+| `config` / `update-config!` | Read or update local ledger configuration under local policy |
+| `batch!` / `set-batch!` | Perform local-only batched calls/writes |
+| `*secret*` | Rotate the local interface secret/key material |
+| `*admins-get*` / `*admins-set*` | Read/replace local administrator principals |
+| `*window-set*` | Update the local public retention window |
+
+Deleting a bridge removes its active route/configuration and associated grants but retains the alias↔journal-root identity binding. Re-establishing the same alias/root is valid and idempotent; substituting another root or moving the root to another alias is rejected as an identity conflict.
 
 #### Root/Admin Functions
 
@@ -172,9 +180,9 @@ These are the public root methods exposed by the root module's base record objec
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `get` | `((root 'get) path)` | Read value at path; returns value, `(nothing)`, or directory metadata. |
+| `get` | `((root 'get) path)` | Read value at path; returns value, `(nothing)`, or a directory listing. |
 | `set!` | `((root 'set!) path value)` | Write value at path; supports structured node/object values and deletion via `(nothing)`. |
-| `copy!` | `((root 'copy!) source target)` | Copy value from `source` path to `target` path. |
+| `copy!` | `((root 'copy!) source target)` | Copy `source` to `target`; a missing source deletes the target. |
 | `equal?` | `((root 'equal?) source target)` | Exact structural equality check between two paths. |
 | `equivalent?` | `((root 'equivalent?) source target)` | Digest-equivalence check between two paths. |
 
@@ -196,29 +204,23 @@ This API is intentionally powerful and low-level, so access should be tightly co
 ### General API Bootstrap
 
 `interface.scm` overlays the instantiated ledger object and dispatches `((function ...))` requests to ledger and bridge-helper methods, with permission checks on each call.
-It also handles remote bridge fetch/merge flows before handing the final operation to `ledger`.
+It also handles remote bridge fetch/merge flows before handing the final operation to `ledger`. A grant remains a normal recursive prefix grant. When a caller requests an ancestor directory of an applicable grant, the interface returns that directory's ordinary immediate listing. This makes folder names traversable without synthetic parent grants, but reading or mutating any listed child still requires authorization for that child. Proof responses preserve the committed directory listing without granting access to child content.
 
 #### General API Methods
 
 | Method | Permission | Description |
 | --- | --- | --- |
-| `size` | Public | Return permanent chain size. |
-| `synchronize` | Public | Return serialized sync proof at index. |
-| `info` | Public | Return public node configuration. |
-| `config` | Public | Return full inline ledger configuration. |
-| `get` | Public | Read staged content. |
-| `trace` | Public | Return serialized proof/path content rooted at an index. |
-| `resolve` | Restricted | Return resolved path content, optionally with pin/proof detail. |
-| `set!` | Restricted | Stage write to local state path. |
-| `pin!` | Restricted | Persist selected path/proof in permanent chain. |
-| `unpin!` | Restricted | Remove previously pinned path/proof. |
-| `bridge!` | Restricted | Add bridge/publication target, fetching remote info when omitted. |
-| `bridge-synchronize!` | Restricted | Synchronize a named bridge into local staged state. |
-| `*step!*` | Restricted | Run bridge synchronization and local step progression. |
-| `*secret*` | Restricted | Rotate interface secret used by interface API auth checks. |
-| `*admins-get*` | Restricted | Read the interface admin username list. |
-| `*admins-set*` | Restricted | Replace the interface admin username list. |
-| `*window-set*` | Restricted | Update the public ledger retention window. |
+| `size`, `info` | Public control | Return local public metadata. |
+| `route`, `synchronize!`, constrained `trace` | Public control | Operate on bridge/proof control structure, never as signed application calls. |
+| `get` | Authenticated/federatable | Read current staged content under terminal-local policy. |
+| `set!` | Authenticated/federatable | Stage a write under terminal-local policy. |
+| `resolve` | Authenticated/federatable | Resolve exact committed content and verify optional returned proof. |
+| `pin!`, `unpin!` | Local authenticated | Retain/remove proof only in Self's permanent chain. |
+| `batch!`, `set-batch!` | Local authenticated | Execute local-only batches. |
+| `authorizations`, `authorize!`, `deauthorize!` | Local authenticated | Inspect or mutate Self-local grants. |
+| `bridge!`, `delete-bridge!` | Local admin | Manage reciprocal bridges. |
+| `config`, `update-config!` | Local admin | Inspect or mutate local ledger configuration. |
+| `*secret*`, `*admins-get*`, `*admins-set*`, `*window-set*` | Local admin | Manage local interface identity and policy. |
 
 Root commands (`*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*`) are also callable, but remain part of the root-plane surface and should be treated as admin-level operations.
 This keeps externally visible behavior stable while allowing implementation details inside ledger classes to evolve.

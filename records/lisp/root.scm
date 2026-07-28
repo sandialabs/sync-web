@@ -7,7 +7,7 @@
               (node-11 (sync-cdr node-1))
               (secret-node (sync-car node-11))
               (root-node (sync-cdr node-11))
-              (root (sync-eval root-node #f)))
+              (root (sync-eval root-node)))
 
          (define (authenticate secret)
            (let ((secret-hash secret-node))
@@ -37,13 +37,18 @@
 
          (define (root-set key secret value)
            (authenticate secret)
+           (if (eq? key 'secret)
+               (let ((handler ((root 'get) '(root handler secret))))
+                 (if (byte-vector? handler)
+                     ((eval (byte-vector->expression handler)) root secret value))))
            (let* ((node-10 (sync-car node-1))
                   (step-node (if (eq? key 'step) (expression->byte-vector value) (sync-car node-10)))
                   (query-node (if (eq? key 'query) (expression->byte-vector value) (sync-cdr node-10)))
                   (secret-node (if (eq? key 'secret) (sync-hash (expression->byte-vector value)) (sync-car node-11)))
                   (root-node (root)))
              (set! *sync-state* (sync-cons transition-node (sync-cons (sync-cons step-node query-node)
-                                                                      (sync-cons secret-node root-node))))))
+                                                                      (sync-cons secret-node root-node))))
+             #t))
 
          (cons (case (car query)
                  ((*eval*) (apply root-eval (cdr query)))
@@ -163,6 +168,8 @@
                                          (dir-all node)))))))
 
        (define (root-set! path value)
+         (if (and (null? path) (not (equal? value '(nothing))))
+             (error 'path-error "Root must remain a directory"))
          (let ((path (map expression->byte-vector path)))
            (cond ((equal? value '(unknown))
                   (error 'value-error "Root values cannot use reserved value: ~S" value))
@@ -176,8 +183,15 @@
                                              (else (append #u(1) (expression->byte-vector value)))))))))
 
        (define (root-copy! source target)
-         (node-set! (map expression->byte-vector target)
-                    (node-get (map expression->byte-vector source))))
+         (let ((source-node (node-get (map expression->byte-vector source))))
+           (cond ((sync-null? source-node)
+                  (root-set! target '(nothing)))
+                 ((and (null? target)
+                       (let ((value (root-get source)))
+                         (not (and (pair? value) (eq? (car value) 'directory)))))
+                  (error 'path-error "Root must remain a directory"))
+                 (else
+                  (node-set! (map expression->byte-vector target) source-node)))))
 
        (define (root-equal? source target)
          (let ((source-node (node-get (map expression->byte-vector source)))
@@ -214,6 +228,11 @@
     '(lambda (root query)
        (eval query)))
 
+  (if (and (eq? clear? 'fresh)
+           (not (equal? (sync-digest *sync-state*)
+                        #u(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+                           0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0))))
+      (error 'upgrade-error "Fresh installation requires empty journal state"))
   (let* ((transition-node (expression->byte-vector transition-function))
          (secret-node (sync-hash (expression->byte-vector secret)))
          (step-node (expression->byte-vector step))

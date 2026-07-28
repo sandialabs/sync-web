@@ -1,16 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import ToolBar from './components/ToolBar';
 import ExplorerTree from './components/ExplorerTree';
 import ExplorerContent from './components/ExplorerContent';
 import LedgerRouteBar from './components/LedgerRouteBar';
+import WorkingRouteBar from './components/WorkingRouteBar';
+import AccessPanel from './components/AccessPanel';
 import AdminPanel from './components/AdminPanel';
 import { GatewayChangeEvent, JournalService } from './services/JournalService';
 import { AppState, ExplorerMode, ExplorerSelection, JournalPath, LedgerHop } from './types';
 import {
   LEDGER_LATEST,
-  buildLedgerBridgesPath,
   buildLedgerStateRootPath,
+  buildLedgerUserHomePath,
   normalizeSnapshotInput,
   stepSnapshotValue,
 } from './utils/ledgerRoute';
@@ -29,8 +31,6 @@ const getEnvVar = (key: string): string => {
   return process.env[`REACT_APP_${key}`] || '';
 };
 
-const JOURNAL_ENDPOINT = getEnvVar('SYNC_EXPLORER_ENDPOINT');
-
 const getInitialTheme = (): 'light' | 'dark' => {
   const stored = localStorage.getItem('theme');
   if (stored === 'light' || stored === 'dark') {
@@ -43,7 +43,7 @@ const getInitialTheme = (): 'light' | 'dark' => {
 };
 
 const createInitialAppState = (): AppState => ({
-  endpoint: JOURNAL_ENDPOINT,
+  endpoint: getEnvVar('SYNC_EXPLORER_ENDPOINT'),
   rootIndex: -1,
   selectedPath: null,
   expandedNodes: new Set(),
@@ -56,6 +56,65 @@ const STAGE_ROOT_PATH: JournalPath = ['*state*'];
 const buildUserHomePath = (username: string): JournalPath => (
   username ? ['*state*', username] : STAGE_ROOT_PATH
 );
+
+const scopeOwnerlessSelection = (
+  selection: ExplorerSelection | null,
+  username: string,
+): ExplorerSelection | null => {
+  if (!selection || !username || selection.path[selection.path.length - 1] !== '*state*') {
+    return selection;
+  }
+  return { ...selection, path: [...selection.path, username] };
+};
+
+const buildHopsForWorkingRoute = (previous: LedgerHop[], route: string[]): LedgerHop[] => [
+  {
+    key: 'local-0',
+    kind: 'local',
+    name: 'Self',
+    snapshot: previous[0]?.snapshot ?? LEDGER_LATEST,
+  },
+  ...route.map((name, index) => ({
+    key: `${name}-${index + 1}`,
+    kind: 'bridge' as const,
+    name,
+    snapshot: previous[index + 1]?.name === name
+      ? previous[index + 1].snapshot
+      : LEDGER_LATEST,
+  })),
+];
+
+const rebaseLedgerSelection = (
+  selection: ExplorerSelection | null,
+  hops: LedgerHop[],
+  rootIndex: number,
+): ExplorerSelection | null => {
+  if (!selection) return null;
+  const stateIndex = selection.path.lastIndexOf('*state*');
+  if (stateIndex < 0) return null;
+  return {
+    ...selection,
+    path: [
+      ...buildLedgerStateRootPath(hops, rootIndex),
+      ...selection.path.slice(stateIndex + 1),
+    ],
+  };
+};
+
+export const isWritableRemoteStageSelection = (
+  selection: ExplorerSelection | null,
+  route: string[],
+  localJournalName: string,
+): boolean => {
+  if (!selection || route.length === 0 || !localJournalName) return false;
+  const stateIndex = selection.path.lastIndexOf('*state*');
+  const bucket = stateIndex >= 0 && selection.path.length > stateIndex + 3
+    ? String(selection.path[stateIndex + 3])
+    : '';
+  const expectedBucket = [localJournalName, ...route.slice(0, -1)].join(':');
+  return String(selection.path[stateIndex + 2]) === 'data'
+    && bucket === expectedBucket;
+};
 
 const isPathWithin = (candidate: JournalPath, ancestor: JournalPath): boolean => {
   if (ancestor.length > candidate.length) {
@@ -110,18 +169,22 @@ const App: React.FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [mode, setMode] = useState<ExplorerMode>('ledger');
   const [journalService, setJournalService] = useState<JournalService | null>(null);
+  const [localJournalName, setLocalJournalName] = useState('');
   const [adminStatus, setAdminStatus] = useState<'checking' | 'admin' | 'not-admin'>('checking');
   const [stageSelection, setStageSelection] = useState<ExplorerSelection | null>(null);
   const [ledgerSelection, setLedgerSelection] = useState<ExplorerSelection | null>(null);
   const [stageExpandedNodes, setStageExpandedNodes] = useState<Set<string>>(new Set());
   const [ledgerExpandedNodes, setLedgerExpandedNodes] = useState<Set<string>>(new Set());
+  const [workingRoute, setWorkingRoute] = useState<string[]>([]);
+  const [workingPeerChoices, setWorkingPeerChoices] = useState<string[] | null>(null);
   const [ledgerHops, setLedgerHops] = useState<LedgerHop[]>(getInitialLedgerHops(-1));
-  const [ledgerPeerChoices, setLedgerPeerChoices] = useState<string[] | null>(null);
   const [ledgerView, setLedgerView] = useState<'content' | 'proof'>('content');
   const [stageRefreshKey, setStageRefreshKey] = useState(0);
   const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0);
   const [adminRefreshKey, setAdminRefreshKey] = useState(0);
+  const [accessRefreshKey, setAccessRefreshKey] = useState(0);
   const isApplyingHashRef = useRef(false);
+  const federationContextRef = useRef('');
   const eventRefreshTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -136,9 +199,12 @@ const App: React.FC = () => {
           const data = await res.json();
           const username = data?.identity?.traits?.username ?? '';
           setSessionName(username);
-          if (JOURNAL_ENDPOINT) {
-            const service = new JournalService(JOURNAL_ENDPOINT);
+          if (appState.endpoint) {
+            const service = new JournalService(appState.endpoint);
             setJournalService(service);
+            void service.getLocalJournalName().then(setLocalJournalName).catch(() => {
+              setLocalJournalName('');
+            });
             if (username) {
               void service.ensureDirectory(buildUserHomePath(username)).catch(() => {
                 // Home creation is best-effort here; normal Explorer requests surface
@@ -156,11 +222,39 @@ const App: React.FC = () => {
       .catch(() => {
         setSessionStatus('error');
       });
-  }, []);
+  }, [appState.endpoint]);
 
   const setLoadingState = (isLoading: boolean, error: string | null = null) => {
     setAppState((prev) => ({ ...prev, isLoading, error }));
   };
+
+  useLayoutEffect(() => {
+    if (!journalService) return;
+    const routeHops = [ledgerHops[0], ...workingRoute.map((name, index) => {
+      const hop = ledgerHops[index + 1];
+      return hop?.name === name ? hop : undefined;
+    })];
+    const historyIndexes = routeHops.map((hop, index) => {
+      if (!hop || hop.snapshot.trim().toLowerCase() === LEDGER_LATEST) return -1;
+      const parsed = Number.parseInt(hop.snapshot, 10);
+      return Number.isNaN(parsed) ? (index === 0 ? appState.rootIndex : -1) : parsed;
+    });
+    const context = {
+      route: workingRoute,
+      ...(workingRoute.length > 0 ? { historyIndexes } : {}),
+    };
+    journalService.setFederationContext(context);
+
+    // A parsed deep link can mount the tree before its route/history context
+    // reaches the mutable service. Reload once after each actual context
+    // transition so a stale ownerless local read cannot leave an empty routed
+    // tree mounted until the user changes paths.
+    const contextKey = JSON.stringify(context);
+    if (federationContextRef.current !== contextKey) {
+      federationContextRef.current = contextKey;
+      setLedgerRefreshKey((prev) => prev + 1);
+    }
+  }, [journalService, workingRoute, ledgerHops, appState.rootIndex]);
 
   useEffect(() => {
     if (!journalService) {
@@ -184,7 +278,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [journalService]);
+  }, [journalService, workingRoute]);
 
   useEffect(() => {
     if (adminStatus === 'not-admin' && mode === 'admin') {
@@ -212,10 +306,10 @@ const App: React.FC = () => {
         isLoading: options.quiet ? prev.isLoading : false,
         error: null,
       }));
-      setLedgerHops(updatedHops);
       if (!options.preserveSelection) {
+        setLedgerHops(updatedHops);
         setLedgerSelection({
-          path: buildLedgerStateRootPath(updatedHops, latestIndex),
+          path: buildLedgerUserHomePath(updatedHops, latestIndex, sessionName),
           type: 'directory',
         });
       }
@@ -229,11 +323,12 @@ const App: React.FC = () => {
         }));
       }
     }
-  }, [journalService, ledgerHops]);
+  }, [journalService, ledgerHops, sessionName]);
 
   useEffect(() => {
     if (journalService && appState.rootIndex < 0) {
-      void synchronizeLedger();
+      const parsed = parseFragmentHash(window.location.hash);
+      void synchronizeLedger({ preserveSelection: parsed?.mode === 'ledger' });
     }
   }, [journalService, appState.rootIndex, synchronizeLedger]);
 
@@ -250,6 +345,10 @@ const App: React.FC = () => {
         eventRefreshTimerRef.current = null;
         if (mode === 'admin') {
           setAdminRefreshKey((prev) => prev + 1);
+          return;
+        }
+        if (mode === 'access') {
+          setAccessRefreshKey((prev) => prev + 1);
           return;
         }
         if (mode === 'stage') {
@@ -278,10 +377,13 @@ const App: React.FC = () => {
   }, [journalService, sessionStatus, mode, synchronizeLedger]);
 
   const ledgerRootPath = useMemo(
-    () => buildLedgerStateRootPath(ledgerHops, appState.rootIndex >= 0 ? appState.rootIndex : 0),
+    () => buildLedgerStateRootPath(
+      ledgerHops,
+      appState.rootIndex >= 0 ? appState.rootIndex : 0,
+    ),
     [ledgerHops, appState.rootIndex],
   );
-  const stageRootPath = useMemo(() => buildUserHomePath(sessionName), [sessionName]);
+  const stageRootPath = STAGE_ROOT_PATH;
   useEffect(() => {
     const applyHash = () => {
       const parsed = parseFragmentHash(window.location.hash);
@@ -294,10 +396,15 @@ const App: React.FC = () => {
       setAppState((prev) => ({ ...prev, error: null }));
 
       if (parsed.mode === 'stage') {
-        setStageSelection(parsed.selection ?? { path: buildUserHomePath(sessionName), type: 'directory' });
+        const nextSelection = scopeOwnerlessSelection(parsed.selection, sessionName)
+          ?? { path: buildUserHomePath(sessionName), type: 'directory' as const };
+        setStageSelection(nextSelection);
       } else if (parsed.mode === 'ledger') {
-        setLedgerHops(parsed.ledgerHops ?? getInitialLedgerHops(appState.rootIndex));
-        setLedgerSelection(parsed.selection ?? null);
+        const parsedHops = parsed.ledgerHops ?? getInitialLedgerHops(-1);
+        const nextSelection = scopeOwnerlessSelection(parsed.selection, sessionName);
+        setWorkingRoute(parsedHops.slice(1).map((hop) => hop.name));
+        setLedgerHops(parsedHops);
+        setLedgerSelection(nextSelection);
         setLedgerView('content');
       }
 
@@ -309,15 +416,18 @@ const App: React.FC = () => {
     applyHash();
     window.addEventListener('hashchange', applyHash);
     return () => window.removeEventListener('hashchange', applyHash);
-  }, [appState.rootIndex, sessionName]);
+  }, [sessionName]);
 
   const handleModeChange = (nextMode: ExplorerMode) => {
+    if (workingRoute.length > 0 && (nextMode === 'access' || nextMode === 'admin')) {
+      return;
+    }
     if (nextMode === 'admin' && adminStatus !== 'admin') {
       return;
     }
     setMode(nextMode);
     if (nextMode === 'stage') {
-      setStageSelection({ path: stageRootPath, type: 'directory' });
+      setStageSelection({ path: buildUserHomePath(sessionName), type: 'directory' });
     } else if (nextMode === 'ledger') {
       setLedgerView('content');
       void synchronizeLedger();
@@ -553,19 +663,11 @@ const App: React.FC = () => {
     setLedgerSelection(null);
   };
 
-  const handleOpenLedgerPeerPicker = async () => {
-    if (!journalService || appState.rootIndex < 0) {
-      return;
-    }
+  const handleOpenWorkingPeerPicker = async () => {
+    if (!journalService) return;
     try {
-      const bridgesPath = buildLedgerBridgesPath(ledgerHops, appState.rootIndex);
-      const entries = await journalService.getDirectoryEntries(bridgesPath);
-      setLedgerPeerChoices(
-        entries
-          .filter((entry) => entry.name !== '*directory*')
-          .map((entry) => entry.name)
-          .sort((a, b) => a.localeCompare(b)),
-      );
+      const peers = await journalService.getBridges();
+      setWorkingPeerChoices(peers.map((peer) => peer.name));
     } catch (error) {
       setAppState((prev) => ({
         ...prev,
@@ -574,35 +676,61 @@ const App: React.FC = () => {
     }
   };
 
-  const handleChooseLedgerPeer = (peerName: string) => {
-    setLedgerHops((prev) => [
-      ...prev,
-      {
-        key: `${peerName}-${prev.length}`,
-        kind: 'bridge',
-        name: peerName,
-        snapshot: LEDGER_LATEST,
-      },
-    ]);
-    setLedgerPeerChoices(null);
-    setLedgerRefreshKey((prev) => prev + 1);
+  const handleChooseWorkingPeer = async (peerName: string) => {
+    let originIndex = appState.rootIndex;
+    const originLatest = ledgerHops[0]?.snapshot.trim().toLowerCase() === LEDGER_LATEST;
+    if (originLatest) {
+      if (!journalService) return;
+      try {
+        originIndex = Math.max(0, (await journalService.getLocalSize()) - 1);
+        setAppState((prev) => ({ ...prev, rootIndex: originIndex, error: null }));
+      } catch (error) {
+        setAppState((prev) => ({
+          ...prev,
+          error: `Synchronization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        }));
+        return;
+      }
+    }
+
+    const nextRoute = [...workingRoute, peerName];
+    const nextHops = buildHopsForWorkingRoute(ledgerHops, nextRoute);
+    setWorkingRoute(nextRoute);
+    setLedgerHops(nextHops);
+    setWorkingPeerChoices(null);
+    setLedgerSelection(rebaseLedgerSelection(
+      ledgerSelection,
+      nextHops,
+      originIndex >= 0 ? originIndex : 0,
+    ));
+    setStageExpandedNodes(new Set());
     setLedgerExpandedNodes(new Set());
-    setLedgerSelection(null);
   };
 
-  const handleRemoveLedgerHop = () => {
-    setLedgerPeerChoices(null);
-    setLedgerHops((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
-    setLedgerRefreshKey((prev) => prev + 1);
-    setLedgerExpandedNodes(new Set());
-    setLedgerSelection(null);
+  const handleRemoveWorkingHop = () => {
+    const nextRoute = workingRoute.slice(0, -1);
+    const nextHops = buildHopsForWorkingRoute(ledgerHops, nextRoute);
+    setWorkingRoute(nextRoute);
+    setLedgerHops(nextHops);
+    setWorkingPeerChoices(null);
+    setLedgerSelection((selection) => rebaseLedgerSelection(
+      selection,
+      nextHops,
+      appState.rootIndex >= 0 ? appState.rootIndex : 0,
+    ));
   };
+
+  useEffect(() => {
+    if (workingRoute.length > 0 && (mode === 'access' || mode === 'admin')) {
+      setMode('ledger');
+    }
+  }, [workingRoute, mode]);
 
   useEffect(() => {
     setLedgerHops((prev) =>
       prev.map((hop, index) => {
         if (index === 0) {
-          return { ...hop, snapshot: appState.rootIndex >= 0 ? String(appState.rootIndex) : '0' };
+          return hop;
         }
 
         return { ...hop, snapshot: normalizeSnapshotInput(hop.snapshot) };
@@ -615,7 +743,7 @@ const App: React.FC = () => {
   }, [ledgerSelection]);
 
   useEffect(() => {
-    if (isApplyingHashRef.current) {
+    if (isApplyingHashRef.current || (mode === 'ledger' && appState.rootIndex < 0)) {
       return;
     }
 
@@ -652,7 +780,6 @@ const App: React.FC = () => {
         <ToolBar
           sessionName=""
           error={sessionStatus === 'error' ? 'Could not check session' : null}
-          isLoading={false}
           mode={mode}
           isAdmin={false}
           theme={theme}
@@ -686,30 +813,47 @@ const App: React.FC = () => {
       <ToolBar
         sessionName={sessionName}
         error={appState.error}
-        isLoading={appState.isLoading}
         mode={mode}
         isAdmin={adminStatus === 'admin'}
+        localOnlyDisabled={workingRoute.length > 0}
         theme={theme}
         onModeChange={handleModeChange}
         onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
       />
 
+      <WorkingRouteBar
+        route={workingRoute}
+        peerChoices={workingPeerChoices}
+        onRemoveHop={handleRemoveWorkingHop}
+        onOpenPeerPicker={handleOpenWorkingPeerPicker}
+        onClosePeerPicker={() => setWorkingPeerChoices(null)}
+        onChoosePeer={handleChooseWorkingPeer}
+      />
+
       {mode === 'ledger' && (
         <LedgerRouteBar
           hops={ledgerHops}
-          peerChoices={ledgerPeerChoices}
           rootIndex={appState.rootIndex}
           onSynchronize={synchronizeLedger}
+          isSynchronizing={appState.isLoading}
           onSnapshotChange={handleLedgerSnapshotChange}
           onStepSnapshot={handleLedgerStepSnapshot}
-          onRemoveHop={handleRemoveLedgerHop}
-          onOpenPeerPicker={handleOpenLedgerPeerPicker}
-          onClosePeerPicker={() => setLedgerPeerChoices(null)}
-          onChoosePeer={handleChooseLedgerPeer}
+          readOnlyRoute
         />
       )}
 
-      {mode === 'admin' ? (
+      {mode === 'access' ? (
+        journalService ? (
+          <div className="main-content">
+            <AccessPanel
+              journalService={journalService}
+              currentUser={sessionName}
+              refreshKey={accessRefreshKey}
+              isAdmin={adminStatus === 'admin'}
+            />
+          </div>
+        ) : null
+      ) : mode === 'admin' ? (
         adminStatus === 'admin' && journalService ? (
         <div className="main-content">
           <AdminPanel
@@ -730,10 +874,11 @@ const App: React.FC = () => {
         <div className="left-pane pane">
           <ExplorerTree
             mode={mode}
-            rootPath={mode === 'stage' ? STAGE_ROOT_PATH : ledgerRootPath}
+            rootPath={mode === 'stage' ? stageRootPath : ledgerRootPath}
             selected={mode === 'stage' ? stageSelection : ledgerSelection}
             expandedNodes={mode === 'stage' ? stageExpandedNodes : ledgerExpandedNodes}
             journalService={journalService}
+            currentUser={sessionName}
             refreshKey={mode === 'stage' ? stageRefreshKey : ledgerRefreshKey}
             onExpandedNodesChange={mode === 'stage' ? setStageExpandedNodes : setLedgerExpandedNodes}
             onSelect={(selection) => {
@@ -753,6 +898,10 @@ const App: React.FC = () => {
             journalService={journalService}
             refreshKey={mode === 'stage' ? stageRefreshKey : ledgerRefreshKey}
             ledgerView={ledgerView}
+            stageReadOnly={mode === 'stage' && workingRoute.length > 0
+              && !isWritableRemoteStageSelection(
+                stageSelection, workingRoute, localJournalName,
+              )}
             onLedgerViewToggle={() =>
               setLedgerView((prev) => (prev === 'content' ? 'proof' : 'content'))
             }

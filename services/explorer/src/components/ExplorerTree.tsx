@@ -3,12 +3,18 @@ import { DirectoryEntry, DirectoryEntryType, ExplorerSelection, ExplorerMode, Jo
 import { JournalService } from '../services/JournalService';
 import { compareSegmentedNames } from '../utils/sortKeys';
 
+const ACCESS_MESSAGE = 'Unable to load this location. Check that the selected journal has granted access to this user and path.';
+const SNAPSHOT_MESSAGE = 'The selected ledger snapshot is unavailable. It may still be committing or may no longer be retained.';
+const loadErrorMessage = (error: unknown): string =>
+  JournalService.isSnapshotUnavailable(error) ? SNAPSHOT_MESSAGE : ACCESS_MESSAGE;
+
 interface ExplorerTreeProps {
   mode: ExplorerMode;
   rootPath: JournalPath;
   selected: ExplorerSelection | null;
   expandedNodes: Set<string>;
   journalService: JournalService | null;
+  currentUser?: string;
   refreshKey: number;
   onExpandedNodesChange: (expanded: Set<string>) => void;
   onSelect: (selection: ExplorerSelection) => void;
@@ -28,7 +34,10 @@ const createNode = (
 ): TreeNode => ({
   id: `${parentId}/${entry.pathSegment ?? entry.name}`,
   label: entry.name,
-  type: entry.type === 'directory' ? 'directory' : 'file',
+  // A selectively disclosed ancestor proof can preserve a child name while
+  // cutting its value/type. Keep unknown entries navigable; authorization is
+  // checked again when the child is opened.
+  type: entry.type === 'value' ? 'file' : 'directory',
   valueType: entry.type,
   path: buildStateChildPath(parentPath, entry.pathSegment ?? entry.name),
 });
@@ -53,35 +62,54 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
   selected,
   expandedNodes,
   journalService,
+  currentUser = '',
   refreshKey,
   onExpandedNodesChange,
   onSelect,
 }) => {
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [loadingNodes, setLoadingNodes] = useState<Set<string>>(new Set());
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [nodeErrors, setNodeErrors] = useState<Record<string, string>>({});
 
   const loadDirectoryChildren = async (path: JournalPath, idPrefix: string): Promise<TreeNode[]> => {
     if (!journalService) {
       return [];
     }
     const entries = await journalService.getDirectoryEntries(path);
+    const namespaceRoot = path[path.length - 1] === '*state*';
     return entries
       .filter((entry) => entry.name !== '*directory*')
-      .sort(compareDirectoryEntries)
+      .sort((left, right) => {
+        if (namespaceRoot && currentUser) {
+          const leftIsCurrentUser = left.name === currentUser;
+          const rightIsCurrentUser = right.name === currentUser;
+          if (leftIsCurrentUser !== rightIsCurrentUser) {
+            return leftIsCurrentUser ? -1 : 1;
+          }
+        }
+        return compareDirectoryEntries(left, right);
+      })
       .map((entry) => createNode(idPrefix, path, entry));
   };
 
   useEffect(() => {
     let active = true;
 
+    const refreshedErrors: Record<string, string> = {};
     const hydrateExpandedChildren = async (nodes: TreeNode[]): Promise<TreeNode[]> =>
       Promise.all(
         nodes.map(async (node) => {
           if (node.type !== 'directory' || !expandedNodes.has(node.id)) {
             return node;
           }
-          const children = await loadDirectoryChildren(node.path, node.id);
-          return { ...node, children: await hydrateExpandedChildren(children) };
+          try {
+            const children = await loadDirectoryChildren(node.path, node.id);
+            return { ...node, children: await hydrateExpandedChildren(children) };
+          } catch (error) {
+            refreshedErrors[node.id] = loadErrorMessage(error);
+            return node;
+          }
         }),
       );
 
@@ -91,22 +119,18 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
         return;
       }
 
+      setLoadError(null);
       try {
         const children = await hydrateExpandedChildren(await loadDirectoryChildren(rootPath, mode));
         if (active) {
           setTreeData(children);
+          setNodeErrors(refreshedErrors);
+          setLoadError(null);
         }
       } catch (error) {
         if (active) {
-          setTreeData([
-            {
-              id: `${mode}/error`,
-              label: error instanceof Error ? error.message : 'Failed to load',
-              type: 'file',
-              valueType: 'unknown',
-              path: rootPath,
-            },
-          ]);
+          setTreeData([]);
+          setLoadError(loadErrorMessage(error));
         }
       }
     };
@@ -115,7 +139,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
     return () => {
       active = false;
     };
-  }, [journalService, mode, refreshKey, rootPath]);
+  }, [currentUser, journalService, mode, refreshKey, rootPath]);
 
   const updateNodeChildren = (nodes: TreeNode[], nodeId: string, children: TreeNode[]): TreeNode[] =>
     nodes.map((node) => {
@@ -144,20 +168,16 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
     }
 
     setLoadingNodes((prev) => new Set(prev).add(node.id));
+    setNodeErrors((prev) => {
+      const next = { ...prev };
+      delete next[node.id];
+      return next;
+    });
     try {
       const children = await loadDirectoryChildren(node.path, node.id);
       setTreeData((prev) => updateNodeChildren(prev, node.id, children));
     } catch (error) {
-      const children = [
-        {
-          id: `${node.id}/error`,
-          label: error instanceof Error ? error.message : 'Failed to load',
-          type: 'file' as const,
-          valueType: 'unknown' as const,
-          path: node.path,
-        },
-      ];
-      setTreeData((prev) => updateNodeChildren(prev, node.id, children));
+      setNodeErrors((prev) => ({ ...prev, [node.id]: loadErrorMessage(error) }));
     } finally {
       setLoadingNodes((prev) => {
         const next = new Set(prev);
@@ -175,6 +195,10 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
     const selectionType: ExplorerSelection['type'] = node.type === 'file' ? 'file' : 'directory';
     const isLoading = loadingNodes.has(node.id);
     const kindIcon = node.type === 'directory' ? '▣' : '▤';
+    const nodeError = nodeErrors[node.id];
+    const isCurrentUserRoot = depth === 0
+      && rootPath[rootPath.length - 1] === '*state*'
+      && node.label === currentUser;
 
     return (
       <div key={node.id} className="tree-node">
@@ -187,6 +211,7 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
             onClick={() => node.type === 'directory' && toggleNode(node)}
             aria-label={isLoading ? `Loading ${node.label}` : undefined}
             aria-busy={isLoading || undefined}
+            aria-describedby={nodeError ? `${node.id}-error` : undefined}
           >
             {isLoading ? '…' : node.type === 'directory' ? (isExpanded ? '▼' : '▶') : '•'}
           </button>
@@ -195,9 +220,21 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
             onClick={() => onSelect({ path: node.path, type: selectionType })}
           >
             <span className="tree-node-kind" aria-hidden="true">{kindIcon}</span>
-            {node.label}
+            <span className={isCurrentUserRoot ? 'tree-node-current-user' : undefined}>
+              {node.label}
+            </span>
           </button>
         </div>
+        {isExpanded && nodeError && (
+          <div
+            id={`${node.id}-error`}
+            className="tree-node-error"
+            role="alert"
+            style={{ marginLeft: `${(depth + 1) * 14}px` }}
+          >
+            {nodeError}
+          </div>
+        )}
         {isExpanded && node.children && (
           <div className="tree-node-children">
             {node.children.map((child) => renderNode(child, depth + 1))}
@@ -209,7 +246,9 @@ const ExplorerTree: React.FC<ExplorerTreeProps> = ({
 
   return (
     <div className="tree-view">
-      {treeData.length === 0 ? (
+      {loadError ? (
+        <div className="tree-load-error" role="alert">{loadError}</div>
+      ) : treeData.length === 0 ? (
         <div className="tree-empty-state">
           {mode === 'stage'
             ? 'No local documents yet.'

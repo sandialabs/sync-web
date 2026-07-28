@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.5.0
+
+### Added
+
+- **Reciprocal federation** — Added exact committed-object routing, direct terminal invocation limited to `get`, `set!`, and `resolve`, terminal-local authorization, and one-round-trip reciprocal bridge synchronization.
+- **Federated service context** — Gateway and Explorer now route only `get`, `set!`, and `resolve`; independently indexed Ledger history applies only to `resolve`, while pin/unpin retain proof locally at Self.
+- **Bridge acceptance configuration** — Added Explorer controls for automatic or preapproved incoming bridge establishment through the generic configuration API.
+- **Raw value view** — Added view-only exact-byte inspection in Stage and Ledger with inert text/source, signature-checked browser media previews, hex fallback, and exact-byte download.
+
+### Changed
+
+- **Tree-native values** — Removed the durable Document wrapper and general metadata API; user payloads are byte vectors stored directly by Tree, while `expression?` remains an Interface boundary codec and preview types are inferred safely at read time. Transition audit values now record the encoded bytes received by Ledger rather than the caller-side expression.
+- **Bridge model** — Replaced publishers, subscribers, and Push/Pull/None negotiation with one reciprocal bridge relationship and one synchronization initiator.
+- **Explorer navigation** — Stage and Ledger share a working-journal breadcrumb; Ledger adds a mirrored historical breadcrumb and an in-place synchronization spinner, while Access and Admin remain Self-local.
+- **Bridge administration** — Presents a spacious bridge list and explicit incoming preapproval allow/remove controls without legacy reciprocal/publisher/subscriber terminology.
+- **Federation routes** — Finite routes may revisit their origin; terminal policy, rather than routing mechanics, decides whether a self-targeted request is allowed.
+- **Ledger path syntax** — Uses directional bridge names directly as one flat traversal prefix, with optional interleaved indexes, instead of repeating `*bridge*` before every hop.
+- **Social-agent model** — Creates configurable deterministic users on every journal, splits each user's fixed keys between public and private state, grants same-user private access over bounded simple routes, runs independent per-user activity/accounting, and preserves origin-local proof retention.
+
+### Fixed
+
+- **Bridge head exchange** — Returns the receiver-known historical digest and merges retained temporary structure into locally pruned signed-head proofs, preserving synchronization under concurrent pin/unpin activity.
+- **Remote proof retention** — Deserializes proof node maps independently of JSON object key order so real Gateway resolve responses can be pinned locally at the origin.
+- **Scoped Explorer routes** — Roots Stage and Ledger trees at the shared `*state*` namespace with the signed-in user's real folder sorted first and emphasized, refreshes latest origin snapshots before extending a route, traverses ordinary ancestor names without exposing reserved state or unauthorized child content, hides mutation controls outside the exact writable remote bucket, presents authorization failures as stable errors, keeps mobile global controls and Access scroll position stable during refresh, and visibly marks remote-disabled Access/Admin controls as Self-local.
+- **Strict evaluation isolation** — Re-evaluates object state in its current proof/materialization context because content words alone do not identify available descendants, while retaining only immutable-code loader caching and rejecting missing graph dependencies before durable commit.
+- **Federation startup** — Reports uncommitted bridge routes explicitly, makes repeated bridge/data setup idempotent, and waits for complete signed route reads before social-agent activity metrics begin, avoiding setup/key-synchronization races and restart corruption.
+- **Bridge re-establishment** — Retains alias/root identity tombstones across deletion, allows the same relationship to be restored (including under preapproval policy), and cleanly rejects alias or root substitution.
+- **Localized Explorer denial** — Keeps the tree mounted and places access failures beneath the denied expanded row so allowed siblings, collapse, and upward navigation remain usable.
+
 ## 1.4.3
 
 ### Changed

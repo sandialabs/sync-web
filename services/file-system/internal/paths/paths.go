@@ -38,6 +38,8 @@ func (s Segment) StringValue() string {
 type ParsedPath struct {
 	Namespace         Namespace
 	Path              []Segment
+	FederationRoute   []string
+	FederationHistory []int
 	Control           string
 	Directory         bool
 	Synthetic         bool
@@ -106,7 +108,53 @@ func parseLedger(parts []string, isDir bool) (ParsedPath, error) {
 	if len(rest) != 0 {
 		return ParsedPath{}, fmt.Errorf("unexpected trailing ledger path segments: %s", strings.Join(rest, "/"))
 	}
-	return ParsedPath{Namespace: NamespaceLedger, Path: path, Directory: isDir}, nil
+	parsed := ParsedPath{Namespace: NamespaceLedger, Path: path, Directory: isDir}
+	return splitFederatedLedgerPath(parsed)
+}
+
+func splitFederatedLedgerPath(parsed ParsedPath) (ParsedPath, error) {
+	if len(parsed.Path) == 0 {
+		return parsed, nil
+	}
+	cursor := 0
+	originIndex := -1
+	if parsed.Path[cursor].IsInt {
+		originIndex = parsed.Path[cursor].Int
+		cursor++
+	}
+	if cursor >= len(parsed.Path) || parsed.Path[cursor].String == "*state*" {
+		return parsed, nil
+	}
+
+	route := []string{}
+	history := []int{originIndex}
+	for {
+		if cursor >= len(parsed.Path) || parsed.Path[cursor].IsInt || parsed.Path[cursor].String == "*state*" {
+			return ParsedPath{}, errors.New("malformed federated ledger path")
+		}
+		route = append(route, parsed.Path[cursor].String)
+		cursor++
+
+		index := -1
+		hasIndex := cursor < len(parsed.Path) && parsed.Path[cursor].IsInt
+		if hasIndex {
+			index = parsed.Path[cursor].Int
+			cursor++
+		}
+		history = append(history, index)
+		if cursor >= len(parsed.Path) {
+			return ParsedPath{}, errors.New("federated ledger path requires terminal state")
+		}
+		if !parsed.Path[cursor].IsInt && parsed.Path[cursor].String == "*state*" {
+			parsed.Path = append([]Segment{Int(index)}, parsed.Path[cursor:]...)
+			parsed.FederationRoute = route
+			parsed.FederationHistory = history
+			return parsed, nil
+		}
+		if !hasIndex {
+			return ParsedPath{}, errors.New("intermediate bridge path requires an index")
+		}
+	}
 }
 
 func parseLedgerSynthetic(parts []string, isDir bool) (ParsedPath, bool, error) {
@@ -199,7 +247,7 @@ func parseLedgerHead(parts []string) ([]Segment, []string, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		path := []Segment{Str("*bridge*"), Str(name)}
+		path := []Segment{Str(name)}
 		path = append(path, tail...)
 		return path, rest, nil
 	default:

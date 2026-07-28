@@ -141,11 +141,15 @@ These signatures are sourced from primitive registrations in `journal/src/evalua
 | Primitive | Signature | Description |
 | --- | --- | --- |
 | `sync-call` | `(sync-call query blocking? id)` | Evaluate query against target record (or current record if `id` omitted). |
+| `sync-eval` | `(sync-eval node)` | Instantiate code carried by a sync node in the caller's current environment. |
+| `sync-let` | `(sync-let ((name value) ...) body ...)` | Evaluate shared self-coded computation in an isolated capability environment with copied inert bindings/results. |
 | `sync-http` | `(sync-http method url . data)` | Perform HTTP request (`get` or `post`). |
 | `sync-remote` | `(sync-remote url data)` | Perform remote post request with payload. |
 | `crypto-generate` | `(crypto-generate seed)` | Derive public/private key pair from seed bytes. |
 | `crypto-sign` | `(crypto-sign private-key message)` | Sign message with private key. |
 | `crypto-verify` | `(crypto-verify public-key signature message)` | Verify signature against message/public key. |
+
+`sync-let` accepts copied ordinary inert data and immutable sync nodes, rejects executable/environment values at the boundary, and blocks ambient journal/root/network/time/random capabilities. Shared self-coded behavior should execute inside `sync-let` regardless of provenance; installed journal host plumbing executes normally and must not evaluate supplied code in its host environment.
 
 When adding new primitives, keep conversion behavior and security constraints in mind so JSON/Scheme workflows remain predictable.
 
@@ -172,6 +176,8 @@ For standard object implementations, `define-class` and `define-method` are the 
 - Internal helper behavior SHOULD be exposed as `~`-prefixed methods, while stable external behavior SHOULD use non-`~` method names.
 
 This convention keeps class loading deterministic, keeps object serialization semantics predictable, and aligns with how `standard.scm` validates class definitions during `make`.
+
+Standard objects dispatch methods directly and restore their prior state when a method raises an error. Direct `sync-eval` is raw object loading, not a containment boundary. Installed Root, Interface, Standard, Ledger, Federation, and Authorization are trusted host infrastructure. Standard's `local` loader supplies trusted generated code with stored durable state; embedded Tree, Chain, custom, peer, and historical behavior runs through child-only `sync-let` boundaries.
 
 #### Standard Class
 
@@ -200,11 +206,11 @@ Public API (`tree.scm`):
 | --- | --- | --- |
 | `obj->node` | `(obj->node self obj)` | Encode Lisp/runtime value into sync-node storage representation. |
 | `node->obj` | `(node->obj self node)` | Decode sync-node storage representation into runtime value. |
-| `get` | `(get self path)` | Read value at key-path; returns value, `(nothing)`, `(unknown)`, or directory metadata. |
+| `get` | `(get self path)` | Read value at key-path; returns value, `(nothing)`, `(unknown)`, or a directory listing. |
 | `equal?` | `(equal? self source path)` | Exact structural equality check between two paths. |
 | `equivalent?` | `(equivalent? self source path)` | Digest-equivalence check between two paths. |
-| `set!` | `(set! self path value)` | Write value at path (or delete when value is `(nothing)`). |
-| `copy!` | `(copy! self source path)` | Copy value from source path to target path. |
+| `set!` | `(set! self path value)` | Write value at a nonempty path, delete with `(nothing)`, or clear the complete map with `(set! self '() '(nothing))`; the empty path cannot store a scalar or object. |
+| `copy!` | `(copy! self source path)` | Copy source to target; a missing source applies normal `(nothing)` deletion semantics, and only a directory source may replace the complete map at the empty path. |
 | `prune!` | `(prune! self path keep-key?)` | Prune proof/state detail at path. |
 | `slice!` | `(slice! self path)` | Slice state to keep proof for path and cut unrelated branches. |
 | `merge!` | `(merge! self other)` | Merge compatible tree structures. |
@@ -226,7 +232,7 @@ Public API (`linear-chain.scm`):
 | `set!` | `(set! self index data)` | Replace entry at index. |
 | `slice!` | `(slice! self index)` | Slice proof view around index. |
 | `prune!` | `(prune! self index)` | Prune proof detail at index. |
-| `truncate!` | `(truncate! self index)` | Truncate chain after index and return cut tail. |
+| `truncate!` | `(truncate! self index)` | Hide entries through the inclusive index while preserving the chain digest. |
 
 #### Log Chain Class
 
@@ -244,7 +250,7 @@ Public API (`log-chain.scm`):
 | `set!` | `(set! self index data)` | Replace entry at index. |
 | `slice!` | `(slice! self index)` | Slice proof view around index. |
 | `prune!` | `(prune! self index)` | Prune proof detail at index. |
-| `truncate!` | `(truncate! self depth)` | Truncate proof tree depth by cutting deeper nodes. |
+| `truncate!` | `(truncate! self index)` | Hide entries through the inclusive index while preserving the chain digest. |
 
 #### Ledger Class
 
@@ -254,21 +260,24 @@ Public API (`ledger.scm`):
 | --- | --- | --- |
 | `*init*` | `(*init* self standard config tree-class chain-class)` | Initialize ledger with standard helper, inline config expression, and storage classes. |
 | `config` | `(config self (path '()))` | Return full configuration or a nested configuration path. |
-| `info` | `(info self)` | Return public configuration subset. |
+| `descriptor` | `(descriptor self index)` | Return the public descriptor for a selected local state. |
 | `size` | `(size self)` | Return permanent chain length. |
-| `bridge!` | `(bridge! self name info-local info-remote)` | Register/update bridge or publication metadata and cached public key. |
-| `get` | `(get self path)` | Read staged content at path. |
-| `set!` | `(set! self path value)` | Stage local state mutation. |
-| `resolve` | `(resolve self path pinned? proof? head)` | Resolve committed content, optionally including pin/proof detail. |
-| `trace` | `(trace self index path head)` | Serialize a proof view rooted at index/path. |
-| `pin!` | `(pin! self path response)` | Pin path into permanent chain retention, optionally from a prepared proof response. |
-| `unpin!` | `(unpin! self path)` | Remove previously pinned path. |
-| `synchronize` | `(synchronize self index)` | Serialize bridge-sync proof view at index. |
-| `bridge-synchronize!` | `(bridge-synchronize! self name index response)` | Merge a prepared bridge synchronization response. |
-| `step!` | `(step! self unix-time)` | Commit staged state to chain, sign, prune by window, and return new size. |
-| `update-window` | `(update-window self window)` | Update the configured recent-history window and prune `temp` when it shrinks. |
-| `update-config!` | `(update-config! self path value)` | Update a configuration entry in place. |
-| `update-code!` | `(update-code! self class update!)` | Update one surface-level code object in place. |
+| `read` | `(read self index supplied-object)` | Anchor an exact partial chain against local history. |
+| `get` | `(get self path)` | Read a staged Tree-native value. |
+| `set!` | `(set! self path value)` | Stage a byte-vector write or deletion. |
+| `set-batch!` | `(set-batch! self changes)` | Stage a list of `(path value)` changes. |
+| `resolve` | `(resolve self path pinned? proof? head ancestor?)` | Resolve committed content with optional retention, proof, prepared-head, and ancestor projection context. |
+| `trace` | `(trace self path head)` | Serialize a proof from local history or a prepared head. |
+| `pin!` | `(pin! self path proof)` | Pin a local path, optionally from a prepared proof response. |
+| `unpin!` | `(unpin! self path)` | Remove a previously pinned path. |
+| `pinned?` | `(pinned? self path)` | Test whether permanent retention contains a path. |
+| `signed-head` | `(signed-head self known-index)` | Return a signed synchronization head. |
+| `peer-head` | `(peer-head self alias index)` | Return committed peer evidence or an opaque peer checkpoint. |
+| `merge-head!` | `(merge-head! self alias supplied-head)` | Merge digest-equivalent fetched proof material transiently. |
+| `store-peer-head!` | `(store-peer-head! self alias verified-head)` | Apply Federation-verified peer evidence. |
+| `delete-peer-head!` | `(delete-peer-head! self alias)` | Retire active peer evidence while preserving identity continuity. |
+| `step!` | `(step! self prepared-inputs)` | Commit staged state, sign it, and apply retention. |
+| `update-config!` | `(update-config! self changes)` | Apply one validated configuration change. |
 
 ## Testing
 
@@ -280,23 +289,21 @@ Use `records/tests` for deterministic, script-driven correctness checks over sim
 
 Prerequisites:
 
-You need either a built `journal-sdk` binary from `journal/` or Docker access to run `ghcr.io/sandialabs/sync-web/journal-sdk`, and you need a POSIX shell environment.
+You need a Rust toolchain and the Journal's C build dependencies. The Records
+runner is cross-platform and does not require a POSIX shell or a separately
+installed Journal SDK executable.
 
-Run with local binary (from repo root):
-
-```bash
-cargo build --release --manifest-path journal/Cargo.toml
-records/tests/test.sh journal/target/release/journal-sdk
-```
-
-Run with Docker:
+Run from the repository root:
 
 ```bash
-docker pull ghcr.io/sandialabs/sync-web/journal-sdk
-records/tests/test.sh "docker run ghcr.io/sandialabs/sync-web/journal-sdk"
+CARGO_TARGET_DIR=journal/target \
+  cargo build --release --manifest-path records/tests/Cargo.toml
+journal/target/release/records-test --suite records/tests/suite.toml
 ```
 
-These tests validate class behavior and cross-journal message scripts in a repeatable sequence.
+These tests validate class behavior in fresh isolated evaluator processes. The
+same suite also runs deterministic cross-journal Interface cases under
+`records/tests/interface`.
 
 ### Service Stack Smoke Tests
 
@@ -399,7 +406,7 @@ Run it:
 
 ```bash
 cd tests/network/compose
-docker compose up
+podman compose up
 ```
 
 Generator defaults:
@@ -410,7 +417,7 @@ Generator defaults:
 - `PERIOD=2`
 - `WINDOW=1024`
 - `SIZE=32`
-- `ACTIVITY=0`
+- `ACTIVITY=4` (seconds between controlled activity cycles; use `0` only for setup-only or benchmark baselines)
 - `WORDS=8`
 
 Network model:
@@ -420,10 +427,13 @@ Network model:
 - routers remain the named HTTP boundary between nodes
 - file-system remains the WebDAV boundary per node through each router's `/webdav/` route
 - social agents live on `public` and talk through routers
+- each journal's fixture assigns about half of `SIZE` to `admin/data/public`, then quarters/eighths/etc. to fixed randomly selected exact routes; colon-separated directory labels are farthest-to-nearest
+- public fixture keys are remotely read-only, private keys are writable only by the admin at the far end of the assigned route, and activity updates those same keys in place
+- descendant grants admit ordinary ancestor listings, while each listed child remains independently access-controlled
 
 Generated topology artifacts:
 
-- `compose.yaml`
+- `compose.yml`
 - `peers.json`
 - `metrics/social-agent-*/`
 - `results/social-agent-*/benchmark.json`
@@ -432,7 +442,7 @@ Generated topology artifacts:
 `peers.json` uses:
 
 - `nodes`: journal-name to router-host mapping
-- `edges`: deterministic outgoing peer adjacency using the same `random.seed(0)` and bounded-degree sampling as FIREWHEEL
+- `edges`: deterministic reciprocal-bridge initiator adjacency using a fixed generator seed and bounded-degree sampling
 
 Port allocation:
 
@@ -447,7 +457,7 @@ Metrics output:
 Benchmark output:
 
 - each social agent also writes a rolling JSON snapshot to `results/social-agent-*/benchmark.json`
-- these files are the simplest place to start for end-to-end throughput benchmarking, especially in serial unpaced mode with `ACTIVITY=0`
+- these files are the simplest place to start for end-to-end throughput benchmarking; `ACTIVITY=0` provides a no-background-activity baseline, while positive intervals exercise controlled traffic
 - run `python3 aggregate_results.py` in the harness directory to maintain `results/network-benchmark.json` as a cluster-wide aggregate snapshot
 
 For local testing of an unpublished social-agent image, build a local tag and override it during generation:
@@ -459,7 +469,7 @@ docker build -t social-agent:dev -f tests/network/common/social-agent/Dockerfile
 ```bash
 cd tests/network/compose
 IMAGE_OVERRIDE_SOCIAL_AGENT=social-agent:dev python3 generate.py
-docker compose up
+podman compose up
 ```
 
 ### Network Emulation

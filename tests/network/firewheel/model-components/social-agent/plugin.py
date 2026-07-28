@@ -13,7 +13,7 @@ random.seed(0)
 class Plugin(AbstractPlugin):
     """synchronic_web.social_agent plugin documentation."""
 
-    def run(self, connectivity="2", size="32", activity="0", words="8"):
+    def run(self, connectivity="2", size="32", activity="4", words="8"):
         connectivity = int(connectivity)
         size = int(size)
         activity = float(activity)

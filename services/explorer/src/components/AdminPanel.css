@@ -8,11 +8,12 @@
 }
 
 .admin-header {
+  width: min(100%, 980px);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin: 0 auto 18px;
 }
 
 .admin-header h1 {
@@ -28,7 +29,8 @@
 }
 
 .admin-message {
-  margin-bottom: 16px;
+  width: min(100%, 980px);
+  margin: 0 auto 16px;
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -47,7 +49,7 @@
 
 .admin-section {
   width: min(100%, 980px);
-  margin-bottom: 22px;
+  margin: 0 auto 22px;
   padding: 18px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -77,6 +79,12 @@
   margin-bottom: 14px;
 }
 
+.admin-section-description {
+  margin: -4px 0 14px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .admin-row {
   display: flex;
   align-items: center;
@@ -89,62 +97,106 @@
   background: var(--bg-primary);
 }
 
-.bridge-row {
+.bridge-list {
   display: grid;
-  grid-template-columns: minmax(110px, 160px) minmax(220px, 1fr) auto auto auto;
-  align-items: center;
-  justify-content: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
 }
 
-.bridge-name {
-  flex: 0 0 160px;
+.bridge-card {
+  position: relative;
+  min-width: 0;
+  padding: 16px;
+  padding-bottom: 58px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+.bridge-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.bridge-card-header strong {
+  font-size: 16px;
+}
+
+.bridge-role {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bridge-details {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.bridge-details div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.bridge-details dt {
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.bridge-endpoint {
+.bridge-details dd {
   min-width: 0;
-  color: var(--text-secondary);
+  margin: 0;
+  font-size: 13px;
+}
+
+.bridge-details code {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.bridge-policy-toggle {
-  display: inline-flex;
-  overflow: hidden;
+.bridge-delete {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+}
+
+.bridge-create-form,
+.preapproval-form {
+  padding: 16px;
   border: 1px solid var(--border-color);
-  border-radius: 999px;
-  background: var(--bg-secondary);
-  white-space: nowrap;
+  border-radius: 10px;
+  background: var(--bg-primary);
 }
 
-.segmented-option {
-  min-width: 48px;
-  padding: 5px 10px;
-  border: 0;
-  border-right: 1px solid var(--border-color);
-  background: transparent;
+.bridge-create-form {
+  grid-template-columns: minmax(110px, 0.7fr) minmax(260px, 1.8fr) minmax(180px, 1fr) auto;
+  align-items: end;
+}
+
+.bridge-create-form h3,
+.preapproval-form h3 {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  font-size: 14px;
+}
+
+.bridge-create-form label,
+.preapproval-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
   color: var(--text-secondary);
-  cursor: pointer;
-  font: inherit;
   font-size: 12px;
-  line-height: 1.2;
-}
-
-.segmented-option:last-child {
-  border-right: 0;
-}
-
-.segmented-option.active {
-  background: var(--blue);
-  color: #ffffff;
-  font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.segmented-option:disabled {
-  color: var(--text-muted, var(--text-secondary));
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 .icon-button {
@@ -188,13 +240,15 @@
 }
 
 .local-endpoint-block {
-  margin-bottom: 14px;
-}
-
-.local-endpoint-label {
-  margin-bottom: 6px;
+  margin-bottom: 16px;
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.local-endpoint-block summary {
+  width: fit-content;
+  margin-bottom: 8px;
+  cursor: pointer;
   font-weight: 600;
 }
 
@@ -234,11 +288,6 @@
   align-items: center;
 }
 
-.admin-form.bridge-form {
-  grid-template-columns: minmax(110px, 150px) minmax(120px, 180px) minmax(260px, 1fr) minmax(160px, 220px) auto;
-  align-items: center;
-}
-
 .admin-form .input {
   width: 100%;
   border-radius: 8px;
@@ -246,6 +295,85 @@
 
 .admin-form .numeric {
   max-width: 180px;
+}
+
+.acceptance-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.acceptance-options > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+
+.acceptance-options input {
+  margin-top: 3px;
+}
+
+.acceptance-options span {
+  display: grid;
+  gap: 4px;
+}
+
+.acceptance-options small {
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.preapproval-panel {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.preapproval-form {
+  grid-template-columns: minmax(110px, 0.7fr) minmax(220px, 1.7fr) auto;
+  align-items: end;
+}
+
+.preapproval-list {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+.preapproval-list h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.preapproval-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.6fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.preapproval-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .bridge-create-form,
+  .preapproval-panel,
+  .preapproval-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -260,13 +388,14 @@
   }
 
   .admin-form.inline,
-  .admin-form.bridge-form,
-  .bridge-row,
-  .local-endpoint-row {
+  .local-endpoint-row,
+  .acceptance-options,
+  .bridge-details div,
+  .preapproval-row {
     grid-template-columns: 1fr;
   }
 
-  .bridge-name {
-    flex-basis: auto;
+  .bridge-role {
+    white-space: normal;
   }
 }

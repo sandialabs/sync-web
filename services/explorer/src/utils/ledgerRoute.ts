@@ -66,7 +66,7 @@ export const buildLedgerRouteBasePath = (
   const path: JournalPath = [firstHopToRootIndex(first.snapshot, rootIndex)];
 
   for (const hop of rest) {
-    path.push('*bridge*', hop.name, bridgeHopToIndex(hop.snapshot));
+    path.push(hop.name, bridgeHopToIndex(hop.snapshot));
   }
 
   return path;
@@ -76,6 +76,15 @@ export const buildLedgerStateRootPath = (
   hops: LedgerHop[],
   rootIndex: number,
 ): JournalPath => [...buildLedgerRouteBasePath(hops, rootIndex), '*state*'];
+
+export const buildLedgerUserHomePath = (
+  hops: LedgerHop[],
+  rootIndex: number,
+  username: string,
+): JournalPath => [
+  ...buildLedgerStateRootPath(hops, rootIndex),
+  ...(username ? [username] : []),
+];
 
 export const buildLedgerBridgesPath = (
   hops: LedgerHop[],

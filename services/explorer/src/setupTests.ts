@@ -5,6 +5,9 @@
 import '@testing-library/jest-dom';
 import { configure } from '@testing-library/react';
 import React from 'react';
+import { TextDecoder, TextEncoder } from 'util';
+
+Object.assign(global, { TextDecoder, TextEncoder });
 
 // Configure @testing-library/react to use React.act
 configure({

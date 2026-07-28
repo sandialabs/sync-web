@@ -1,3 +1,12 @@
+const canonicalJournalError = (responseText: string): string | undefined => {
+  const trimmed = responseText.trim();
+  if (!/^\(error(?=\s|\))/.test(trimmed)) {
+    return undefined;
+  }
+  const tag = trimmed.match(/^\(error\s+'?([^\s()]+)/)?.[1];
+  return tag ? `Journal error: ${tag}` : 'Journal error';
+};
+
 /**
  * Execute a query against the journal endpoint
  */
@@ -40,6 +49,7 @@ export const executeQuery = async (
       result,
       request: requestInfo,
       response: responseInfo,
+      error: canonicalJournalError(responseText),
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

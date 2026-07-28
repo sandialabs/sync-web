@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import random
+import shutil
 from pathlib import Path
 
 try:
@@ -18,13 +19,11 @@ OUTPUT_PEERS = SCRIPT_DIR / "peers.json"
 HTTP_ONLY_CERT = SCRIPT_DIR / "http-only.crt"
 HTTP_ONLY_KEY = SCRIPT_DIR / "http-only.key"
 ACME_DIR = SCRIPT_DIR / "acme-challenge"
-METRICS_DIR = SCRIPT_DIR / "metrics"
-RESULTS_DIR = SCRIPT_DIR / "results"
 ROOT_DIR = SCRIPT_DIR.parents[2]
 SOCIAL_AGENT_VERSION = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
 DEFAULT_GENERAL_COMPOSE = str(ROOT_DIR / "deploy" / "compose" / "general" / "compose.yaml")
 
-HTTP_PORT_BASE = 8192
+HTTP_PORT_BASE = int(os.environ.get("HTTP_PORT_BASE", "8192"))
 DEFAULT_NODE_COUNT = 4
 DEFAULT_SECRET = "password"
 DEFAULT_ADMIN_USERNAME = "admin"
@@ -32,10 +31,12 @@ DEFAULT_CONNECTIVITY = 2
 DEFAULT_PERIOD = 2
 DEFAULT_WINDOW = 1024
 DEFAULT_SIZE = 32
-DEFAULT_ACTIVITY = 0.0
+DEFAULT_ACTIVITY = 4.0
+DEFAULT_USERS = 1
+DEFAULT_SEGMENTS = 2
 DEFAULT_WORDS = 8
 DEFAULT_CLIENTS = 1
-AGGREGATE_RESULTS_PORT = 8290
+AGGREGATE_RESULTS_PORT = int(os.environ.get("AGGREGATE_RESULTS_PORT", "8290"))
 
 
 def env_required(name):
@@ -106,14 +107,13 @@ def rewrite_depends_on(depends_on, node_index):
     raise SystemExit("Unsupported compose depends_on format")
 
 
-def rewrite_service_environment(service_name, node_index, environment, secret, period, window, admin_username, admin_password, bridge_publish):
+def rewrite_service_environment(service_name, node_index, environment, secret, period, window, admin_username, admin_password):
     env_map = to_env_map(environment)
 
     if service_name == "journal":
         env_map["SECRET"] = secret
         env_map["PERIOD"] = str(period)
         env_map["WINDOW"] = str(window)
-        env_map["BRIDGE_PUBLISH"] = bridge_publish
         env_map["INTERFACE"] = f"http://router-{node_index}/api/v1/journal/interface"
         env_map["JOURNAL_NAME"] = f"journal-{node_index}"
     elif service_name == "gateway":
@@ -213,31 +213,28 @@ def logical_node_name(node_index):
 def generate_peer_config(node_count, connectivity):
     rng = random.Random(1)
     node_names = [logical_node_name(index) for index in range(node_count)]
-    publish_modes = {
-        node_name: "push" if index % 2 == 0 else "pull"
-        for index, node_name in enumerate(node_names)
-    }
-    edges = {}
+    edges = {node_name: [] for node_name in node_names}
+    pairs = set()
     for node_name in node_names:
         candidates = [other_name for other_name in node_names if other_name != node_name]
         rng.shuffle(candidates)
-        selected = []
-        for peer in candidates:
-            if publish_modes[node_name] == "push":
-                selected.append({"node": peer, "mode": "push"})
-            elif publish_modes[peer] == "pull":
-                selected.append({"node": peer, "mode": "pull"})
-            if len(selected) >= connectivity:
-                break
-        edges[node_name] = selected
+        for peer in candidates[:connectivity]:
+            pair = tuple(sorted((node_name, peer)))
+            if pair in pairs:
+                continue
+            pairs.add(pair)
+            edges[pair[0]].append({"node": pair[1]})
     nodes = {
-        node_name: {"router_host": f"router-{index}", "publish": publish_modes[node_name]}
+        node_name: {"router_host": f"router-{index}"}
         for index, node_name in enumerate(node_names)
     }
     return {"nodes": nodes, "edges": edges}
 
 
-def make_social_agent_service(node_index, period, size, activity, words, clients, admin_username, admin_password):
+def make_social_agent_service(
+    node_index, period, size, activity, users, segments, words, clients,
+    admin_username, admin_password, run_path
+):
     service_name = f"social-agent-{node_index}"
     image = os.environ.get(
         "IMAGE_OVERRIDE_SOCIAL_AGENT",
@@ -246,7 +243,7 @@ def make_social_agent_service(node_index, period, size, activity, words, clients
     return {
         "image": image,
         "depends_on": [f"router-{node_index}", f"identity-provider-{node_index}"],
-        "networks": ["public"],
+        "networks": ["public", f"private-{node_index}"],
         "environment": {
             "NODE_NAME": logical_node_name(node_index),
             "SYNC_USERNAME": admin_username,
@@ -254,26 +251,29 @@ def make_social_agent_service(node_index, period, size, activity, words, clients
             "PERIOD": str(period),
             "SIZE": str(size),
             "ACTIVITY": str(activity),
+            "USERS": str(users),
+            "SEGMENTS": str(segments),
             "WORDS": str(words),
             "CLIENTS": str(clients),
             "PEERS_CONFIG": "/srv/peers.json",
             "BENCHMARK_OUTPUT": "/srv/results/benchmark.json",
         },
         "volumes": [
-            "./peers.json:/srv/peers.json:ro,z",
-            f"./metrics/{service_name}:/var/lib/node_exporter/textfile:Z",
-            f"./results/{service_name}:/srv/results:Z",
+            f"./{run_path}/peers.json:/srv/peers.json:ro,z",
+            f"./{run_path}/metrics/{service_name}:/var/lib/node_exporter/textfile:Z",
+            f"./{run_path}/results/{service_name}:/srv/results:Z",
         ],
     }
 
 
-def make_aggregate_results_service():
+def make_aggregate_results_service(run_path):
     return {
         "image": "python:3.11-alpine",
         "working_dir": "/workspace",
         "command": ["python3", "aggregate_results.py"],
         "volumes": [
-            ".:/workspace:z",
+            "./aggregate_results.py:/workspace/aggregate_results.py:ro,z",
+            f"./{run_path}/results:/workspace/results:z",
         ],
         "ports": [f"{AGGREGATE_RESULTS_PORT}:8090"],
         "restart": "unless-stopped",
@@ -294,8 +294,17 @@ def main():
     window = env_int("WINDOW", DEFAULT_WINDOW)
     size = env_int("SIZE", DEFAULT_SIZE)
     activity = env_float("ACTIVITY", DEFAULT_ACTIVITY)
+    users = env_int("USERS", DEFAULT_USERS)
+    segments = env_int("SEGMENTS", DEFAULT_SEGMENTS)
     words = env_int("WORDS", DEFAULT_WORDS)
     clients = env_int("CLIENTS", DEFAULT_CLIENTS)
+    project = env_optional("COMPOSE_PROJECT_NAME", "social-agent-network")
+    if not project.replace("-", "").replace("_", "").replace(".", "").isalnum():
+        raise SystemExit("COMPOSE_PROJECT_NAME contains unsupported path characters")
+    run_path = Path("runs") / project
+    run_dir = SCRIPT_DIR / run_path
+    metrics_dir = run_dir / "metrics"
+    results_dir = run_dir / "results"
 
     base = load_base_compose(base_compose_path)
     base_services = base["services"]
@@ -307,14 +316,18 @@ def main():
         "volumes": {},
     }
 
-    METRICS_DIR.mkdir(exist_ok=True)
-    RESULTS_DIR.mkdir(exist_ok=True)
+    # Generated diagnostics belong to this process generation. Remove stale
+    # counters before Compose starts so readiness cannot accept an older run.
+    shutil.rmtree(metrics_dir, ignore_errors=True)
+    shutil.rmtree(results_dir, ignore_errors=True)
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     for node_index in range(node_count):
         private_network = f"private-{node_index}"
         generated["networks"][private_network] = {}
-        (METRICS_DIR / f"social-agent-{node_index}").mkdir(exist_ok=True)
-        (RESULTS_DIR / f"social-agent-{node_index}").mkdir(exist_ok=True)
+        (metrics_dir / f"social-agent-{node_index}").mkdir(exist_ok=True)
+        (results_dir / f"social-agent-{node_index}").mkdir(exist_ok=True)
 
         for service_name, service in base_services.items():
             generated_name = f"{service_name}-{node_index}"
@@ -331,12 +344,11 @@ def main():
                 service_name,
                 node_index,
                 generated_service.get("environment"),
-                secret,
+                f"{secret}-{node_index}",
                 period,
                 window,
                 admin_username,
                 admin_password,
-                peers["nodes"][logical_node_name(node_index)]["publish"],
             )
 
             if "image" in generated_service:
@@ -370,24 +382,29 @@ def main():
             generated["services"][generated_name] = generated_service
 
         generated["services"][f"social-agent-{node_index}"] = make_social_agent_service(
-            node_index, period, size, activity, words, clients, admin_username, admin_password
+            node_index, period, size, activity, users, segments, words, clients,
+            admin_username, admin_password, run_path.as_posix(),
         )
 
         for volume_name, volume_config in base_named_volumes.items():
             generated["volumes"][f"{volume_name}-{node_index}"] = copy.deepcopy(volume_config)
 
-    generated["services"]["aggregate-results"] = make_aggregate_results_service()
+    generated["services"]["aggregate-results"] = make_aggregate_results_service(run_path.as_posix())
 
     SCRIPT_DIR.mkdir(parents=True, exist_ok=True)
     ACME_DIR.mkdir(exist_ok=True)
     HTTP_ONLY_CERT.write_text("HTTP-only compose placeholder cert.\n", encoding="utf-8")
     HTTP_ONLY_KEY.write_text("HTTP-only compose placeholder key.\n", encoding="utf-8")
+    project_peers = run_dir / "peers.json"
+    project_peers.write_text(json.dumps(peers, indent=2) + "\n", encoding="utf-8")
+    # Keep the historical convenience output for manual inspection only. Runtime
+    # containers bind the immutable project-scoped copy above.
     OUTPUT_PEERS.write_text(json.dumps(peers, indent=2) + "\n", encoding="utf-8")
     with OUTPUT_COMPOSE.open("w", encoding="utf-8") as fd:
         yaml.safe_dump(generated, fd, sort_keys=False)
 
     print(f"Wrote {OUTPUT_COMPOSE}")
-    print(f"Wrote {OUTPUT_PEERS}")
+    print(f"Wrote {project_peers}")
 
 
 if __name__ == "__main__":

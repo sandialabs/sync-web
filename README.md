@@ -1,8 +1,12 @@
 # Synchronic Web
 
-The Synchronic Web is a global infrastructure for data assurance. Journals maintain immutable, cryptographically linked records and continuously synchronize metadata with other journals to achieve global consensus. Applications built on top can prove the existence and integrity of any data at a specific point in time.
+The Synchronic Web is infrastructure for data assurance. Each journal maintains immutable, cryptographically linked records. Reciprocal bridges exchange root-signed heads so journals can preserve and inspect verifiable cross-journal history without requiring global consensus. Applications can retain selective proof material and verify data against an exact committed journal state.
 
 Full documentation: [sandialabs.github.io/sync-web](https://sandialabs.github.io/sync-web)
+
+## Federation model
+
+Sync Web 1.5 uses reciprocal bridges for identity, proof reachability, and signed-head synchronization. A bridge grants no application-data access by itself. Remote application calls are delivered directly to the terminal journal, whose local policy may authorize only `get`, `set!`, and `resolve`; pinning, batching, bridge/configuration changes, access policy, and administration remain local to the origin journal. See [`docs/ideas/federation.md`](docs/ideas/federation.md) for the protocol and trust model.
 
 ## Repository Layout
 
@@ -14,6 +18,7 @@ Full documentation: [sandialabs.github.io/sync-web](https://sandialabs.github.io
 | `deploy/` | Single-node Compose-compatible container deployment |
 | `tests/` | API smoke tests, load tests, multi-node network tests |
 | `docs/` | Documentation site (Astro/Starlight) |
+| `scripts/` | Compact check orchestration and read-only network diagnostics |
 
 ## Quickstart
 

@@ -2,6 +2,12 @@
 
 This repo has several independent validation layers. Run the checks relevant to the area you changed.
 
+## Compact orchestration
+
+- `scripts/sync-check --changed --base origin/main` conservatively maps committed, staged, unstaged, and untracked changes to existing component checks. Use `--plan` to inspect its selection and `--full` for every profile. Complete logs and a compact report are written under `target/sync-check/`.
+- `scripts/sync-network status|wait-ready|probe|logs|snapshot --project <isolated-name>` provides read-only diagnostics for an existing generated multi-node network. Exact test project names are required and production-like names are rejected. It does not create, restart, or remove containers.
+- Both tools use the local artifact contract documented in [`scripts/README.md`](../scripts/README.md).
+
 ## Core journal and records
 
 - Rust journal tests
@@ -10,8 +16,8 @@ This repo has several independent validation layers. Run the checks relevant to 
   - Command: `cargo test`
 - Scheme record tests
   - Path: repo root
-  - Requires: built `journal-sdk` binary
-  - Command: `./records/tests/test.sh ./journal/target/debug/journal-sdk`
+  - Requires: Rust toolchain with Cargo and C build dependencies
+  - Command: `CARGO_TARGET_DIR=journal/target cargo build --manifest-path records/tests/Cargo.toml && journal/target/debug/records-test --suite records/tests/suite.toml`
 
 ## Services
 

@@ -54,29 +54,10 @@
     ;;   Returns:
     ;;     sync node: proof chain node with header.
     (let* ((size ((self 'size)))
-           (index ((self '~adjust) index size))
-           (height-1 ((self '~range) 0 size))
-           (height-2 ((self '~range) 0 (+ index 1)))
-           (main (let loop ((node (self '(1 1))) (depth-1 1) (depth-2 1))
-                   (let* ((domain-1 ((self '~domain) depth-1 size))
-                          (domain-2 ((self '~domain) depth-2 (+ index 1))))
-                     (cond ((not domain-1) (sync-null))
-                           ((and (equal? domain-1 domain-2) (= (- height-1 depth-1) (- height-2 depth-2))) node)
-                           ((equal? domain-1 domain-2)
-                            (sync-cons (sync-car node) (loop (sync-cdr node) (+ depth-1 1) (+ depth-2 1))))
-                           ((> (car domain-1) (car domain-2)) (loop (sync-cdr node) (+ depth-1 1) depth-2))
-                           ((<= (cadr domain-1) (car domain-2)) (loop node depth-1 (+ depth-2 1)))
-                           (else (let recurse ((node (sync-car node)) (start (car domain-1)) (end (cadr domain-1))
-                                               (rest (loop (sync-cdr node) (+ depth-1 1) (- depth-2 1))))
-                                   (let ((depth-start ((self '~range) start (+ index 1)))
-                                         (depth-end ((self '~range) (- end 1) (+ index 1)))
-                                         (mid (/ (+ start end) 2)))
-                                     (cond ((not depth-start) rest)
-                                           ((equal? depth-start depth-end) (sync-cons node rest))
-                                           ((>= mid (cadr domain-2)) (recurse (sync-car node) start mid rest))
-                                           (else (recurse (sync-cdr node) mid end
-                                                          (recurse (sync-car node) start mid rest))))))))))))
-      (sync-cons (self '(0)) (sync-cons (expression->byte-vector (+ index 1)) main))))
+           (index ((self '~adjust) index size)))
+      (sync-cons (self '(0))
+                 (sync-cons (expression->byte-vector (+ index 1))
+                            ((self '~previous) index)))))
 
   (define-method (digest self (index (- ((self 'size)) 1)))
     ;; Digest of proof chain at index.
@@ -95,12 +76,19 @@
     ;;     boolean: #t after mutation.
     (let* ((size ((self 'size)))
            (chain (let loop ((node (self '(1 1))) (depth 1) (new data))
-                    (if (sync-null? node) (sync-cons new (sync-null))
-                        (let ((old (sync-car node)) (rest (sync-cdr node))
-                              (domain ((self '~domain) depth size)))
-                          (cond ((< (- (cadr domain) (car domain)) (expt 2 depth)) (sync-cons (sync-cons old new) rest))
-                                ((sync-stub? old) (sync-cons (sync-cut new) (loop rest (+ depth 1) old)))
-                                (else (sync-cons new (loop rest (+ depth 1) old)))))))))
+                    (cond ((sync-null? node) (sync-cons new (sync-null)))
+                          ((sync-stub? node)
+                           (error 'availability-error
+                                  "Cannot append through unavailable log-chain structure"))
+                          (else
+                           (let ((old (sync-car node)) (rest (sync-cdr node))
+                                 (domain ((self '~domain) depth size)))
+                             (cond ((< (- (cadr domain) (car domain)) (expt 2 depth))
+                                    (sync-cons (sync-cons old new) rest))
+                                   ((sync-stub? old)
+                                    (sync-cons new (loop rest (+ depth 1) old)))
+                                   (else
+                                    (sync-cons new (loop rest (+ depth 1) old))))))))))
       (set! (self '(1)) (sync-cons (expression->byte-vector (+ size 1)) chain))))
 
   (define-method (set! self index data)
@@ -159,7 +147,8 @@
                   (sync-cons (sync-cut (sync-car node)) (loop-1 (sync-cdr node) (+ depth 1))))))))
 
   (define-method (prune! self index)
-    ;; Prune chain to hide proof for index.
+    ;; Prune chain to hide proof for index while preserving the internal branch
+    ;; digests needed to derive every historical prefix.
     ;;   Args:
     ;;     index (integer): index to access.
     ;;   Returns:
@@ -169,8 +158,9 @@
            (level ((self '~range) index size))
            (domain ((self '~domain) level size))
            (modifier (if (= (- (cadr domain) (car domain)) (expt 2 level)) 0 1))
-           (offset (modulo index (expt 2 level)))
-           (sync-cons/cut (lambda (x y) (if (and (sync-stub? x) (sync-stub? y)) (sync-cut (sync-cons x y)) (sync-cons x y)))))
+           (offset (modulo index (expt 2 level))))
+      ;; Historical sizes can partition one current log range differently, so
+      ;; retain pair boundaries even after both children have become stubs.
       (set! (self '(1 1))
             (let loop-1 ((node (self '(1 1))) (depth 1))
               (if (= depth level)
@@ -178,28 +168,49 @@
                                (cond ((sync-stub? node) node)
                                      ((= depth 0) (sync-cut node))
                                      (else (if (< offset (expt 2 (- depth 1)))
-                                               (sync-cons/cut (loop-2 (sync-car node) (- depth 1)
-                                                                      (modulo offset (expt 2 (- depth 1))))
-                                                              (sync-cdr node))
-                                               (sync-cons/cut (sync-car node)
-                                                              (loop-2 (sync-cdr node) (- depth 1)
-                                                                      (modulo offset (expt 2 (- depth 1)))))))))
+                                               (sync-cons (loop-2 (sync-car node) (- depth 1)
+                                                                  (modulo offset (expt 2 (- depth 1))))
+                                                          (sync-cdr node))
+                                               (sync-cons (sync-car node)
+                                                          (loop-2 (sync-cdr node) (- depth 1)
+                                                                  (modulo offset (expt 2 (- depth 1)))))))))
                              (sync-cdr node))
                   (sync-cons (sync-car node) (loop-1 (sync-cdr node) (+ depth 1))))))))
 
-  (define-method (truncate! self depth)
-    ;; Truncate proof tree depth by cutting deeper nodes.
+  (define-method (truncate! self index)
+    ;; Hide every entry through index while preserving the chain digest.
+    ;; The truncated prefix is reduced to its canonical logarithmic frontier;
+    ;; current ranges retain only the branches needed to reach those stumps.
     ;;   Args:
-    ;;     depth (integer): max depth to keep.
+    ;;     index (integer): oldest range endpoint to hide, inclusive.
     ;;   Returns:
-    ;;     sync node: truncated proof tree.
-    (let ((chain (let loop ((node (self '(1 1))) (d 0))
-                   (if (sync-null? node) node
-                       (let ((data (sync-car node)) (rest (sync-cdr node)))
-                         (if (<= d depth) (sync-cons data (loop rest (+ d 1)))
-                             (sync-cons (sync-cut data) (loop rest (- d 1)))))))))
-      (set! (self '(1 1)) chain)
-      chain))
+    ;;     sync node: resulting partial proof tree.
+    (let* ((size ((self 'size)))
+           (index ((self '~adjust) index size))
+           (history-size (+ index 1)))
+      (set! (self '(1 1))
+            (let loop-levels ((node (self '(1 1))) (depth 1))
+              (let ((domain ((self '~domain) depth size)))
+                (if (not domain) (sync-null)
+                    (sync-cons
+                     (let cut-range ((node (sync-car node))
+                                     (start (car domain))
+                                     (end (cadr domain)))
+                       (cond ((>= start history-size) node)
+                             ((equal? (list start end)
+                                      ((self '~domain)
+                                       ((self '~range) start history-size)
+                                       history-size))
+                              (sync-cut node))
+                             ((sync-stub? node)
+                              (error 'availability-error
+                                     "Cannot truncate through unavailable log-chain structure"))
+                             (else
+                              (let ((middle (/ (+ start end) 2)))
+                                (sync-cons (cut-range (sync-car node) start middle)
+                                           (cut-range (sync-cdr node) middle end))))))
+                     (loop-levels (sync-cdr node) (+ depth 1)))))))
+      (self '(1 1))))
 
   (define-method (~previous self index)
     ;; Helper method to calculate previous state.

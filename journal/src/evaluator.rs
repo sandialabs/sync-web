@@ -305,7 +305,8 @@ fn primitive_byte_vector_to_expression() -> Primitive {
         bytes.push(0);
 
         match CString::from_vec_with_nul(bytes) {
-            Ok(c_string) => s7_eval_c_string(sc, c_string.as_ptr()),
+            Ok(c_string) =>
+                s7_eval_c_string_with_environment(sc, c_string.as_ptr(), s7_curlet(sc)),
             Err(_) => s7_error(
                 sc,
                 s7_make_symbol(sc, c"encoding-error".as_ptr()),
@@ -435,14 +436,17 @@ fn primitive_random_byte_vector() -> Primitive {
         }
 
         let length = s7_integer(arg);
-        let mut rng = OsRng;
-        let mut bytes = vec![
-            0u8;
-            length
+        let length_usize = length
                 .try_into()
-                .expect("Length exceeds system memory limits")
-        ];
+            .expect("Length exceeds system memory limits");
+        let mut bytes = if let Some(bytes) = crate::scenario_random_bytes(sc, length_usize) {
+            bytes
+        } else {
+            let mut rng = OsRng;
+            let mut bytes = vec![0u8; length_usize];
         rng.fill_bytes(&mut bytes);
+            bytes
+        };
 
         let bv = s7_make_byte_vector(sc, length as i64, 1, std::ptr::null_mut());
         for i in 0..length as usize {

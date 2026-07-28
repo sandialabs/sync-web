@@ -47,7 +47,9 @@ jobs:
         run: cargo build
       - name: Test
         working-directory: journal
-        run: cargo test
+        run: |
+          cargo test
+          cargo check --features test-support --lib
 
   build-journal-sdk:
     needs: [changes, test-journal]

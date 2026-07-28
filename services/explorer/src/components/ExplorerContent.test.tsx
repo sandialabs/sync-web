@@ -15,6 +15,18 @@ jest.mock('../services/JournalService', () => ({
       return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     }),
     isReservedStateSegment: jest.fn((value: string) => value.startsWith('*') && value.endsWith('*')),
+    isIndexError: jest.fn((error: unknown) =>
+      typeof error === 'object' && error !== null
+        && 'code' in error && (error as { code?: unknown }).code === 'index-error'),
+    isSnapshotUnavailable: jest.fn((error: unknown) => {
+      const value = error as { code?: unknown; message?: unknown };
+      const message = typeof value?.message === 'string'
+        ? value.message.replace(/^bridge-error: /, '')
+        : value?.message;
+      return value?.code === 'index-error'
+        || (value?.code === 'bridge-error' && typeof message === 'string'
+          && message.startsWith('Bridge is not committed at the selected local index:'));
+    }),
     decodePathSegment: jest.fn((value: string) => value.replace(/%20/g, ' ')),
   },
 }));
@@ -31,9 +43,23 @@ describe('ExplorerContent', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    URL.createObjectURL = jest.fn(() => 'blob:test');
+    URL.revokeObjectURL = jest.fn();
     (JournalService.extractSchemeValue as jest.Mock).mockImplementation((value) => ({ value, schemeType: null }));
     (JournalService.parseDirectoryResponse as jest.Mock).mockReturnValue(null);
     (JournalService.parseDirectoryEntries as jest.Mock).mockReturnValue(null);
+    (JournalService.isIndexError as jest.Mock).mockImplementation((error: unknown) =>
+      typeof error === 'object' && error !== null
+        && 'code' in error && (error as { code?: unknown }).code === 'index-error');
+    (JournalService.isSnapshotUnavailable as jest.Mock).mockImplementation((error: unknown) => {
+      const value = error as { code?: unknown; message?: unknown };
+      const message = typeof value?.message === 'string'
+        ? value.message.replace(/^bridge-error: /, '')
+        : value?.message;
+      return value?.code === 'index-error'
+        || (value?.code === 'bridge-error' && typeof message === 'string'
+          && message.startsWith('Bridge is not committed at the selected local index:'));
+    });
   });
 
   it('shows stage directory actions', async () => {
@@ -67,9 +93,141 @@ describe('ExplorerContent', () => {
       />,
     );
 
-    expect(await screen.findByText('+ Document')).toBeInTheDocument();
+    expect(await screen.findByText('+ File')).toBeInTheDocument();
     expect(screen.getByText('+ Directory')).toBeInTheDocument();
     expect(screen.getByText('Upload File')).toBeInTheDocument();
+  });
+
+  it('shows exact stored text in a view-only Raw mode', async () => {
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: { '*type/byte-vector*': '3c7363726970743e616c6572742831293c2f7363726970743e' },
+      proof: {},
+    });
+
+    const { unmount } = render(
+      <ExplorerContent
+        mode="stage"
+        selection={{ path: ['*state*', 'alice', 'page.html'], type: 'file' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Raw'));
+    expect(await screen.findByText('<script>alert(1)</script>')).toBeInTheDocument();
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Rename')).not.toBeInTheDocument();
+    expect(mockJournalService.get).toHaveBeenCalledWith(
+      ['*state*', 'alice', 'page.html'],
+    );
+    unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test');
+  });
+
+  it('does not present a transient snapshot race as an access denial', async () => {
+    (mockJournalService.get as jest.Mock).mockRejectedValue(
+      Object.assign(new Error('Index is out of bounds: 257'), { code: 'index-error' }),
+    );
+
+    render(
+      <ExplorerContent
+        mode="ledger"
+        selection={{ path: [257, 'journal-1', -2, '*state*', 'alice'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('selected ledger snapshot is unavailable');
+    expect(alert).not.toHaveTextContent('granted access');
+  });
+
+  it('does not present an unretained historical route as an access denial', async () => {
+    (mockJournalService.get as jest.Mock).mockRejectedValue(
+      Object.assign(
+        new Error('bridge-error: Bridge is not committed at the selected local index: journal-1 -1'),
+        { code: 'bridge-error' },
+      ),
+    );
+
+    render(
+      <ExplorerContent
+        mode="ledger"
+        selection={{ path: [257, 'journal-1', -2, '*state*', 'alice'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('selected ledger snapshot is unavailable');
+    expect(alert).not.toHaveTextContent('granted access');
+  });
+
+  it('hides mutation controls for a remote public stage directory', async () => {
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: ['directory', { 'key-0': 'value' }, false],
+      'pinned?': false,
+      proof: {},
+    });
+    (JournalService.parseDirectoryResponse as jest.Mock).mockReturnValue({
+      items: ['key-0'],
+      isComplete: false,
+    });
+    (JournalService.parseDirectoryEntries as jest.Mock).mockReturnValue([
+      { name: 'key-0', type: 'value' },
+    ]);
+
+    render(
+      <ExplorerContent
+        mode="stage"
+        stageReadOnly
+        selection={{ path: ['*state*', 'admin', 'data', 'public'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn().mockResolvedValue(undefined)}
+        onStageCreateDirectory={jest.fn().mockResolvedValue(undefined)}
+        onStageUploadFile={jest.fn().mockResolvedValue(undefined)}
+        onStageRename={jest.fn().mockResolvedValue(undefined)}
+        onStageDelete={jest.fn().mockResolvedValue(undefined)}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('key-0')).toBeInTheDocument();
+    expect(screen.queryByText('+ Document')).not.toBeInTheDocument();
+    expect(screen.queryByText('+ Directory')).not.toBeInTheDocument();
+    expect(screen.queryByText('Upload File')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Rename')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
   });
 
   it('shows stage file actions', async () => {
@@ -102,6 +260,35 @@ describe('ExplorerContent', () => {
 
     expect(await screen.findByText('Edit')).toBeInTheDocument();
     expect(screen.getByText('Download')).toBeInTheDocument();
+  });
+
+  it('shows a stable access error without exposing the raw journal response', async () => {
+    (mockJournalService.get as jest.Mock).mockRejectedValue(
+      new Error('journal_error: raw authorization details'),
+    );
+
+    render(
+      <ExplorerContent
+        mode="stage"
+        selection={{ path: ['*state*', 'alice'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn().mockResolvedValue(undefined)}
+        onStageCreateDirectory={jest.fn().mockResolvedValue(undefined)}
+        onStageUploadFile={jest.fn().mockResolvedValue(undefined)}
+        onStageRename={jest.fn().mockResolvedValue(undefined)}
+        onStageDelete={jest.fn().mockResolvedValue(undefined)}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Check that the selected journal has granted access to this user and path.',
+    );
+    expect(screen.queryByText(/raw authorization details/)).not.toBeInTheDocument();
+    expect(screen.queryByText('+ Document')).not.toBeInTheDocument();
   });
 
   it('navigates when a directory entry is clicked', async () => {
@@ -230,7 +417,7 @@ describe('ExplorerContent', () => {
     render(
       <ExplorerContent
         mode="ledger"
-        selection={{ path: [-1, '*bridge*', 'journal-5', -1, '*state*', 'admin', 'data', 'key-0'], type: 'file' }}
+        selection={{ path: [-1, 'journal-5', -1, '*state*', 'admin', 'data', 'key-0'], type: 'file' }}
         journalService={mockJournalService}
         refreshKey={0}
         ledgerView="content"

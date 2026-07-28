@@ -5,14 +5,8 @@
     "example": "((function size))",
     "permission": "any"
   },
-  "synchronize": {
-    "description": "Returns a serialized proof of the chain state up to the specified index. Used for bridge synchronization to verify chain integrity and fetch missing data.",
-    "template": "((function synchronize) (arguments ((index <index>))))",
-    "example": "((function synchronize) (arguments ((index 0))))",
-    "permission": "any"
-  },
   "resolve": {
-    "description": "Returns committed/indexed content for a specific path. Optional pinned? and proof? flags control whether metadata and serialized proof material are included.",
+    "description": "Returns committed/indexed content for a specific path. Optional pinned? and proof? flags control whether local pin status and serialized proof material are included.",
     "template": "((function resolve) (arguments ((path <path>) (pinned? <pinned?>) (proof? <proof?>))) (authentication ((credentials <secret>))))",
     "example": "((function resolve) (arguments ((path (-1 (*state* key))) (pinned? #t) (proof? #f))) (authentication ((credentials \"mysecret\"))))",
     "permission": "user"
@@ -66,9 +60,15 @@
     "permission": "user"
   },
   "bridge!": {
-    "description": "Adds or updates a bridge/publication target. The local info records the peer interface, local policy, role, and proposed remote name.",
-    "template": "((function bridge!) (arguments ((name <name>) (info-local ((interface <endpoint>) (policy ((publish push) (subscribe pull))) (role #f) (remote-name <remote-name>))))) (authentication ((credentials <secret>))))",
-    "example": "((function bridge!) (arguments ((name alice) (info-local ((interface \"http://alice.example.com/api/v1/journal/interface\") (policy ((publish push) (subscribe pull))) (role #f) (remote-name local-journal))))) (authentication ((credentials \"mysecret\"))))",
+    "description": "Creates a reciprocal bridge and takes responsibility for initiating synchronization.",
+    "template": "((function bridge!) (arguments ((name <name>) (interface <endpoint>) (remote-name <remote-name>))) (authentication ((credentials <secret>))))",
+    "example": "((function bridge!) (arguments ((name alice) (interface \"http://alice.example.com/api/v1/journal/interface\") (remote-name local-journal))) (authentication ((credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "update-config!": {
+    "description": "Updates a ledger configuration path. Used for bridge acceptance and preapproval settings.",
+    "template": "((function update-config!) (arguments ((path <path>) (value <value>))) (authentication ((credentials <secret>))))",
+    "example": "((function update-config!) (arguments ((path (public bridge-accept)) (value preapproved))) (authentication ((credentials \"mysecret\"))))",
     "permission": "user"
   },
   "*secret*": {

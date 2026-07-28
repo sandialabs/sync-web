@@ -20,7 +20,8 @@ const STANDARD_SCM: &str = include_str!("../../../../records/lisp/standard.scm")
 const LOG_CHAIN_SCM: &str = include_str!("../../../../records/lisp/log-chain.scm");
 const TREE_SCM: &str = include_str!("../../../../records/lisp/tree.scm");
 const LEDGER_SCM: &str = include_str!("../../../../records/lisp/ledger.scm");
-const DOCUMENT_SCM: &str = include_str!("../../../../records/lisp/document.scm");
+const FEDERATION_SCM: &str = include_str!("../../../../records/lisp/federation.scm");
+const AUTHORIZATION_SCM: &str = include_str!("../../../../records/lisp/authorization.scm");
 const INTERFACE_SCM: &str = include_str!("../../../../records/lisp/interface.scm");
 
 const INDEX_HTML: &str = r#"<!DOCTYPE html>
@@ -114,11 +115,6 @@ struct Args {
     #[arg(long, default_value = "", help = "Journal name advertised in ledger info")]
     name: String,
 
-    #[arg(long, default_value = "push", help = "Bridge publish policy: push|pull|none")]
-    bridge_publish: String,
-
-    #[arg(long, default_value = "pull", help = "Bridge subscribe policy: push|pull|none")]
-    bridge_subscribe: String,
 }
 
 #[get("/")]
@@ -229,27 +225,24 @@ fn install_expr(args: &Args, secret: &str, clear: bool) -> String {
           (window {}) \
           (root {}) \
           (interface \"{}\") \
-          (name \"{}\") \
-          (push-enabled? #t) \
-          (bridge-policy ((publish {}) (subscribe {}))))",
+          (name \"{}\"))",
         escape_scheme_string(secret),
         escape_scheme_string(secret),
         args.window,
         ROOT_SCM,
         escape_scheme_string(&interface),
         escape_scheme_string(&name),
-        args.bridge_publish,
-        args.bridge_subscribe,
     );
     let expr = format!(
-        "({interface_scm} {config} {standard} {chain} {tree} {ledger} {document})",
+        "({interface_scm} {config} {standard} {chain} {tree} {ledger} {federation} {authorization})",
         interface_scm = INTERFACE_SCM,
         config = config,
         standard = quote_expr(STANDARD_SCM),
         chain = quote_expr(LOG_CHAIN_SCM),
         tree = quote_expr(TREE_SCM),
         ledger = quote_expr(LEDGER_SCM),
-        document = quote_expr(DOCUMENT_SCM),
+        federation = quote_expr(FEDERATION_SCM),
+        authorization = quote_expr(AUTHORIZATION_SCM),
     );
     if clear {
         expr

@@ -1,6 +1,6 @@
 # Journal peer identities
 
-Idea note for future journal-to-journal request authentication. Not yet implemented.
+Status: superseded by `federation.md`. Sync Web 1.5 derives remote identity from reciprocal, root-signed bridge history rather than the independent TOFU registry proposed below. This file remains historical design context only.
 
 ## Motivation
 

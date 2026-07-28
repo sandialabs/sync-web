@@ -21,7 +21,7 @@ describe('encodePathToHash', () => {
   });
 
   it('should encode a complex bridge path', () => {
-    const path = [-1, '*bridge*', 'alice', -1, '*state*', 'data'];
+    const path = [-1, 'alice', -1, '*state*', 'data'];
     const result = encodePathToHash(path);
     expect(result).toBe(encodeURIComponent(JSON.stringify(path)));
   });
@@ -76,9 +76,9 @@ describe('generateExpandedNodesFromPath', () => {
   });
 
   it('should generate expanded nodes for a bridge path', () => {
-    const path = [-1, '*bridge*', 'alice', -1, '*state*'];
+    const path = [-1, 'alice', -1, '*state*'];
     const result = generateExpandedNodesFromPath(path);
-    expect(result.size).toBe(5);
+    expect(result.size).toBe(4);
   });
 });
 
@@ -96,9 +96,9 @@ describe('getBasePath', () => {
   });
 
   it('should extract base path from bridge path', () => {
-    const path = [-1, '*bridge*', 'alice', -2, '*state*', 'data'];
+    const path = [-1, 'alice', -2, '*state*', 'data'];
     const result = getBasePath(path);
-    expect(result).toBe(JSON.stringify(['*bridge*', 'alice', '*state*', 'data']));
+    expect(result).toBe(JSON.stringify(['alice', '*state*', 'data']));
   });
 });
 
@@ -116,9 +116,9 @@ describe('buildVersionPath', () => {
   });
 
   it('should update bridge version for tab > 0', () => {
-    const path = [-1, '*bridge*', 'alice', -1, '*state*', 'data'];
+    const path = [-1, 'alice', -1, '*state*', 'data'];
     const result = buildVersionPath(path, 1, -4);
-    expect(result).toEqual([-1, '*bridge*', 'alice', -4, '*state*', 'data']);
+    expect(result).toEqual([-1, 'alice', -4, '*state*', 'data']);
   });
 });
 
@@ -136,7 +136,7 @@ describe('getVersionAtTab', () => {
   });
 
   it('should return bridge version for tab > 0', () => {
-    const path = [-1, '*bridge*', 'alice', -4, '*state*', 'data'];
+    const path = [-1, 'alice', -4, '*state*', 'data'];
     const result = getVersionAtTab(path, 1);
     expect(result).toBe(-4);
   });

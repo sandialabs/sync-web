@@ -203,7 +203,9 @@ impl MemoryPersistor {
             return Ok(());
         }
 
-        Ok(())
+        Err(PersistorAccessError(format!(
+            "Cannot materialize referenced node {:?}", node
+        )))
     }
 
     fn release_plan(&self, node: Word, plan: &mut MergePlan) -> Result<(), PersistorAccessError> {
@@ -662,6 +664,10 @@ impl DatabasePersistor {
             || db.get_cf(stumps, node).expect("Failed to get stump").is_some()
             || db.get_cf(branches, node).expect("Failed to get branch").is_some()
         {
+            // Durable database branches are inserted only through a complete
+            // merge plan. Avoid walking the entire retained DAG on every
+            // commit; missing dependencies in newly copied source branches
+            // are rejected below before the batch is applied.
             return Ok(());
         }
 
@@ -684,7 +690,9 @@ impl DatabasePersistor {
             return Ok(());
         }
 
-        Ok(())
+        Err(PersistorAccessError(format!(
+            "Cannot materialize referenced node {:?}", node
+        )))
     }
 
     fn merged_branch(
@@ -1338,6 +1346,81 @@ mod tests {
         let db = ".test-database-root-set-merge-from-source";
         let _ = fs::remove_dir_all(db);
         test_root_set_merge_from_source(Box::new(DatabasePersistor::new(db)));
+        let _ = fs::remove_dir_all(db);
+    }
+
+    fn test_root_set_rejects_missing_referenced_node(target: Box<dyn Persistor>) {
+        let zeros: Word = [0; SIZE];
+        let handle: Word = [8; SIZE];
+        let missing_left: Word = [9; SIZE];
+        let missing_right: Word = [10; SIZE];
+        let source = MemoryPersistor::new();
+        let root = source
+            .branch_set(missing_left, missing_right, zeros)
+            .expect("incomplete branch");
+        target.root_new(handle, zeros).expect("target root");
+
+        let result = target.root_set(handle, zeros, root, &source);
+        assert!(result.is_err());
+        assert_eq!(target.root_get(handle).expect("unchanged root"), zeros);
+    }
+
+    #[test]
+    fn test_memory_root_set_rejects_missing_referenced_node() {
+        test_root_set_rejects_missing_referenced_node(Box::new(MemoryPersistor::new()));
+    }
+
+    #[test]
+    fn test_database_root_set_rejects_missing_referenced_node() {
+        let db = ".test-database-root-set-rejects-missing-node";
+        let _ = fs::remove_dir_all(db);
+        test_root_set_rejects_missing_referenced_node(Box::new(DatabasePersistor::new(db)));
+        let _ = fs::remove_dir_all(db);
+    }
+
+    #[test]
+    fn test_database_repeated_shared_history_updates_remain_complete() {
+        let db = ".test-database-repeated-shared-history";
+        let _ = fs::remove_dir_all(db);
+        let target = DatabasePersistor::new(db);
+        let zeros: Word = [0; SIZE];
+        let handle: Word = [11; SIZE];
+        let code = target.leaf_set(vec![0]).expect("code");
+        let empty = target.leaf_set(Vec::new()).expect("empty history");
+        let mut state = target.branch_set(code, empty, zeros).expect("initial state");
+        target.root_new(handle, state).expect("record root");
+        let mut values = Vec::new();
+
+        for index in 0..500_u32 {
+            let temporary = target.root_temp(state).expect("temporary root");
+            let source = MemoryPersistor::new();
+            let value = source
+                .leaf_set(index.to_le_bytes().to_vec())
+                .expect("history value");
+            values.push(value);
+            let history = target.branch_get(state).expect("state branch").1;
+            let next_history = source
+                .branch_set(history, value, zeros)
+                .expect("next history");
+            let next_state = source
+                .branch_set(code, next_history, zeros)
+                .expect("next state");
+            target
+                .root_set(handle, state, next_state, &source)
+                .expect("advance state");
+            target.root_delete(temporary).expect("release temporary");
+            state = next_state;
+        }
+
+        let mut history = target.branch_get(state).expect("final state").1;
+        for expected in values.iter().rev() {
+            let (previous, value, _) = target.branch_get(history).expect("history entry");
+            assert_eq!(&value, expected);
+            target.leaf_get(value).expect("retained history value");
+            history = previous;
+        }
+        assert_eq!(history, empty);
+        drop(target);
         let _ = fs::remove_dir_all(db);
     }
 

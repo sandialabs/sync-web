@@ -180,11 +180,14 @@ Included metrics:
 - `POST /api/v1/general/pin`
 - `POST /api/v1/general/unpin`
 - `POST /api/v1/general/batch`
-- `POST /api/v1/general/synchronize`
+- `POST /api/v1/general/set-batch`
+- `POST /api/v1/general/synchronize!` (public reciprocal exchange)
 - `POST /api/v1/general/resolve`
 - `POST /api/v1/general/trace` (public)
+- `POST /api/v1/general/route` (public)
 - `POST /api/v1/general/bridge`
 - `POST /api/v1/general/config`
+- `POST /api/v1/general/update-config`
 - `POST /api/v1/general/admins`
 - `POST /api/v1/general/set-admins`
 - `POST /api/v1/general/set-window`
@@ -192,10 +195,12 @@ Included metrics:
 
 Admin-oriented general endpoints:
 
-- `admins` calls `*admins-get*` and returns the interface admin username list.
-- `set-admins` calls `*admins-set*` and replaces that list wholesale.
+- `admins` calls `*admins-get*` and returns local administrator principal paths.
+- `set-admins` calls `*admins-set*` and replaces that list wholesale; entries must be `[*state*, <name>]` principals.
 - `set-window` calls `*window-set*` and updates the public ledger retention window.
-- `bridge` expects `info-local` with a concrete remote journal proxy endpoint, for example `((interface "http://peer.example/api/v1/journal/interface") (policy ((publish push) (subscribe pull))) (role #f) (remote-name local-journal))`.
+- `bridge` creates a reciprocal relationship from `name`, `interface`, and `remote-name`.
+- `update-config` manages explicit ledger configuration such as `(public bridge-accept)` and `(private bridge-preapproval <name>)`.
+- Only JSON `get`, `set`, and `resolve` calls accept `$federation: { route: [<aliases>] }`; only `resolve` accepts `history`, with one index for the origin and each route hop. Pin/unpin and all administration remain local to the origin journal. Direct Scheme callers use the records-layer invocation protocol rather than `$federation`.
 
 ### Root (disabled by default)
 
@@ -207,6 +212,11 @@ Enable with `ALLOW_ADMIN_ROUTES=1`:
 - `POST /api/v1/root/set-secret`
 - `POST /api/v1/root/set-step`
 - `POST /api/v1/root/set-query`
+
+Root `set-secret` atomically commits a journal signing-key transition bound to
+the journal's stable random identity. Update the runtime `SECRET` configuration
+to the new value before subsequent root calls or steps; peers verify the
+transition during normal bridge synchronization.
 
 ## Examples
 
@@ -224,6 +234,25 @@ curl -X POST http://127.0.0.1:8180/api/v1/general/get \
   -H "Content-Type: application/json" \
   -d '{"path":["*state*","docs","article","hash"]}'
 ```
+
+Federated committed read (Alice → Carol → Bob):
+
+```bash
+curl -X POST http://127.0.0.1:8180/api/v1/general/resolve \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": [7,"*state*","bob","shared","message"],
+    "pinned?": true,
+    "proof?": true,
+    "$federation": {
+      "route": ["carol","bob"],
+      "history": [-1,4,7]
+    }
+  }'
+```
+
+The returned proof is verified by the origin. To retain remote content, send that proof to the local `pin` endpoint with the full origin-relative historical path and no `$federation` context.
 
 Restricted Scheme call:
 

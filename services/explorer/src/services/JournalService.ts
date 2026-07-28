@@ -12,8 +12,8 @@ import {
   DirectoryResult,
   DirectoryEntry,
   DirectoryEntryType,
-  BridgeDirection,
-  BridgePolicyChoice,
+  AuthorizationRule,
+  FederationContext,
 } from '../types';
 
 export interface GatewayChangeEvent {
@@ -58,9 +58,26 @@ class GatewayRequestError extends Error {
 
 export class JournalService {
   private endpointBase: string;
+  private federation: FederationContext = { route: [] };
 
   constructor(endpoint: string) {
     this.endpointBase = endpoint.replace(/\/+$/, '');
+  }
+
+  setFederationContext(context: FederationContext): void {
+    this.federation = {
+      route: [...context.route],
+      ...(context.historyIndexes ? { historyIndexes: [...context.historyIndexes] } : {}),
+    };
+  }
+
+  getFederationContext(): FederationContext {
+    return {
+      route: [...this.federation.route],
+      ...(this.federation.historyIndexes
+        ? { historyIndexes: [...this.federation.historyIndexes] }
+        : {}),
+    };
   }
 
   /**
@@ -123,6 +140,29 @@ export class JournalService {
 
   static isReservedStateSegment(value: string): boolean {
     return value.startsWith('*') && value.endsWith('*');
+  }
+
+  static isIndexError(error: unknown): boolean {
+    return typeof error === 'object' && error !== null
+      && 'code' in error && (error as { code?: unknown }).code === 'index-error';
+  }
+
+  static isSnapshotUnavailable(error: unknown): boolean {
+    if (JournalService.isIndexError(error)) {
+      return true;
+    }
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+    const value = error as { code?: unknown; message?: unknown };
+    if (value.code !== 'bridge-error' || typeof value.message !== 'string') {
+      return false;
+    }
+    const prefix = `${value.code}: `;
+    const message = value.message.startsWith(prefix)
+      ? value.message.slice(prefix.length)
+      : value.message;
+    return message.startsWith('Bridge is not committed at the selected local index:');
   }
 
   static isR7RSIdentifier(value: string): boolean {
@@ -282,6 +322,42 @@ export class JournalService {
     return typeof path[0] === 'number';
   }
 
+  private selectedFederation(path: JournalPath): {
+    route: string[];
+    historyIndexes: number[];
+    terminalPath: JournalPath;
+  } | null {
+    if (typeof path[0] !== 'number') return null;
+    const route: string[] = [];
+    const historyIndexes = [path[0]];
+    let cursor = 1;
+    while (cursor < path.length) {
+      const name = path[cursor];
+      if (typeof name !== 'string' || name.startsWith('*')) break;
+      route.push(name);
+      cursor++;
+      if (typeof path[cursor] === 'number') {
+        historyIndexes.push(path[cursor] as number);
+        cursor++;
+      } else {
+        historyIndexes.push(-1);
+      }
+    }
+    return route.length > 0
+      ? {
+          route,
+          historyIndexes,
+          terminalPath: [historyIndexes[historyIndexes.length - 1], ...path.slice(cursor)],
+        }
+      : null;
+  }
+
+  private terminalPath(path: JournalPath): JournalPath {
+    const selected = this.selectedFederation(path);
+    if (selected) return selected.terminalPath;
+    return path;
+  }
+
   private static getBridgeBlock(config: unknown): Record<string, unknown> | null {
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
       return null;
@@ -299,49 +375,16 @@ export class JournalService {
     return bridgeBlock as Record<string, unknown>;
   }
 
-  private static extractBridgeNames(config: unknown): string[] {
-    const bridgeBlock = JournalService.getBridgeBlock(config);
-    return bridgeBlock ? Object.keys(bridgeBlock).sort() : [];
-  }
-
   private static asRecord(value: unknown): Record<string, unknown> | null {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown>
       : null;
   }
 
-  private static extractPolicyChoice(value: unknown, fallback: BridgePolicyChoice): BridgePolicyChoice {
-    const { value: extracted } = JournalService.extractSchemeValue(value);
-    return extracted === 'push' || extracted === 'pull' || extracted === 'none' ? extracted : fallback;
-  }
-
-  private static extractPolicy(value: unknown): { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice } {
-    const policy = JournalService.asRecord(value);
-    return {
-      publish: JournalService.extractPolicyChoice(policy?.publish, 'push'),
-      subscribe: JournalService.extractPolicyChoice(policy?.subscribe, 'pull'),
-    };
-  }
-
-  private static extractNestedPolicy(value: unknown, key: 'local' | 'remote'): { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice } {
-    const bridge = JournalService.asRecord(value);
-    const policy = JournalService.asRecord(bridge?.policy);
-    return JournalService.extractPolicy(policy?.[key]);
-  }
-
   private static extractBridgeEndpoint(value: unknown): string {
     const bridge = JournalService.asRecord(value);
-    if (!bridge) {
-      return '';
-    }
-    const { value: endpoint } = JournalService.extractSchemeValue(bridge.interface);
-    if (typeof endpoint === 'string') {
-      return endpoint;
-    }
-
-    const local = JournalService.asRecord(bridge.local);
-    const { value: legacyEndpoint } = JournalService.extractSchemeValue(local?.interface);
-    return typeof legacyEndpoint === 'string' ? legacyEndpoint : '';
+    const { value: endpoint } = JournalService.extractSchemeValue(bridge?.interface);
+    return typeof endpoint === 'string' ? endpoint : '';
   }
 
   private static extractRemoteName(input: unknown): string | undefined {
@@ -350,41 +393,23 @@ export class JournalService {
     return typeof value === 'string' ? value : undefined;
   }
 
-  private static extractDisabled(input: unknown): boolean {
-    const bridge = JournalService.asRecord(input);
-    const mode = JournalService.asRecord(bridge?.policy)?.mode;
-    const { value: extractedMode } = JournalService.extractSchemeValue(mode);
-    return bridge?.['disabled?'] === true || extractedMode === 'none';
-  }
-
-  private static extractAdminBridgeEntries(config: unknown, direction: BridgeDirection): AdminBridge[] {
-    const block = direction === 'incoming'
-      ? JournalService.getBridgeBlock(config)
-      : JournalService.asRecord(JournalService.asRecord(config)?.private)?.subscriber as Record<string, unknown> | null;
-    if (!block) {
-      return [];
-    }
-
-    return Object.entries(block)
-      .map(([name, value]) => ({
+  private static extractAdminBridges(config: unknown): AdminBridge[] {
+    const block = JournalService.getBridgeBlock(config);
+    if (!block) return [];
+    return Object.entries(block).map(([name, value]): AdminBridge => {
+      const bridge = JournalService.asRecord(value);
+      const initiation = JournalService.extractSchemeValue(bridge?.initiation).value;
+      return {
         name,
         endpoint: JournalService.extractBridgeEndpoint(value),
-        direction,
-        localPolicy: JournalService.extractNestedPolicy(value, 'local'),
-        remotePolicy: JournalService.extractNestedPolicy(value, 'remote'),
-        mode: JournalService.extractPolicyChoice(JournalService.asRecord(JournalService.asRecord(value)?.policy)?.mode, 'none'),
-        disabled: JournalService.extractDisabled(value),
         remoteName: JournalService.extractRemoteName(value),
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name));
-  }
-
-  private static extractAdminBridges(config: unknown): AdminBridge[] {
-    return JournalService.extractAdminBridgeEntries(config, 'incoming');
-  }
-
-  private static extractAdminSubscribers(config: unknown): AdminBridge[] {
-    return JournalService.extractAdminBridgeEntries(config, 'outgoing');
+        initiation: initiation === 'remote' ? 'remote' : 'local',
+        ...(typeof bridge?.['last-index'] === 'number'
+          ? { lastIndex: bridge['last-index'] as number } : {}),
+        ...(typeof bridge?.['remote-index'] === 'number'
+          ? { remoteIndex: bridge['remote-index'] as number } : {}),
+      };
+    }).sort((left, right) => left.name.localeCompare(right.name));
   }
 
   private static getPublicBlock(config: unknown): Record<string, unknown> | null {
@@ -394,6 +419,13 @@ export class JournalService {
 
   private static extractLocalName(config: unknown): string | null {
     const { value } = JournalService.extractSchemeValue(JournalService.getPublicBlock(config)?.name);
+    return typeof value === 'string' ? value : null;
+  }
+
+  private static extractLocalEndpoint(config: unknown): string | null {
+    const publicConfig = JournalService.getPublicBlock(config);
+    const interfaceConfig = JournalService.asRecord(publicConfig?.interface);
+    const { value } = JournalService.extractSchemeValue(interfaceConfig?.endpoint);
     return typeof value === 'string' ? value : null;
   }
 
@@ -431,15 +463,30 @@ export class JournalService {
     method: 'GET' | 'POST';
     path: string;
     args?: Record<string, any>;
+    federation?: 'working' | 'history';
+    federationRoute?: string[];
+    federationHistory?: number[];
   }): Promise<T> {
-    const { method, path, args } = input;
+    const { method, path, args, federation, federationRoute, federationHistory } = input;
     const url = this.buildGatewayUrl(path);
     const headers: Record<string, string> = {};
     let body: string | undefined;
 
     if (method === 'POST') {
       headers['Content-Type'] = 'application/json';
-      body = JSON.stringify(args ?? {});
+      body = JSON.stringify({
+        ...(args ?? {}),
+        ...(federation && (federationRoute ?? this.federation.route).length > 0
+          ? {
+              $federation: {
+                route: federationRoute ?? this.federation.route,
+                ...(federation === 'history' && (federationHistory ?? this.federation.historyIndexes)
+                  ? { history: federationHistory ?? this.federation.historyIndexes }
+                  : {}),
+              },
+            }
+          : {}),
+      });
     }
 
     const controller = new AbortController();
@@ -483,6 +530,22 @@ export class JournalService {
     }
   }
 
+  private async retryIndexRead<T>(read: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await read();
+      } catch (error) {
+        if (!JournalService.isIndexError(error) || attempt === 2) {
+          throw error;
+        }
+        // Size and resolve use separate Journal snapshots. A just-published
+        // latest index can briefly precede the snapshot seen by the next read.
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+    throw new Error('Indexed read retry exhausted');
+  }
+
   subscribeEvents(input: {
     onChange: (event: GatewayChangeEvent) => void;
     onError?: (event: Event) => void;
@@ -501,14 +564,39 @@ export class JournalService {
     return () => source.close();
   }
 
+  async getLocalJournalName(): Promise<string> {
+    const info = await this.request<Record<string, unknown>>({
+      method: 'GET',
+      path: '/general/info',
+    });
+    const name = JournalService.extractSchemeValue(info?.name).value;
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new Error('Journal info did not return a name');
+    }
+    return name;
+  }
+
   /**
    * Get current size of the ledger
    */
+  async getLocalSize(): Promise<number> {
+    return this.request<number>({ method: 'POST', path: '/general/size' });
+  }
+
   async getSize(): Promise<number> {
-    return this.request<number>({
-      method: 'GET',
-      path: '/general/size',
+    if (this.federation.route.length === 0) {
+      return this.getLocalSize();
+    }
+    const routed = await this.request<Record<string, unknown>>({
+      method: 'POST',
+      path: '/general/route',
+      args: { 'route-target': this.federation.route, index: -1 },
     });
+    const terminalIndex = routed?.['terminal-index'];
+    if (typeof terminalIndex !== 'number') {
+      throw new Error('Federation route did not return a terminal index');
+    }
+    return terminalIndex + 1;
   }
 
   /**
@@ -517,8 +605,6 @@ export class JournalService {
   async saveBridge(input: {
     name: string;
     endpoint: string;
-    direction: BridgeDirection;
-    policy: { publish: BridgePolicyChoice; subscribe: BridgePolicyChoice };
     remoteName?: string;
   }): Promise<boolean> {
     const endpointStr: SchemeString = { '*type/string*': input.endpoint };
@@ -527,31 +613,29 @@ export class JournalService {
       path: '/general/bridge',
       args: {
         name: input.name,
-        'info-local': {
-          interface: endpointStr,
-          policy: input.policy,
-          role: input.direction === 'outgoing' ? 'publisher' : false,
-          'remote-name': input.remoteName || input.name,
-        },
+        interface: endpointStr,
+        'remote-name': input.remoteName || input.name,
       },
     });
   }
 
   async addBridge(name: string, endpoint: string): Promise<boolean> {
-    return this.saveBridge({
-      name,
-      endpoint,
-      direction: 'incoming',
-      policy: { publish: 'push', subscribe: 'pull' },
-      remoteName: name,
+    return this.saveBridge({ name, endpoint, remoteName: name });
+  }
+
+  async deleteBridge(name: string): Promise<boolean> {
+    return this.request<boolean>({
+      method: 'POST',
+      path: '/general/delete-bridge',
+      args: { name },
     });
   }
 
-  async deleteBridge(name: string, direction: BridgeDirection): Promise<boolean> {
+  async updateConfig(path: JournalPath, value: unknown): Promise<boolean> {
     return this.request<boolean>({
       method: 'POST',
-      path: direction === 'incoming' ? '/general/delete-bridge' : '/general/delete-subscriber',
-      args: { name },
+      path: '/general/update-config',
+      args: { path, value },
     });
   }
 
@@ -562,10 +646,8 @@ export class JournalService {
     return this.request<boolean>({
       method: 'POST',
       path: '/general/set',
-      args: {
-        path,
-        value,
-      },
+      args: { path, value },
+      federation: 'working',
     });
   }
 
@@ -574,25 +656,32 @@ export class JournalService {
   }
 
   /**
-   * Get the existing value at the path alongside metadata
+   * Get a Tree-native value and optional Ledger proof/retention details.
    */
   async get(
     path: JournalPath,
     options: { pinned?: boolean; proof?: boolean } = {},
   ): Promise<JournalResponse> {
     const { pinned = true, proof = true } = options;
+    const selected = this.selectedFederation(path);
+    path = selected?.terminalPath ?? this.terminalPath(path);
     const indexedPath = JournalService.isIndexedPath(path);
     if (indexedPath) {
-      return this.request<JournalResponse>({
+      return this.retryIndexRead(() => this.request<JournalResponse>({
         method: 'POST',
         path: '/general/resolve',
         args: { path, 'pinned?': pinned, 'proof?': proof },
-      });
+        federation: 'history',
+        ...(selected
+          ? { federationRoute: selected.route, federationHistory: selected.historyIndexes }
+          : {}),
+      }));
     }
     const raw = await this.request<unknown>({
       method: 'POST',
       path: '/general/get',
       args: { path },
+      federation: 'working',
     });
     return { content: raw } as JournalResponse;
   }
@@ -601,10 +690,51 @@ export class JournalService {
    * Pin the value at the specified path
    */
   async pin(path: JournalPath): Promise<boolean> {
+    if (this.federation.route.length === 0) {
+      return this.request<boolean>({
+        method: 'POST',
+        path: '/general/pin',
+        args: { path },
+      });
+    }
+
+    const selectedPath = [...path];
+    if (selectedPath[0] === -1) {
+      selectedPath[0] = Math.max(0, (await this.getLocalSize()) - 1);
+    }
+    const historyIndexes: number[] = [];
+    if (typeof selectedPath[0] === 'number') {
+      historyIndexes.push(selectedPath[0]);
+    }
+    let cursor = 1;
+    for (const peer of this.federation.route) {
+      if (selectedPath[cursor] !== peer) {
+        throw new Error('Remote pin path does not match the selected federation route');
+      }
+      cursor++;
+      if (typeof selectedPath[cursor] === 'number') {
+        historyIndexes.push(selectedPath[cursor] as number);
+        cursor++;
+      } else {
+        historyIndexes.push(-1);
+      }
+    }
+
+    const terminalPath = this.terminalPath(selectedPath);
+    const resolved = await this.retryIndexRead(() => this.request<JournalResponse>({
+      method: 'POST',
+      path: '/general/resolve',
+      args: { path: terminalPath, 'pinned?': false, 'proof?': true },
+      federation: 'history',
+      federationHistory: historyIndexes,
+    }));
+    if (!resolved || resolved.proof === undefined) {
+      throw new Error('Remote resolve did not return proof material for local pinning');
+    }
     return this.request<boolean>({
       method: 'POST',
       path: '/general/pin',
-      args: { path },
+      args: { path: selectedPath, response: resolved.proof },
     });
   }
 
@@ -678,9 +808,10 @@ export class JournalService {
   async uploadFile(parentPath: JournalPath, file: File): Promise<boolean> {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-    return this.set(this.buildStateChildPath(parentPath, file.name), {
-      '*type/byte-vector*': hex,
-    });
+    return this.set(
+      this.buildStateChildPath(parentPath, file.name),
+      { '*type/byte-vector*': hex },
+    );
   }
 
   async renameStagePath(path: JournalPath, nextName: string): Promise<boolean> {
@@ -756,17 +887,15 @@ export class JournalService {
    * Get bridge info
    */
   async getBridges(): Promise<PeerInfo[]> {
-    const config = await this.request<unknown>({
+    const directory = await this.request<unknown>({
       method: 'POST',
-      path: '/general/config',
-      args: {
-        path: ['private', 'bridge'],
-      },
+      path: '/general/get',
+      args: { path: ['*bridge*'] },
     });
-    return JournalService.extractBridgeNames(config).map((name) => ({
-      name,
+    return (JournalService.parseDirectoryEntries(directory) ?? []).map((entry) => ({
+      name: entry.name,
       endpoint: '',
-    }));
+    })).sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async addPeer(name: string, endpoint: string): Promise<boolean> {
@@ -785,14 +914,16 @@ export class JournalService {
     if (!Array.isArray(admins)) {
       return [];
     }
-    return admins.map((admin) => String(admin)).sort((left, right) => left.localeCompare(right));
+    return admins
+      .map((admin) => (Array.isArray(admin) && admin[0] === '*state*' ? String(admin[1]) : String(admin)))
+      .sort((left, right) => left.localeCompare(right));
   }
 
   async setAdmins(admins: string[]): Promise<boolean> {
     return this.request<boolean>({
       method: 'POST',
       path: '/general/set-admins',
-      args: { admins },
+      args: { admins: admins.map((admin) => ['*state*', admin]) },
     });
   }
 
@@ -801,6 +932,63 @@ export class JournalService {
       method: 'POST',
       path: '/general/set-window',
       args: { value },
+    });
+  }
+
+  private static ruleField(rule: unknown, name: string): unknown {
+    if (rule && typeof rule === 'object' && !Array.isArray(rule)) {
+      return (rule as Record<string, unknown>)[name];
+    }
+    if (Array.isArray(rule)) {
+      const entry = rule.find((item) => Array.isArray(item) && item[0] === name);
+      return Array.isArray(entry) ? entry[1] : undefined;
+    }
+    return undefined;
+  }
+
+  private static parseAuthorizationRule(rule: unknown): AuthorizationRule | null {
+    const principal = JournalService.ruleField(rule, 'principal');
+    const path = JournalService.ruleField(rule, 'path');
+    const resolve = JournalService.ruleField(rule, 'resolve');
+    if (!Array.isArray(principal) || !Array.isArray(path)) return null;
+    return {
+      principal: principal as JournalPath,
+      path: path as JournalPath,
+      get: JournalService.ruleField(rule, 'get') === true,
+      'set!': JournalService.ruleField(rule, 'set!') === true,
+      resolve: Array.isArray(resolve) && resolve.length === 2
+        ? [Number(resolve[0]), Number(resolve[1])]
+        : resolve === true,
+    };
+  }
+
+  private static normalizeAuthorizationUser(user: string | JournalPath): JournalPath {
+    return Array.isArray(user) ? user : ['*state*', user];
+  }
+
+  async getAuthorizations(user: string | JournalPath): Promise<AuthorizationRule[]> {
+    const rules = await this.request<unknown>({
+      method: 'POST',
+      path: '/general/authorizations',
+      args: { user: JournalService.normalizeAuthorizationUser(user) },
+    });
+    if (!Array.isArray(rules)) return [];
+    return rules.map(JournalService.parseAuthorizationRule).filter((rule): rule is AuthorizationRule => rule !== null);
+  }
+
+  async authorize(user: string | JournalPath, rule: AuthorizationRule): Promise<boolean> {
+    return this.request<boolean>({
+      method: 'POST',
+      path: '/general/authorize',
+      args: { user: JournalService.normalizeAuthorizationUser(user), rule },
+    });
+  }
+
+  async deauthorize(user: string | JournalPath, rule: AuthorizationRule): Promise<boolean> {
+    return this.request<boolean>({
+      method: 'POST',
+      path: '/general/deauthorize',
+      args: { user: JournalService.normalizeAuthorizationUser(user), rule },
     });
   }
 
@@ -813,12 +1001,17 @@ export class JournalService {
       }),
     ]);
 
+    const publicConfig = JournalService.getPublicBlock(config);
+    const privateConfig = JournalService.asRecord(JournalService.asRecord(config)?.private);
+    const bridgeAccept = JournalService.extractSchemeValue(publicConfig?.['bridge-accept']).value;
     return {
       admins,
       bridges: JournalService.extractAdminBridges(config),
-      subscribers: JournalService.extractAdminSubscribers(config),
       localName: JournalService.extractLocalName(config),
+      localEndpoint: JournalService.extractLocalEndpoint(config),
       windowSize: JournalService.extractWindowSize(config),
+      bridgeAccept: bridgeAccept === 'preapproved' ? 'preapproved' : 'auto',
+      bridgePreapprovals: JournalService.asRecord(privateConfig?.['bridge-preapproval']) ?? {},
     };
   }
 }

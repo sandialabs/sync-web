@@ -6,7 +6,7 @@ This directory contains reusable record artifacts, primarily Lisp/Scheme modules
 
 - `lisp/`
   - `root.scm`: Installs the root object and admin-controlled call/query/step hooks.
-  - `standard.scm`: The shared object model used by the other modules. Public object boundaries now work primarily on `sync-node` values, with explicit `(sync-eval node #f)` where a live object is needed internally. `make` builds an uninitialized shell and `init` applies `*init*` when constructor arguments are needed.
+  - `standard.scm`: The shared object model used by the other modules. Public object boundaries now work primarily on `sync-node` values, with explicit `(sync-eval node)` where a live object is needed internally. `make` builds an uninitialized shell and `init` applies `*init*` when constructor arguments are needed.
   - `tree.scm`, `linear-chain.scm`, `log-chain.scm`, `ledger.scm`, `interface.scm`: Active record modules and data structures. `ledger.scm` now stores its configuration directly rather than delegating to a separate configuration class.
   - `archive/`: Historical or auxiliary Scheme modules retained for reference.
 - `tests/`
@@ -42,7 +42,7 @@ These Scheme modules are intended to be loaded into a running Synchronic Web Jou
 ## Notes
 
 - The current codebase prefers `sync-node` values at module boundaries. In particular, `standard 'make` returns an uninitialized shell node, while `standard 'init` returns an initialized node.
-- When a caller needs the loaded object form, use `(sync-eval node #f)` explicitly.
+- When a caller needs the loaded object form, use `(sync-eval node)` explicitly.
 
 ## Testing
 

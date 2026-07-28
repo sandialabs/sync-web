@@ -1,419 +1,431 @@
-(macro (config standard chain tree ledger document . classes)
-
-  (define (config-ref key) (cadr (assoc key config)))
-
+(macro (config standard-module chain tree ledger federation authorization . classes)
+  (if (not (equal? (sync-digest *sync-state*)
+                   #u(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+                      0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0)))
+      (error 'upgrade-error "This Interface supports fresh installation only"))
+  (set! chain (eval chain))
+  (set! tree (eval tree))
+  (set! ledger (eval ledger))
+  (set! federation (eval federation))
+  (set! authorization (eval authorization))
+  (define (cfg key) (cadr (assoc key config)))
   (for-each (lambda (key)
-              (if (not (assoc key config))
-                  (error 'argument-error "Missing interface config value: ~S" key)))
+              (if (not (assoc key config)) (error 'argument-error "Missing config")))
             '(root-secret interface-secret root))
+  (set! config (append config `((clear? #t) (admins ()) (window #f)
+				(interface ,(cfg 'interface-secret))
+				(name ,(cfg 'interface-secret)) (bridge-accept auto))))
+  (if (not (cfg 'clear?))
+      (error 'upgrade-error "This Interface supports fresh installation only"))
 
-  (if (or (not (string? (config-ref 'root-secret)))
-          (not (string? (config-ref 'interface-secret))))
-      (error 'argument-error "Interface secrets must be strings: ~S ~S"
-             (config-ref 'root-secret) (config-ref 'interface-secret)))
+  (define standard-source (eval standard-module))
+  (define standard-module* (eval standard-source))
+  (define standard-class (standard-module* 'class))
+  (define (call body) (let ((result (sync-call `(*call* ,(cfg 'root-secret) ,body) #t)))
+			(if (and (pair? result) (eq? (car result) 'error)) (apply error (cdr result)) result)))
+  (define (set-query body) (sync-call `(*set-query* ,(cfg 'root-secret) ,body) #t))
+  (define (set-step body) (sync-call `(*set-step* ,(cfg 'root-secret) ,body) #t))
 
-  (set! config (append config `((clear? #t)
-                                (admins ())
-                                (window #f)
-                                (interface ,(config-ref 'interface-secret))
-                                (name ,(config-ref 'interface-secret))
-                                (push-enabled? #f)
-                                (bridge-policy ((publish push) (subscribe pull))))))
+  (let ((result (sync-call `(,(cfg 'root) ,(cfg 'root-secret) fresh) #t)))
+    (if (and (pair? result) (eq? (car result) 'error))
+        (apply error (cdr result))))
+  (call `(lambda (root) (let* ((standard-module (eval ',standard-source))
+			       (standard-node (standard-module 'make))
+			       (standard-class (standard-module 'class))
+			       (identity-nonce ,(random-byte-vector 32))
+			       (identity-id (sync-hash (expression->byte-vector
+							(list 'sync-web/journal-id/v1 identity-nonce))))
+			       (identity `((id ,identity-id) (nonce ,identity-nonce)))
+			       (journal-keys (crypto-generate (expression->byte-vector
+							       (list 'sync-web/journal-signing-key/v1 identity-id
+								     (sync-hash (expression->byte-vector ,(cfg 'root-secret)))))))
+			       (federation-node
+                                (standard-module 'init ',federation
+                                 (list standard-node
+                                       `((endpoint ,,(cfg 'interface))
+                                         (bridge-accept ,',(cfg 'bridge-accept))
+                                         (secret ,,(cfg 'interface-secret))
+                                         (peers ()) (retired ())))))
+                               (federation-live
+                                (standard-module 'local ',federation federation-node))
+                               (interface-public-key
+                                ((federation-live 'config) '(interface-public-key)))
+                               (ledger-config
+                                `((public
+                                   ((window ,,(cfg 'window)) (identity ,identity)
+                                    (public-key ,(car journal-keys))
+                                    (journal ((public-key ,(car journal-keys))
+                                              (latest-rotation-index -1)))
+                                    (interface ((public-key ,interface-public-key)
+                                                (endpoint ,,(cfg 'interface))))
+                                    (bridge-accept ,',(cfg 'bridge-accept))
+                                    (name ,',(cfg 'name))))
+                                  (private
+                                   ((bridge-preapproval ())
+                                    (journal ((rotation-indexes ())
+                                              (pending-rotation ())))))))
+                               (ledger-node
+                                (standard-module 'init ',ledger
+                                 (list standard-node ledger-config ',tree ',chain)))
+                               (authorization-node
+                                (standard-module 'init ',authorization '())))
+			  ((root 'set!) '(root class standard-module) ',standard-source)
+			((root 'set!) '(root class standard) standard-class)
+			  ((root 'set!) '(root class chain) ',chain)
+			  ((root 'set!) '(root class tree) ',tree)
+			  ((root 'set!) '(root class ledger) ',ledger)
+			  ((root 'set!) '(root class federation) ',federation)
+			  ((root 'set!) '(root class authorization) ',authorization)
+			  ((root 'set!) '(root object standard) standard-node)
+			  ((root 'set!) '(root object ledger) ledger-node)
+			  ((root 'set!) '(root object federation) (federation-live))
+			  ((root 'set!) '(root object authorization) authorization-node)
+			  ((root 'set!) '(interface secret)
+			   (sync-hash (expression->byte-vector ,(cfg 'interface-secret))))
+			  ((root 'set!) '(interface admins) ',(cfg 'admins))
+			  ((root 'set!) '(interface endpoint) ,(cfg 'interface))
+			  ((root 'set!) '(interface name) ',(cfg 'name))
+			  ((root 'set!) '(interface private-key) '(nothing))
+			  ((root 'set!) '(interface keys) '(nothing))
+			  #t)))
 
-  ;; install root logic
-  (if (config-ref 'clear?)
-      (sync-call `(,(config-ref 'root) ,(config-ref 'root-secret) ,(config-ref 'clear?)) #t)
-      (sync-call `(*eval* ,(config-ref 'root-secret)
-                          (,(config-ref 'root) ,(config-ref 'root-secret) ,(config-ref 'clear?))) #t))
+  (let loop ((rest classes)) (if (pair? rest) (begin (call `(lambda (root)
+							      ((root 'set!) '(root object ,(caar rest)) ,(cadar rest))))
+						     (loop (cdr rest)))))
 
-  (define (call function)
-    (sync-call `(*call* ,(config-ref 'root-secret) ,function) #t))
+  (call `(lambda (root) ((root 'set!) '(root handler secret) (expression->byte-vector
+							      '(lambda (root old-secret new-secret)
+								 (let* ((module (eval ((root 'get) '(root class standard-module))))
+									(std-node ((root 'get) '(root object standard)))
+									(standard (module 'local ((root 'get) '(root class standard)) std-node))
+									(ledger (module 'local ((root 'get) '(root class ledger))
+										((root 'get) '(root object ledger))))
+									(identity ((ledger 'config) '(public identity)))
+									(id (cadr (assoc 'id identity)))
+									(old (crypto-generate (expression->byte-vector
+											       (list 'sync-web/journal-signing-key/v1 id (sync-hash
+																	  (expression->byte-vector old-secret))))))
+									(new (crypto-generate (expression->byte-vector
+											       (list 'sync-web/journal-signing-key/v1 id (sync-hash
+																	  (expression->byte-vector new-secret))))))
+									(indexes ((ledger 'config) '(journal-rotation-indexes)))
+									(previous (if (null? indexes) -1 (car (reverse indexes))))
+									(index ((ledger 'size))))
+								   (if (not (equal? (car old) (car new))) (begin ((ledger 'step!)
+														  `((unix-time ,(system-time-unix))
+														    (public-key ,(car new)) (secret-key ,(cdr new))
+														    (rotation ((previous-key ,(car old)) (public-key ,(car new)) (signature
+																						  ,(crypto-sign (cdr old) (expression->byte-vector
+																									   (list 'sync-web/journal-key-rotation/v1 id index
+																										 previous (car old) (car new)))))))))
+														 ((root 'set!) '(root object ledger) (ledger))))
+								   #t))))))
 
-  (define (set-query function)
-    (sync-call `(*set-query* ,(config-ref 'root-secret) ,function) #t))
+  (define query-once '(lambda (query) (let* ((function (cadr (assoc 'function query)))
+					     (arguments (if (assoc 'arguments query) (cadr (assoc 'arguments query)) '()))
+					     (authentication (and (assoc 'authentication query)
+								  (cadr (assoc 'authentication query))))
+					     (invocation (and (assoc 'invocation query) (cadr (assoc 'invocation query))))
+					     (prepared (and (assoc 'prepared query) (cadr (assoc 'prepared query))))
+					     (module (eval ((root 'get) '(root class standard-module))))
+                                             (std-node ((root 'get) '(root object standard)))
+                                             (standard (module 'local ((root 'get) '(root class standard)) std-node))
+                                             (ledger (module 'local ((root 'get) '(root class ledger))
+                                                             ((root 'get) '(root object ledger))))
+                                             (federation (module 'local ((root 'get) '(root class federation))
+                                                                 ((root 'get) '(root object federation))))
+                                             (authorization (module 'local ((root 'get) '(root class authorization))
+                                                                    ((root 'get) '(root object authorization))))
+                                             (context '()) (auth-head #f) (ancestor? #f)
+					     (delegated? #f))
 
-  (define (set-step function)
-    (sync-call `(*set-step* ,(config-ref 'root-secret) ,function) #t))
+					(define (arg name) (let ((entry (assoc name arguments))) (and entry (cadr entry))))
+					(define (set-alist values key value) (let loop ((in values) (out '()))
+									       (cond ((null? in) (reverse (cons (list key value) out))) ((eq? (caar in) key)
+																	 (append (reverse out) (cons (list key value) (cdr in))))
+										     (else (loop (cdr in) (cons (car in) out))))))
+					(if (or (assoc 'meta arguments) (assoc 'metas arguments) (assoc 'meta? arguments))
+					    (error 'argument-error "Metadata is not supported"))
+					(define (with-auth request) (cond (authentication
+									   (append request `((authentication ,authentication))))
+									  (invocation (append request `((invocation ,invocation))))
+									  (else request)))
+					(define (self-call data)
+					  (set! delegated? #t)
+					  (sync-call (with-auth
+					              `((function ,function) (arguments ,arguments)
+					                ,@(if data `((prepared ,data)) '()))) #t))
+					(define (failure result) (let ((entry (and (pair? result) (pair? (car result))
+										   (assoc 'failure result))))
+								   (if entry (let ((value (cadr entry))) (error (cadr (assoc 'tag value))
+														(cadr (assoc 'message value))))
+								       result)))
+					(define (federation-call method operands) (let* ((input (if (not prepared) operands
+												    (append (reverse (cdr (reverse operands)))
+													    (list `((value ,(car (reverse operands)))
+														    (continuation ,prepared))))))
+											 (result (apply (federation method) (cons ledger input)))
+											 (next (and (pair? result) (pair? (car result)) (assoc 'continuation result))))
+										    (cond (next (failure (self-call (cadr next)))) (prepared result)
+											  (else (failure result)))))
+					(define (authenticate) (if invocation
+								   (let ((source (arg-from invocation 'route-source))
+									 (target (arg-from invocation 'route-target)))
+								     (if (and (null? source) (null? target))
+									 (let ((identity (arg-from invocation 'identity))) (if (not (equal?
+																     (sync-hash (expression->byte-vector
+																		 (arg-from invocation 'credentials)))
+																     ((root 'get) '(interface secret))))
+															       (error 'authentication-error "Authentication failed"))
+									      (if (eq? identity '*journal*) '()
+										  (if (eq? identity '*public*) '(*public*) `(*state* ,identity))))
+									 (let* ((result ((federation 'authenticate) ledger
+											 `((function ,function) (arguments ,arguments)
+											   (invocation ,invocation)))))
+									   (set! context (cadr (assoc 'context result)))
+									   (set! auth-head (and (assoc 'data-head result)
+												(cadr (assoc 'data-head result))))
+									   (cadr (assoc 'principal result)))))
+								   (if (not authentication) '(*public*)
+								       (let ((principal (or (arg-from authentication 'identity) '())))
+									 (if (not (equal? (sync-hash (expression->byte-vector
+												      (arg-from authentication 'credentials)))
+											  ((root 'get) '(interface secret))))
+									     (error 'authentication-error "Authentication failed"))
+									 principal))))
+					(define (arg-from values key) (let ((entry (and (list? values) (assoc key values))))
+									(and entry (cadr entry))))
+					(define (authorize) (let* ((principal (authenticate)) (path (let ((path (arg 'path)))
+												      (if (and (eq? function 'trace) (arg 'index) (or (null? path)
+																		      (not (integer? (car path)))))
+													  (cons (arg 'index) path) path)))
+								   (admins ((root 'get) '(interface admins)))
+								   (remote (assoc 'authentication-index context))
+								   (ctx `((latest-index ,(- ((ledger 'size)) 1))
+									  ,@(if remote `((authentication-index ,(cadr remote))) '())))
+								   (owner (arg 'user))
+								   (direct? (or (and (not remote)
+										     (or (null? principal) (member principal admins)))
+										(and (memq function '(authorizations authorize! deauthorize!))
+										     owner (equal? owner principal))))
+								   (decision (if direct? 'direct (if (eq? function 'set-batch!)
+												     (let loop ((paths (arg 'paths))) (if (null? paths) 'direct
+																	  (and (eq? ((authorization 'authorized?)
+																		     principal ctx (car paths) 'set!)
+																		    'direct)
+																	       (loop (cdr paths)))))
+												     (and path ((authorization 'authorized?)
+														principal ctx path function))))))
+							      (if (not decision) (error 'authorization-error "Not authorized"))
+							      (set! ancestor? (eq? decision 'ancestor))
+							      principal))
+					(define (encode value expression?) (cond ((equal? value '(nothing)) value)
+										 (expression? (expression->byte-vector value))
+										 ((byte-vector? value) value)
+										 (else (error 'value-error "Expected byte-vector"))))
+					(define (decode value expression?) (cond ((not expression?) value)
+										 ((byte-vector? value) (byte-vector->expression value))
+										 ((and (pair? value) (pair? (car value)) (assoc 'content value))
+										  (set-alist value 'content (decode (cadr (assoc 'content value)) #t)))
+										 (else value)))
+					(define (stage-directory value) (if (not ancestor?) value
+									    (let ((entries (and (pair? value) (eq? (car value) 'directory) (cadr value))))
+									      (if (not entries) (error 'authorization-error "Not a directory"))
+									      `(directory ,(let loop ((in entries) (out '())) (if (null? in) (reverse out)
+																  (let* ((name (caar in)) (text (symbol->string name))) (loop (cdr in)
+																							      (if (and (> (length text) 1) (char=? (text 0) #\*)
+																								       (char=? (text (- (length text) 1)) #\*))
+																								  out (cons (car in) out)))))) #f))))
+					(define* (hydrate path (index -1))
+					  ((federation 'route) ledger
+					   `((operation hydrate) (path ,path) (index ,index))))
+					(define (federate) (if (not (memq function '(get set! resolve)))
+							       (error 'api-error "Not federated"))
+					  (if (not (equal? (sync-hash
+							    (expression->byte-vector (arg-from invocation 'credentials)))
+							   ((root 'get) '(interface secret))))
+					      (error 'authentication-error "Authentication failed"))
+					  ((federation 'invoke) ledger function arguments (arg-from invocation 'route-target)
+					   (arg-from invocation 'history-indexes)
+					   (arg-from invocation 'identity)))
+					(define (config-view path)
+  (if (not (and (pair? path) (eq? (car path) 'private)))
+      ((ledger 'config) path)
+      (case (and (pair? (cdr path)) (cadr path))
+        ((bridge bridge-retired)
+         ((federation 'config)
+          (cons (if (eq? (cadr path) 'bridge) 'peers 'retired)
+                (cddr path))))
+        ((bridge-identity)
+         (let* ((alias (and (pair? (cddr path)) (caddr path)))
+                (active ((federation 'config) `(peers ,alias identity-id))))
+           (if (null? active)
+               ((federation 'config) `(retired ,alias identity-id)) active)))
+        ((bridge-preapproval)
+         ((ledger 'config) (cons 'peer-preapproval (cddr path))))
+        (else '()))))
 
-  ;; install and instantiate standard library
-  (call `(lambda (root)
-           (let ((init (caddr ,standard)))
-             ((root 'set!) '(root class standard) ,standard)
-             ((root 'set!) '(root object standard)
-              ((eval `(lambda* ,(cddadr init) ,@(cddr init))) ,standard)))))
+					(if (and invocation (pair? (arg-from invocation 'route-target))) (federate)
+					    (let ((result (case function ((route) ((federation 'route) ledger
+										   `((route-source ,(or (arg 'route-source) '()))
+										     (route-target ,(arg 'route-target))
+										     (index ,(or (arg 'index) -1))
+										     ,@(if (assoc 'history-indexes arguments)
+											   `((history-indexes ,(arg 'history-indexes))) '())
+										     ,@(if (assoc 'history-head-index arguments) `((history-head-index
+																    ,(arg 'history-head-index))) '())
+										     (roots ,(or (arg 'roots) '())))))
+								((size) ((ledger 'size)))
+								((info) ((ledger 'descriptor) -1))
+								((synchronize!) ((federation 'synchronize!) ledger arguments))
+								(else (authorize) (case function ((get) (stage-directory
+													 (decode ((ledger 'get) (arg 'path)) (arg 'expression?))))
+											((set!) ((ledger 'set!) (arg 'path)
+												 (encode (arg 'value) (arg 'expression?))))
+											((set-batch!) ((ledger 'set-batch!) (map (lambda (path value)
+																   (list path (encode value (arg 'expression?))))
+																 (arg 'paths) (arg 'values))))
+											((resolve) (let* ((path (arg 'path)) (head (or (arg 'head) auth-head))
+													  (attempt ((ledger 'resolve) path #f #f head ancestor?))
+													  (head (if (and (not head) (equal? attempt '(unknown))
+															 (pair? path)
+															 (let ((segment (if (integer? (car path))
+																	    (cadr path) (car path))))
+															   (or (eq? segment '*bridge*)
+															       (and (symbol? segment) (not (memq segment
+																				 '(*state* *transition* *crypto*)))))))
+														    (hydrate path) head)))
+												     (decode ((ledger 'resolve) path (arg 'pinned?) (arg 'proof?)
+													      head ancestor?)
+													     (arg 'expression?))))
+											((trace) (let* ((path (arg 'path)) (index (or (arg 'index) -1))
+													(trace-path (cons index path))
+													(head (arg 'head)))
+												   (if head ((ledger 'trace) path head)
+												       (let* ((resolve-path (if (and (pair? path) (integer? (car path)))
+													 path (cons index path)))
+											  (attempt ((ledger 'resolve) resolve-path)))
+													 (if (equal? attempt '(unknown)) ((ledger 'trace) path
+																	  (hydrate path index))
+													     ((ledger 'trace) trace-path))))))
+											((pin!) (if (arg 'response)
+                                                      ((ledger 'pin!) (arg 'path) (arg 'response))
+                                                      (let* ((path (arg 'path))
+                                                             (attempt ((ledger 'resolve) path)))
+                                                        (if (not (equal? attempt '(unknown)))
+                                                            ((ledger 'pin!) path #f)
+                                                            (sync-call
+                                                             (with-auth
+                                                              `((function pin!)
+                                                                (arguments
+                                                                 ,(set-alist
+                                                                   arguments 'response
+                                                                   ((ledger 'trace) path
+                                                                    (hydrate path)))))) #t)))))
+                                          ((unpin!) ((ledger 'unpin!) (arg 'path)))
+											((bridge!) (federation-call 'bridge! (list (arg 'name)
+																   `((interface ,(arg 'interface))
+																     (remote-name ,(arg 'remote-name))))))
+											((delete-bridge!) ((authorization 'deauthorize!)
+													   `((principal-prefix (,(arg 'name)))))
+											 ((federation 'delete-bridge!) ledger (arg 'name)))
+											((authorizations) ((authorization 'authorizations) (arg 'user)))
+											((authorize!) ((authorization 'authorize!)
+												       `((user ,(arg 'user)) (rule ,(arg 'rule))
+													 (latest-index ,(- ((ledger 'size)) 1)))))
+											((deauthorize!) ((authorization 'deauthorize!)
+													 `((user ,(arg 'user)) (rule ,(arg 'rule)))))
+											((config) (config-view (or (arg 'path) '())))
+											((update-config!) ((ledger 'update-config!)
+													   `((path ,(arg 'path)) (value ,(arg 'value))))
+											 (if (equal? (arg 'path) '(public bridge-accept))
+											     ((federation 'update-config!) `((path (bridge-accept))
+															     (value ,(arg 'value))))) #t)
+											((*secret*)
+                         (let* ((secret (arg 'secret))
+                                (committed
+                                 ((ledger 'resolve)
+                                  '(-1 *crypto* interface public-key)))
+                                (public-key
+                                 ((federation 'update-config!)
+                                  `((path (rotate-key))
+                                    (value ((secret ,secret)
+                                            (committed-public-key ,committed)))))))
+                           ((root 'set!) '(interface secret)
+                            (sync-hash (expression->byte-vector secret)))
+                           ((ledger 'update-config!)
+                            `((path (public interface public-key))
+                              (value ,public-key)))))
+                                          ((*admins-get*) ((root 'get) '(interface admins)))
+											((*admins-set*) (if (not (let loop ((in (arg 'admins))) (or (null? in)
+																		    (and (pair? (car in)) (eq? (caar in) '*state*)
+																			 (pair? (cdar in))
+																			 (symbol? (cadar in))
+																			 (null? (cddar in))
+																			 (loop (cdr in))))))
+													    (error 'argument-error "Admins must be local"))
+											 ((root 'set!) '(interface admins) (arg 'admins)))
+											((*window-set*) ((ledger 'update-config!)
+													 `((path (public window)) (value ,(arg 'value)))))
+											(else (error 'api-error "Unknown Interface function")))))))
+					      (if (not delegated?)
+					          (begin
+					            ((root 'set!) '(root object ledger) (ledger))
+					            ((root 'set!) '(root object federation) (federation))
+					            ((root 'set!) '(root object authorization) (authorization))))
+					      result)))))
 
-  ;; install required classes
-  (call `(lambda (root) ((root 'set!) '(root class chain) ,chain)))
-  (call `(lambda (root) ((root 'set!) '(root class tree) ,tree)))
-  (call `(lambda (root) ((root 'set!) '(root class ledger) ,ledger)))
-  (call `(lambda (root) ((root 'set!) '(root class document) ,document)))
+  (set-query `(lambda (root query) (define (arg-from values key)
+				     (let ((entry (and (list? values) (assoc key values)))) (and entry (cadr entry))))
+		      (let ((once ,query-once)) (if (not (eq? (cadr (assoc 'function query)) 'batch!))
+						    (once query)
+						    (let ((auth (assoc 'authentication query))) (map (lambda (item)
+												       (once (if auth (append item (list auth)) item)))
+												     (arg-from (cadr (assoc 'arguments query)) 'queries)))))))
 
-  ;; install optional classes
-  (let loop ((classes classes))
-    (if (null? classes) #t
-        (begin (call `(lambda (root ((root 'set!) '(root object ,(caar classes)) ,(cadadr classes)))))
-               (loop (cdr classes)))))
-
-  (call `(lambda (root)
-           (let* ((std-node ((root 'get) '(root object standard)))
-                  (standard (sync-eval std-node #f))
-                  (standard-class ((root 'get) '(root class standard)))
-                  (tree-class ((root 'get) '(root class tree)))
-                  (chain-class ((root 'get) '(root class chain)))
-                  (ledger-class ((root 'get) '(root class ledger)))
-                  (document-class ((root 'get) '(root class document)))
-                 (keys (crypto-generate (expression->byte-vector ,(config-ref 'root-secret)))))
-             (if ,(config-ref 'clear?)
-                 (let* ((config-expr (list (list 'public (list (list 'window ,(config-ref 'window))
-                                                               (list 'public-key (car keys))
-                                                               (list 'bridge-policy ',(config-ref 'bridge-policy))
-                                                               (list 'name ,(config-ref 'name))))
-                                           (list 'private '())))
-                        (ledger ((standard 'init) ledger-class std-node config-expr tree-class chain-class document-class)))
-                   ((root 'set!) '(root object ledger) ledger))
-                 (let* ((ledger-old (sync-eval ((root 'get) '(root object ledger)) #f))
-                        (ledger (sync-eval (sync-cons (sync-car ((standard 'make) ledger-class)) (ledger-old '(1))) #f))
-                        (recode (lambda (class)
-                                  (let ((code (sync-car ((standard 'make) class))))
-                                    `(lambda (obj)
-                                       (sync-cons ,code (sync-cdr obj)))))))
-                   ((ledger 'update-config!) '(public window) ,(config-ref 'window))
-                   ((ledger 'update-config!) '(public public-key) (car keys))
-                   ((ledger 'update-config!) '(public bridge-policy) ',(config-ref 'bridge-policy))
-                   ((ledger 'update-config!) '(public name) ,(config-ref 'name))
-                   ((ledger 'update-code!) 'standard (recode standard-class))
-                   ((ledger 'update-code!) 'tree (recode tree-class))
-                   ((ledger 'update-code!) 'chain (recode chain-class))
-                   ((ledger 'update-code!) 'document (recode document-class))
-                   ((root 'set!) '(root object ledger) (ledger)))))))
-
-  ;; define secret store and admin list
-  (call `(lambda (root)
-           ((root 'set!) '(interface secret) (sync-hash (expression->byte-vector ,(config-ref 'interface-secret))))
-           (if ,(config-ref 'clear?)
-               ((root 'set!) '(interface admins) ,(config-ref 'admins)))
-           ((root 'set!) '(interface endpoint) ,(config-ref 'interface))
-           ((root 'set!) '(interface name) ,(config-ref 'name))
-           ((root 'set!) '(interface push-enabled?) ,(config-ref 'push-enabled?))))
-
-  (define query-once
-    '(lambda (query)
-       (let* ((func (assoc 'function query))
-              (args (assoc 'arguments query))
-              (auth (assoc 'authentication query))
-              (arg-list (if args (cadr args) '()))
-              (keyword-args (let loop ((in (reverse arg-list)) (out '()))
-                              (if (null? in) out
-                                  (loop (cdr in) (append `(,(symbol->keyword (caar in)) ,(cadar in)) out)))))
-              (std-node ((root 'get) '(root object standard)))
-              (standard (sync-eval std-node #f))
-              (node ((root 'get) '(root object ledger)))
-              (ledger (sync-eval node #f)))
-
-         ;; --- query helpers ---
-
-         (define (~with-auth query)
-           (append query `((authentication ,(cadr auth)))))
-
-         (define (~self-call function args blocking?)
-           (sync-call (~with-auth `((function ,function) (arguments ,args))) blocking?))
-
-         (define (~authenticate+authorize)
-           (let* ((auth-val (cadr auth))
-                  (identity (if (assoc 'identity auth-val) (cadr (assoc 'identity auth-val)) '*journal*))
-                  (credentials (cadr (assoc 'credentials auth-val)))
-                  (admins ((root 'get) '(interface admins)))
-                  (admin? (or (eq? identity '*journal*) (member identity admins))))
-             (if (not (equal? (sync-hash (expression->byte-vector credentials))
-                              ((root 'get) '(interface secret))))
-                 (error 'authentication-error "Could not authenticate restricted interface call for identity: ~S" identity))
-             (if (not admin?)
-                 (let ((segment (lambda (path)
-                                  (let ((segments (if (and (pair? path) (integer? (car path))) (cdr path) path)))
-                                    (if (and (pair? segments) (memq (car segments) '(*state* *transition*)))
-                                        (cdr segments)
-                                        '())))))
-                   (case (cadr func)
-                     ((set!)
-                      (if (not (eq? identity (car (segment (cadr (assoc 'path arg-list))))))
-                          (error 'authorization-error "User may only write to their own space: ~S" identity)))
-                     ((set-batch!)
-                      (for-each (lambda (path)
-                                  (if (not (eq? identity (car (segment path))))
-                                      (error 'authorization-error "User may only write to their own space: ~S" identity)))
-                                (cadr (assoc 'paths arg-list))))
-                     ((get resolve pin! unpin!)
-                      (let ((seg (segment (cadr (assoc 'path arg-list)))))
-                        (if (not (or (null? seg) (eq? identity (car seg)) (not (memq '*private* seg))))
-                            (error 'authorization-error "User may not read another user's private namespace: ~S" identity))))
-                     (else (error 'authorization-error "Operation requires admin privileges: ~S" (cadr func))))))))
-
-         (define (~bridge-path? path)
-           (let ((segments (if (and (pair? path) (integer? (car path))) (cdr path) path)))
-             (and (pair? segments) (eq? (car segments) '*bridge*))))
-
-         ;; --- remote bridge helpers ---
-
-         (define* (~fetch-remote-head path index (meta? #f))
-           (let* ((request ((ledger 'bridge-head) path index))
-                  (interface (cadr (assoc 'interface request)))
-                  (remote-index (cadr (assoc 'index request)))
-                  (remote-path (cadr (assoc 'path request)))
-                  (query `((function trace) (arguments ((index ,remote-index) (path ,remote-path) (meta? ,meta?)))))
-                  (response (sync-remote interface query)))
-             ((standard 'deserialize) response)))
-
-         (define* (~fetch-merged-head path (index -1) (meta? #f))
-           (let ((head (~fetch-remote-head path index meta?)))
-             ((ledger 'merge-head) path head index)))
-
-         ;; --- handlers ---
-
-         (define* (*secret* (secret (error 'argument-error "Missing required argument: ~S" 'secret)))
-           ;; Set the interface authentication secret.
-           ;;   Args:
-           ;;     secret (string): new interface secret.
-           ;;   Returns:
-           ;;     sync hash: stored secret hash.
-           ((root 'set!) '(interface secret) (sync-hash (expression->byte-vector secret))))
-
-         (define (*admins-get*)
-           ;; Return the current admin username list.
-           ((root 'get) '(interface admins)))
-
-         (define* (*admins-set* (admins (error 'argument-error "Missing required argument: ~S" 'admins)))
-           ;; Replace the admin username list wholesale.
-           ;;   Args:
-           ;;     admins (list of strings): new admin usernames.
-           ;;   Returns:
-           ;;     stored value.
-           ((root 'set!) '(interface admins) admins))
-
-         (define* (*window-set* (value (error 'argument-error "Missing required argument: ~S" 'value)))
-           ;; Update the public retention window.
-           ;;   Args:
-           ;;     value (integer): positive retention window size.
-           ;;   Returns:
-           ;;     boolean: #t after updating.
-           (if (not (and (integer? value) (> value 0)))
-               (error 'argument-error "Window must be a positive integer: ~S" value))
-           ((ledger 'update-config!) '(public window) value))
-
-         (define* (config (path '()))
-           ;; Return ledger configuration through the admin-only envelope.
-           ;;   Args:
-           ;;     path (list): optional config path.
-           ;;   Returns:
-           ;;     any: config expression or subexpression.
-           ((ledger 'config) path))
-
-         (define* (get (path (error 'argument-error "Missing required argument: ~S" 'path)) meta? expression?)
-           ;; Get staged document value, optionally with metadata and expression decoding.
-           ;;   Args:
-           ;;     path (list): target path.
-           ;;     meta? (boolean): #t to return value and metadata envelope.
-           ;;     expression? (boolean): #t to decode document payload bytes as an expression.
-           ;;   Returns:
-           ;;     any: staged byte-vector/expression value, metadata envelope, sentinel, or directory listing.
-           ((ledger 'get) path meta? expression?))
-
-         (define* (set-document! (path (error 'argument-error "Missing required argument: ~S" 'path)) value meta expression?)
-           ;; Stage a document content and/or metadata update.
-           ;;   Args:
-           ;;     path (list): target path.
-           ;;     value: optional byte-vector payload, expression payload when expression? is #t, or `(nothing)`.
-           ;;     meta: optional metadata patch.
-           ;;     expression? (boolean): #t to encode value as an expression before storing bytes.
-           ;;   Returns:
-           ;;     boolean: #t after staging.
-           (let ((value-entry (assoc 'value arg-list))
-                 (meta-entry (assoc 'meta arg-list)))
-             (if (and (not value-entry) (not meta-entry))
-                 (error 'argument-error "set! requires value or metadata for path: ~S" path))
-             (let* ((meta (if meta-entry (cadr meta-entry) '()))
-                    (value (if value-entry (cadr value-entry)
-                               (let ((current ((ledger 'get) path)))
-                                 (if (or (equal? current '(nothing))
-                                         (equal? current '(unknown))
-                                         (and (list? current) (not (null? current)) (eq? (car current) 'directory)))
-                                     (error 'value-error "Metadata-only writes require an existing document at path: ~S" path)
-                                     current)))))
-               ((ledger 'set!) path value meta expression?))))
-
-         (define* (resolve (path (error 'argument-error "Missing required argument: ~S" 'path)) pinned? proof? head meta? expression?)
-           ;; Resolve a path, optionally using a provided proof head or remote bridge fetch.
-           ;;   Args:
-           ;;     path (list): target path.
-           ;;     pinned? (boolean): #t to prefer pinned history.
-           ;;     proof? (boolean): #t to return proof-ish result.
-           ;;     head (sync node): optional pre-fetched chain head.
-           ;;     meta? (boolean): #t to return value and metadata envelope.
-           ;;     expression? (boolean): #t to decode document payload bytes as an expression.
-           ;;   Returns:
-           ;;     any: resolved byte-vector/expression value, metadata envelope, or sentinel.
-           (if head ((ledger 'resolve) path pinned? proof? head meta? expression?)
-               (let ((attempt ((ledger 'resolve) path #f #f #f meta? expression?)))
-                 (cond ((not (equal? attempt '(unknown))) ((ledger 'resolve) path pinned? proof? #f meta? expression?))
-                       ((not (~bridge-path? path)) attempt)
-                       (else ((ledger 'resolve) path pinned? proof? (~fetch-merged-head path -1 meta?) meta? expression?))))))
-
-         (define* (trace (index (error 'argument-error "Missing required argument: ~S" 'index)) (path (error 'argument-error "Missing required argument: ~S" 'path)) head meta?)
-           ;; Return a proof trace for a path, fetching remote bridge state when needed.
-           ;;   Args:
-           ;;     index (integer): trace index.
-           ;;     path (list): target path.
-           ;;     head (sync node): optional pre-fetched chain head.
-           ;;   Returns:
-           ;;     sync node: traced proof.
-           (if head ((ledger 'trace) index path head meta?)
-               (let ((attempt ((ledger 'resolve) (cond ((null? path) `(,index))
-                                                       ((not (integer? (car path)))
-                                                        (if (>= index 0) (cons index path) path))
-                                                       ((>= (car path) 0) path)
-                                                       ((>= index 0) (cons (+ (+ index 1) (car path)) (cdr path)))
-                                                       (else (cons (+ index (car path) 1) (cdr path)))))))
-                 (cond ((not (equal? attempt '(unknown))) ((ledger 'trace) index path #f meta?))
-                       ((not (~bridge-path? path)) (error 'path-error "Cannot trace unknown path: ~S" path))
-                       (else ((ledger 'trace) index path (~fetch-merged-head path index meta?) meta?))))))
-
-         (define* (pin! (path (error 'argument-error "Missing required argument: ~S" 'path)) response)
-           ;; Pin content locally, fetching and reserializing remote bridge content when needed.
-           ;;   Args:
-           ;;     path (list): target path.
-           ;;     response (expression): optional serialized pin response.
-           ;;   Returns:
-           ;;     boolean: #t after pinning.
-           (if response ((ledger 'pin!) path response)
-               (let ((attempt ((ledger 'resolve) path)))
-                 (cond ((not (equal? attempt '(unknown))) ((ledger 'pin!) path))
-                       ((not (~bridge-path? path)) (error 'path-error "Cannot pin unknown content at path: ~S" path))
-                       (else (let* ((merged (~fetch-merged-head path))
-                                    (response ((ledger 'trace) -1 path merged))
-                                    (args (append arg-list `((response ,response)))))
-                               (~self-call 'pin! args #t)))))))
-
-         (define* (bridge! (name (error 'argument-error "Missing required argument: ~S" 'name))
-                           (info-local (error 'argument-error "Missing required argument: ~S" 'info-local))
-                           info-remote)
-           ;; Register a bridge/publication target, lazily fetching remote info when omitted.
-           ;;   Args:
-           ;;     name (symbol): local bridge/publication target name.
-           ;;     info-local (alist): locally stored bridge info, including interface/policy/role/remote-name.
-           ;;     info-remote (alist): optional remote public info payload.
-           ;;   Returns:
-           ;;     boolean: #t after bridge registration.
-           (if info-remote ((ledger 'bridge!) name info-local info-remote)
-               (let* ((info-remote (sync-remote (cadr (assoc 'interface info-local)) '((function info))))
-                      (args `((name ,name) (info-local ,info-local) (info-remote ,info-remote))))
-                 (~self-call 'bridge! args #t))))
-
-         (define* (delete-bridge! (name (error 'argument-error "Missing required argument: ~S" 'name)))
-           ;; Delete an incoming bridge config entry.
-           ((ledger 'delete-bridge!) name))
-
-         (define* (delete-subscriber! (name (error 'argument-error "Missing required argument: ~S" 'name)))
-           ;; Delete an outgoing subscriber config entry.
-           ((ledger 'delete-subscriber!) name))
-
-         (define (~method)
-           (let ((result (apply (ledger (cadr func)) keyword-args)))
-             result))
-
-         ;; --- dispatch ---
-
-         (let ((ret (case (cadr func)
-                      ((*secret*) (~authenticate+authorize) (apply *secret* keyword-args))
-                      ((*admins-get*) (~authenticate+authorize) (apply *admins-get* keyword-args))
-                      ((*admins-set*) (~authenticate+authorize) (apply *admins-set* keyword-args))
-                      ((*window-set*) (~authenticate+authorize) (apply *window-set* keyword-args))
-                      ((get) (~authenticate+authorize) (apply get keyword-args))
-                      ((set!) (~authenticate+authorize) (apply set-document! keyword-args))
-                      ((resolve) (~authenticate+authorize) (apply resolve keyword-args))
-                      ((trace) (apply trace keyword-args))
-                      ((pin!) (~authenticate+authorize) (apply pin! keyword-args))
-                      ((bridge!) (~authenticate+authorize) (apply bridge! keyword-args))
-                      ((delete-bridge!) (~authenticate+authorize) (apply delete-bridge! keyword-args))
-                      ((delete-subscriber!) (~authenticate+authorize) (apply delete-subscriber! keyword-args))
-                      ((config) (~authenticate+authorize) (apply config keyword-args))
-                      ((set-batch! unpin!) (~authenticate+authorize) (~method))
-                      ((size synchronize synchronize! info) (~method))
-                      (else (error 'api-error "Interface does not implement API endpoint: ~S" (cadr func))))))
-           ((root 'set!) '(root object ledger) (ledger))
-           ret))))
-
-  (set-query
-   `(lambda (root query)
-      (let ((query-once ,query-once))
-        (if (not (eq? (cadr (assoc 'function query)) 'batch!)) (query-once query)
-            (let ((auth (assoc 'authentication query)))
-              (let loop ((queries (cadr (assoc 'queries (cadr (assoc 'arguments query))))) (result '()))
-                (if (null? queries) (reverse result)
-                    (let ((subquery (if auth (append (car queries) (list auth)) (car queries))))
-                      (loop (cdr queries) (cons (query-once subquery) result))))))))))
-  (define step-once
-    '(lambda (root secret query)
-       (let* ((query (if (null? query) '(ledger-step) query))
-              (std-node ((root 'get) '(root object standard)))
-              (standard (sync-eval std-node #f))
-              (node ((root 'get) '(root object ledger)))
-              (ledger (sync-eval node #f)))
-
-         ;; --- query helpers ---
-
-         (define (~self-call blocking? query)
-           (sync-call `(*step* ,secret ,query) blocking?))
-
-         ;; --- handlers ---
-
-         (define* (bridge-synchronize! (name (error 'argument-error "Missing required argument: ~S" 'name)) direction index response)
-           ;; Synchronize a bridge/subscriber by routing a ledger-prepared request.
-           ;;   Args:
-           ;;     name (symbol): bridge or subscriber name.
-           ;;     direction (symbol): `pull` or `push`.
-           ;;     index (integer): request index when applying response.
-           ;;     response (expression): optional remote response/ack.
-           ;;   Returns:
-           ;;     boolean: #t/#f after synchronization or ack handling.
-           (if response ((ledger 'bridge-synchronize!) name index response direction)
-               (let* ((request ((ledger 'bridge-synchronize!) name #f #f direction ((root 'get) '(interface endpoint))))
-                      (response (sync-remote (cadr (assoc 'interface request)) (cadr (assoc 'query request)))))
-                 (~self-call #t `(bridge-synchronize! ,name ,direction ,(cadr (assoc 'index request)) ,response)))))
-
-         (define* (ledger-step mutate?)
-           ;; Run one interface step, optionally mutating the local ledger at the end.
-           ;;   Args:
-           ;;     mutate? (boolean): #t to perform the final local step.
-           ;;   Returns:
-           ;;     integer: resulting ledger size.
-           (if mutate? (let ((keys (crypto-generate (expression->byte-vector secret))))
-                         ((ledger 'step!) (system-time-unix) (car keys) (cdr keys))
-                         ((ledger 'size)))
-               (begin
-                 (let loop ((names (map car ((ledger 'config) '(private bridge)))))
-                   (if (not (null? names))
-                       (begin
-                         (if (not (eq? ((ledger 'config) `(private bridge ,(car names) policy mode)) 'none))
-                             (~self-call #f `(bridge-synchronize! ,(car names) pull)))
-                         (loop (cdr names)))))
-                 (let ((size (~self-call #t '(ledger-step #t))))
-                   (if ((root 'get) '(interface push-enabled?))
-                       (let loop ((subscribers ((ledger 'config) '(private subscriber))))
-                         (if (not (null? subscribers))
-                             (begin
-                               (if (eq? ((ledger 'config) `(private subscriber ,(caar subscribers) policy mode)) 'push)
-                                   (~self-call #f `(bridge-synchronize! ,(caar subscribers) push)))
-                               (loop (cdr subscribers))))))
-                   size))))
-
-         ;; --- dispatch ---
-
-         (let ((ret (case (car query)
-                      ((ledger-step) (apply ledger-step (cdr query)))
-                      ((bridge-synchronize!) (apply bridge-synchronize! (cdr query)))
-                      (else (error 'api-error "Step does not implement operation: ~S" (cadr func))))))
-           ((root 'set!) '(root object ledger) (ledger))
-           ret))))
-
+  (define step-once '(lambda (root secret query)
+		       (let* ((module (eval ((root 'get) '(root class standard-module))))
+                              (std-node ((root 'get) '(root object standard)))
+                              (standard (module 'local ((root 'get) '(root class standard)) std-node))
+                              (ledger (module 'local ((root 'get) '(root class ledger))
+                                              ((root 'get) '(root object ledger))))
+                              (federation (module 'local ((root 'get) '(root class federation))
+                                                  ((root 'get) '(root object federation)))))
+                         (define (self query blocking?) (sync-call `(*step* ,secret ,query) blocking?))
+			 (define (run method operands data query) (let* ((input (if data
+										    (append (reverse (cdr (reverse operands)))
+											    (list `((value ,(car (reverse operands))) (continuation ,data))))
+										    operands))
+									 (result (apply (federation method) (cons ledger input)))
+									 (next (and (pair? result) (pair? (car result)) (assoc 'continuation result))))
+								    (if next (self (append query (list (cadr next))) #t) result)))
+			 (define (commit) (let* ((identity ((ledger 'config) '(public identity)))
+						 (id (cadr (assoc 'id identity)))
+						 (keys (crypto-generate (expression->byte-vector
+									 (list 'sync-web/journal-signing-key/v1 id
+									       (sync-hash (expression->byte-vector secret))))))
+						 (size ((ledger 'step!) `((unix-time ,(system-time-unix))
+									  (public-key ,(car keys))
+									  (secret-key ,(cdr keys)))))
+						 (configured ((ledger 'config) '(public interface public-key)))
+						 (committed (if (= size 0) '() ((ledger 'resolve)
+										'(-1 *crypto* interface public-key))))
+						 )
+					    ((federation 'update-config!)
+					     `((path (commit-key))
+					       (value ((configured ,configured) (committed ,committed)))))
+					    size))
+			 (let* ((query (if (null? query) '(ledger-step) query)) (result (case (car query)
+											  ((ledger-step) (if (and (pair? (cdr query)) (cadr query)) (commit)
+													     (let ((ops (cadr (assoc 'operations ((federation 'step!) ledger)))))
+													       (for-each (lambda (op) (self op #f)) ops)
+													       (self '(ledger-step #t) #t))))
+											  ((bridge-synchronize!) (run 'bridge-synchronize! (list (cadr query))
+														      (and (pair? (cddr query)) (caddr query))
+														      `(bridge-synchronize! ,(cadr query))))
+											  (else (error 'api-error "Unknown step operation")))))
+			   ((root 'set!) '(root object ledger) (ledger))
+			   ((root 'set!) '(root object federation) (federation))
+			   result))))
   (set-step step-once)
-
   "Installed interface")

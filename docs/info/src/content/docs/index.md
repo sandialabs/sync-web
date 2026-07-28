@@ -24,8 +24,8 @@ If you already operate or build on the stack, you can jump directly to the secti
 ## Purpose
 
 The core value proposition is verifiable shared state in adversarial or partially-trusted environments.
-Traditional APIs can serve data quickly, but they often lack strong guarantees about temporal ordering, provenance, and cross-node consistency.
-The Synchronic Web addresses that by treating state as a cryptographically linked structure with programmable rules for mutation and synchronization.
+Traditional APIs can serve data quickly, but they often lack durable evidence about temporal ordering, provenance, and what one peer observed from another.
+The Synchronic Web addresses that by treating each journal's state as a cryptographically linked structure with programmable mutation and reciprocal signed-head synchronization. It does not require or claim one global total order.
 
 ### Dynamic Object Structures
 
@@ -37,8 +37,8 @@ In practice, this means teams can iterate on application semantics at the Lisp l
 ### Dynamic Peer Topologies
 
 The distributed model is usage-driven: peer relationships can be introduced and updated at runtime.
-Nodes can synchronize proofs and selectively resolve remote state while preserving cryptographic verifiability.
-This gives a practical notion of state across space, not just within one process or one database.
+Reciprocal bridges synchronize signed heads and provide exact committed routes for resolving remote state. Bridges establish identity and proof reachability, not application access; the terminal journal applies explicit local policy to signed `get`, `set!`, and `resolve` calls.
+This gives a practical notion of independently committed state across space, not just within one process or database.
 This topology flexibility is useful in real systems where trust boundaries and communication patterns change over time.
 
 ## Resources

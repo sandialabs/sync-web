@@ -7,6 +7,9 @@ edition = "2024"
 name = "ledger"
 path = "../deploy/bin/ledger/src/main.rs"
 
+[features]
+test-support = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.release]
@@ -31,7 +34,6 @@ sha2 = "0.10.8"
 libc = "0.2"
 log = "0.4.21"
 env_logger = "0.10"
-lru = "0.12.5"
 crystals-dilithium = "1.0.0"
 pqcrypto = { version = "0.17.0", default-features = false }
 tokio = { version = "1.0", features = ["time", "rt", "rt-multi-thread", "macros"] }

@@ -90,6 +90,10 @@ export const buildFragmentHash = (input: {
     return '#admin';
   }
 
+  if (input.mode === 'access') {
+    return '#access';
+  }
+
   if (input.mode === 'stage') {
     return buildStageFragment(input.stageSelection);
   }
@@ -175,7 +179,7 @@ const parseLedgerFragment = (segments: string[], isDirectory: boolean) => {
       name: bridgeName,
       snapshot,
     });
-    path.push('*bridge*', bridgeName, snapshot === 'latest' ? -1 : Number.parseInt(snapshot, 10));
+    path.push(bridgeName, snapshot === 'latest' ? -1 : Number.parseInt(snapshot, 10));
   }
 
   return null;
@@ -189,6 +193,10 @@ export const parseProjectedFragment = (hash: string) => {
 
   if (segments[0] === 'admin') {
     return { mode: 'admin' as const };
+  }
+
+  if (segments[0] === 'access') {
+    return { mode: 'access' as const };
   }
 
   if (segments[0] === 'stage') {

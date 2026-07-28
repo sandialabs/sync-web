@@ -1,5 +1,7 @@
 # Cross-journal sharing flows
 
+Status: exploratory follow-on note. Sync Web 1.5 implements the narrower model in `federation.md`: signed remote application calls are limited to `get`, `set!`, and `resolve`; pin/unpin and administration are origin-local. The arbitrary query, materialization, and step-job concepts below are future possibilities, not current federation behavior.
+
 ## Motivation
 
 A useful enterprise shape for Sync Web is moving many small documents, and selected historical versions of those documents, between organizations. The goal is not large-file streaming yet. The goal is a wide, understandable pipeline for asking a peer journal for exactly the data needed, then retaining that data locally.
@@ -20,7 +22,7 @@ Private application data should be fetched directly from the terminal journal. I
 Avoid cross-journal paths like:
 
 ```scheme
-(-1 *bridge* carol *bridge* dave *state* bob photos trip image.jpg)
+(-1 carol dave *state* bob photos trip image.jpg)
 ```
 
 Prefer a split flow:

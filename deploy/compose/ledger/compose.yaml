@@ -19,8 +19,6 @@ services:
       INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
       INTERFACE: ${INTERFACE:-}
       JOURNAL_NAME: ${JOURNAL_NAME:-}
-      BRIDGE_PUBLISH: ${BRIDGE_PUBLISH:-push}
-      BRIDGE_SUBSCRIBE: ${BRIDGE_SUBSCRIBE:-pull}
       LISP_DIR: /srv/lisp
     volumes:
       - database:/srv/database

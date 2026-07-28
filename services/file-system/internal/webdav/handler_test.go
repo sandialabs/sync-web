@@ -76,6 +76,84 @@ func TestDirectoryChildrenDecodePercentEscapedSegments(t *testing.T) {
 	if len(children) != 2 || children[0].Name != "New folder" || !children[0].Directory || children[1].Name != "a%b.txt" || children[1].Directory {
 		t.Fatalf("unexpected children: %#v", children)
 	}
+
+	children, ok = directoryChildren([]any{"directory", map[string]any{
+		"hello%20world%20&%20%C3%BC.bin": "value",
+	}, true})
+	if !ok || len(children) != 1 || children[0].Name != "hello world & ü.bin" {
+		t.Fatalf("unexpected map children: %#v", children)
+	}
+}
+
+func TestEscapedNamesPropfindAndRecursiveLifecycle(t *testing.T) {
+	fake := newFakeGateway(t)
+	fake.mapDirectories = true
+	h := Handler{Gateway: gateway.New(fake.url + "/api/v1"), MaxObjectBytes: 1024 * 1024}
+
+	request(t, h, "MKCOL", "/webdav/stage/admin/source%20space/", "", http.StatusCreated)
+	request(t, h, "PUT", "/webdav/stage/admin/source%20space/hello%20world%20%26%20%C3%BC.bin", "hello", http.StatusCreated)
+	body := request(t, h, "PROPFIND", "/webdav/stage/admin/source%20space/", "", 207)
+	if !strings.Contains(body, "/webdav/stage/admin/source%20space/") || !strings.Contains(body, "hello%20world%20&amp;%20%C3%BC.bin") {
+		t.Fatalf("escaped hrefs missing from PROPFIND: %s", body)
+	}
+
+	req := httptest.NewRequest("COPY", "/webdav/stage/admin/source%20space/", nil)
+	req.Header.Set("Destination", "http://example.test/webdav/stage/admin/copied%20space/")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("COPY status = %d body=%s", res.Code, res.Body.String())
+	}
+	request(t, h, "GET", "/webdav/stage/admin/copied%20space/hello%20world%20%26%20%C3%BC.bin", "", http.StatusOK)
+
+	req = httptest.NewRequest("MOVE", "/webdav/stage/admin/copied%20space/", nil)
+	req.Header.Set("Destination", "http://example.test/webdav/stage/admin/moved%20space/")
+	res = httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("MOVE status = %d body=%s", res.Code, res.Body.String())
+	}
+	request(t, h, "GET", "/webdav/stage/admin/moved%20space/hello%20world%20%26%20%C3%BC.bin", "", http.StatusOK)
+	request(t, h, "DELETE", "/webdav/stage/admin/moved%20space/", "", http.StatusNoContent)
+	request(t, h, "GET", "/webdav/stage/admin/moved%20space/hello%20world%20%26%20%C3%BC.bin", "", http.StatusNotFound)
+}
+
+func TestFederatedLedgerReadsSendRouteAndHistory(t *testing.T) {
+	fake := newFakeGateway(t)
+	fake.values["-1/*state*/alice/data/public/key-0"] = map[string]any{"*type/byte-vector*": "6869"}
+	fake.values["7/*state*/alice/data/public/key-0"] = map[string]any{"*type/byte-vector*": "6869"}
+	h := Handler{Gateway: gateway.New(fake.url + "/api/v1"), MaxObjectBytes: 1024 * 1024}
+
+	request(t, h, "GET", "/webdav/ledger/bridge/journal-1/state/alice/data/public/key-0", "", http.StatusOK)
+	assertFederation(t, fake.lastBody, []string{"journal-1"}, []int{-1, -1})
+	body := request(t, h, "PROPFIND", "/webdav/ledger/bridge/journal-1/state/alice/data/public/", "", 207)
+	if !strings.Contains(body, "key-0") {
+		t.Fatalf("federated PROPFIND omitted child: %s", body)
+	}
+	assertFederation(t, fake.lastBody, []string{"journal-1"}, []int{-1, -1})
+
+	request(t, h, "GET", "/webdav/ledger/1/5/5/4/bridge/journal-1/minus/2/bridge/journal-3/7/state/alice/data/public/key-0", "", http.StatusOK)
+	assertFederation(t, fake.lastBody, []string{"journal-1", "journal-3"}, []int{1554, -2, 7})
+}
+
+func TestExpiredFederatedHistoryIsNotFoundWithoutHidingAuthorizationErrors(t *testing.T) {
+	expired := httptest.NewRecorder()
+	writeGatewayError(expired, gateway.Error{StatusCode: http.StatusBadRequest, Body: map[string]any{
+		"error":   "bridge-error",
+		"message": "Bridge is not committed at the selected local index: journal-1 -1",
+	}})
+	if expired.Code != http.StatusNotFound {
+		t.Fatalf("expired history status = %d, want 404", expired.Code)
+	}
+
+	denied := httptest.NewRecorder()
+	writeGatewayError(denied, gateway.Error{StatusCode: http.StatusBadRequest, Body: map[string]any{
+		"error":   "authorization-error",
+		"message": "Principal is not authorized",
+	}})
+	if denied.Code != http.StatusBadRequest {
+		t.Fatalf("authorization status = %d, want 400", denied.Code)
+	}
 }
 
 func TestPropfindHidesReservedStateSegments(t *testing.T) {
@@ -93,7 +171,7 @@ func TestPropfindHidesReservedStateSegments(t *testing.T) {
 	}
 }
 
-func TestRawNonDocumentValueFailsClearly(t *testing.T) {
+func TestNonByteVectorValueFailsClearly(t *testing.T) {
 	fake := newFakeGateway(t)
 	fake.values["*state*/admin/raw.txt"] = "raw expression"
 	h := Handler{Gateway: gateway.New(fake.url + "/api/v1"), MaxObjectBytes: 1024 * 1024}
@@ -161,6 +239,8 @@ type fakeGateway struct {
 	url               string
 	values            map[string]any
 	lastAuthorization string
+	lastBody          map[string]any
+	mapDirectories    bool
 }
 
 func newFakeGateway(t *testing.T) *fakeGateway {
@@ -178,6 +258,7 @@ func (f *fakeGateway) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	f.lastBody = body
 	key := pathKey(body["path"])
 	switch r.URL.Path {
 	case "/api/v1/general/set":
@@ -194,6 +275,15 @@ func (f *fakeGateway) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if children := f.children(key); len(children) > 0 {
+			if f.mapDirectories {
+				mapped := map[string]any{}
+				for _, entry := range children {
+					pair := entry.([]any)
+					mapped[pair[0].(string)] = pair[1]
+				}
+				writeJSON(w, []any{"directory", mapped, true})
+				return
+			}
 			writeJSON(w, []any{"directory", children, true})
 			return
 		}
@@ -244,6 +334,19 @@ func pathKey(value any) string {
 	return strings.Join(parts, "/")
 }
 
+func assertFederation(t *testing.T, body map[string]any, route []string, history []int) {
+	t.Helper()
+	federation, ok := body["$federation"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing federation context: %#v", body)
+	}
+	gotRoute, _ := federation["route"].([]any)
+	gotHistory, _ := federation["history"].([]any)
+	if fmt.Sprint(gotRoute) != fmt.Sprint(route) || fmt.Sprint(gotHistory) != fmt.Sprint(history) {
+		t.Fatalf("federation = %#v, want route=%v history=%v", federation, route, history)
+	}
+}
+
 func isNothingValue(value any) bool {
 	items, ok := value.([]any)
 	return ok && len(items) == 1 && items[0] == "nothing"
@@ -252,4 +355,20 @@ func isNothingValue(value any) bool {
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func TestSafeContentTypeUsesMagicBeforeFilename(t *testing.T) {
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
+	if got := safeContentType(png, "misleading.html"); got != "image/png" {
+		t.Fatalf("content type = %q, want image/png", got)
+	}
+	if got := safeContentType([]byte("<script>alert(1)</script>"), "page.html"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("content type = %q, want inert text", got)
+	}
+}
+
+func TestSafeContentTypeFallsBackForUnknownBinary(t *testing.T) {
+	if got := safeContentType([]byte{0x00, 0xff, 0x00, 0xfe}, "image.svg"); got != "application/octet-stream" {
+		t.Fatalf("content type = %q, want application/octet-stream", got)
+	}
 }

@@ -148,6 +148,25 @@ describe('JournalService', () => {
   });
 });
 
+describe('snapshot error classification', () => {
+  it('recognizes index and unretained-route errors without classifying authorization errors', () => {
+    expect(JournalService.isSnapshotUnavailable({ code: 'index-error', message: 'out of bounds' }))
+      .toBe(true);
+    expect(JournalService.isSnapshotUnavailable({
+      code: 'bridge-error',
+      message: 'bridge-error: Bridge is not committed at the selected local index: journal-1 -1',
+    })).toBe(true);
+    expect(JournalService.isSnapshotUnavailable({
+      code: 'authorization-error',
+      message: 'authorization-error: Principal is not authorized',
+    })).toBe(false);
+    expect(JournalService.isSnapshotUnavailable({
+      code: 'bridge-error',
+      message: 'bridge-error: Bridge is not available: journal-1',
+    })).toBe(false);
+  });
+});
+
 describe('reserved state segments', () => {
   it('treats star-wrapped names as reserved but leaves ordinary names alone', () => {
     expect(JournalService.isReservedStateSegment('*time*')).toBe(true);
@@ -227,10 +246,116 @@ describe('JournalService API', () => {
       expect(mockFetch).toHaveBeenCalledWith(
         'http://test-endpoint.com/api/v1/general/size',
         expect.objectContaining({
-          method: 'GET',
-          headers: {},
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
         })
       );
+    });
+  });
+
+  describe('getLocalJournalName', () => {
+    it('reads the local public descriptor without federation context', async () => {
+      service.setFederationContext({ route: ['journal-3'] });
+      mockFetch.mockResolvedValueOnce(mockJsonResponse({
+        name: { '*type/string*': 'journal-1' },
+      }));
+
+      await expect(service.getLocalJournalName()).resolves.toBe('journal-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/info',
+        expect.objectContaining({ method: 'GET', body: undefined }),
+      );
+    });
+  });
+
+  describe('federation context', () => {
+    it('uses public route metadata instead of federating size', async () => {
+      service.setFederationContext({ route: ['carol', 'bob'] });
+      mockFetch.mockResolvedValueOnce(mockJsonResponse({ 'terminal-index': 7 }));
+
+      await expect(service.getSize()).resolves.toBe(8);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/route',
+        expect.objectContaining({
+          body: JSON.stringify({ 'route-target': ['carol', 'bob'], index: -1 }),
+        }),
+      );
+    });
+
+    it('adds the working route to staged get and set requests', async () => {
+      service.setFederationContext({ route: ['bob'] });
+      mockFetch
+        .mockResolvedValueOnce(mockJsonResponse({ '*type/byte-vector*': '01' }))
+        .mockResolvedValueOnce(mockTextResponse('true'));
+
+      await service.get(['*state*', 'doc']);
+      await service.set(['*state*', 'doc'], { '*type/byte-vector*': '02' });
+
+      expect(JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        path: ['*state*', 'doc'],
+        $federation: { route: ['bob'] },
+      });
+      expect(JSON.parse((mockFetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        path: ['*state*', 'doc'], value: { '*type/byte-vector*': '02' },
+        $federation: { route: ['bob'] },
+      });
+    });
+
+    it('derives federation from a selected Ledger path before mutable route context catches up', async () => {
+      mockFetch.mockResolvedValueOnce(mockJsonResponse({ content: ['directory', { data: 'directory' }, true] }));
+
+      await service.get([400, 'journal-3', -1, '*state*', 'admin'], {
+        pinned: false,
+        proof: false,
+      });
+
+      expect(JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        path: [-1, '*state*', 'admin'],
+        'pinned?': false,
+        'proof?': false,
+        $federation: { route: ['journal-3'], history: [400, -1] },
+      });
+    });
+
+    it('adds the working route and mirrored Ledger indexes to resolve requests', async () => {
+      service.setFederationContext({ route: ['carol', 'bob'], historyIndexes: [-1, 3, 7] });
+      mockFetch.mockResolvedValueOnce(mockJsonResponse({ content: 'value' }));
+
+      await service.get([-1, 'carol', 3, 'bob', 7, '*state*', 'doc']);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/resolve',
+        expect.objectContaining({
+          body: JSON.stringify({
+            path: [7, '*state*', 'doc'],
+            'pinned?': true,
+            'proof?': true,
+            $federation: { route: ['carol', 'bob'], history: [-1, 3, 7] },
+          }),
+        }),
+      );
+    });
+
+    it('requests proof-backed Tree-native bytes over a selected route', async () => {
+      const value = { '*type/byte-vector*': '255044462d' };
+      mockFetch.mockResolvedValueOnce(mockJsonResponse({
+        content: value, proof: { graph: true }, 'pinned?': false,
+      }));
+
+      const result = await service.get(
+        [103, 'journal-2', -1, '*state*', 'alice', 'data', 'public', 'report.pdf'],
+      );
+
+      expect(result).toEqual({
+        content: value, proof: { graph: true }, 'pinned?': false,
+      });
+      expect(JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        path: [-1, '*state*', 'alice', 'data', 'public', 'report.pdf'],
+        'pinned?': true,
+        'proof?': true,
+        $federation: { route: ['journal-2'], history: [103, -1] },
+      });
     });
   });
 
@@ -255,6 +380,30 @@ describe('JournalService API', () => {
       );
     });
 
+    it('returns staged Tree-native bytes without an envelope', async () => {
+      const value = { '*type/byte-vector*': '00ff' };
+      mockFetch.mockResolvedValueOnce(mockJsonResponse(value));
+
+      const path = ['*state*', 'binary'];
+      await expect(service.get(path)).resolves.toEqual({ content: value });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test-endpoint.com/api/v1/general/get',
+        expect.objectContaining({ body: JSON.stringify({ path }) }),
+      );
+    });
+
+    it('preserves historical content and proof details', async () => {
+      const value = { '*type/byte-vector*': '255044462d' };
+      mockFetch.mockResolvedValueOnce(mockJsonResponse({
+        content: value, proof: { graph: true }, 'pinned?': false,
+      }));
+
+      const path = [-1, '*state*', 'report.pdf'];
+      await expect(service.get(path)).resolves.toEqual({
+        content: value, proof: { graph: true }, 'pinned?': false,
+      });
+    });
+
     it('should call resolve endpoint for indexed paths', async () => {
       const mockResponse = 'value';
       mockFetch.mockResolvedValueOnce(mockJsonResponse(mockResponse));
@@ -273,6 +422,25 @@ describe('JournalService API', () => {
           body: JSON.stringify({ path, 'pinned?': false, 'proof?': false }),
         })
       );
+    });
+
+    it('retries a newly published index against a briefly older read snapshot', async () => {
+      const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockFetch
+        .mockResolvedValueOnce(mockJsonResponse({
+          error: 'index-error', message: 'Index is out of bounds: 257', source: 'journal',
+        }, false, 400, 'Bad Request'))
+        .mockResolvedValueOnce(mockJsonResponse({
+          error: 'index-error', message: 'Index is out of bounds: 257', source: 'journal',
+        }, false, 400, 'Bad Request'))
+        .mockResolvedValueOnce(mockJsonResponse({ content: ['directory', { alice: 'directory' }, true] }));
+
+      await expect(service.get(
+        [257, 'journal-1', -2, '*state*', 'alice'],
+        { pinned: false, proof: false },
+      )).resolves.toEqual({ content: ['directory', { alice: 'directory' }, true] });
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      log.mockRestore();
     });
   });
 
@@ -384,6 +552,51 @@ describe('JournalService API', () => {
     });
   });
 
+  describe('remote local retention', () => {
+    it('resolves proof remotely then pins and unpins the full path locally', async () => {
+      service.setFederationContext({ route: ['bob'], historyIndexes: [-1, 4] });
+      const path = [12, 'bob', 4, '*state*', 'doc'];
+      const proof = [['c', 0, '00']];
+      mockFetch
+        .mockResolvedValueOnce(mockJsonResponse({ content: 'value', proof }))
+        .mockResolvedValueOnce(mockTextResponse('true'))
+        .mockResolvedValueOnce(mockTextResponse('true'));
+
+      await expect(service.pin(path)).resolves.toBe(true);
+      await expect(service.unpin(path)).resolves.toBe(true);
+
+      expect(JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        path: [4, '*state*', 'doc'], 'pinned?': false, 'proof?': true,
+        $federation: { route: ['bob'], history: [12, 4] },
+      });
+      expect(JSON.parse((mockFetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        path, response: proof,
+      });
+      expect(JSON.parse((mockFetch.mock.calls[2][1] as RequestInit).body as string)).toEqual({ path });
+    });
+
+    it('captures one explicit origin index before resolving and pinning latest', async () => {
+      service.setFederationContext({ route: ['bob'], historyIndexes: [-1, -1] });
+      const path = [-1, 'bob', -1, '*state*', 'doc'];
+      const selectedPath = [12, 'bob', -1, '*state*', 'doc'];
+      const proof = [['c', 0, '00']];
+      mockFetch
+        .mockResolvedValueOnce(mockTextResponse('13'))
+        .mockResolvedValueOnce(mockJsonResponse({ content: 'value', proof }))
+        .mockResolvedValueOnce(mockTextResponse('true'));
+
+      await expect(service.pin(path)).resolves.toBe(true);
+
+      expect(JSON.parse((mockFetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        path: [-1, '*state*', 'doc'], 'pinned?': false, 'proof?': true,
+        $federation: { route: ['bob'], history: [12, -1] },
+      });
+      expect(JSON.parse((mockFetch.mock.calls[2][1] as RequestInit).body as string)).toEqual({
+        path: selectedPath, response: proof,
+      });
+    });
+  });
+
   describe('unpin', () => {
     it('should call unpin endpoint with path', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
@@ -442,12 +655,8 @@ describe('JournalService API', () => {
           },
           body: JSON.stringify({
             name: 'peer-name',
-            'info-local': {
-              interface: { '*type/string*': 'http://peer-endpoint.com' },
-              policy: { publish: 'push', subscribe: 'pull' },
-              role: false,
-              'remote-name': 'peer-name',
-            },
+            interface: { '*type/string*': 'http://peer-endpoint.com' },
+            'remote-name': 'peer-name',
           }),
         })
       );
@@ -455,12 +664,9 @@ describe('JournalService API', () => {
   });
 
   describe('getPeers', () => {
-    it('should call config and normalize bridge names', async () => {
+    it('should read the public bridge directory', async () => {
       mockFetch.mockResolvedValueOnce(
-        mockJsonResponse({
-          alice: {},
-          bob: {},
-        })
+        mockJsonResponse(['directory', [['alice', 'value'], ['bob', 'value']], true])
       );
       const result = await service.getPeers();
       expect(result).toEqual([
@@ -468,27 +674,25 @@ describe('JournalService API', () => {
         { name: 'bob', endpoint: '' },
       ]);
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://test-endpoint.com/api/v1/general/config',
+        'http://test-endpoint.com/api/v1/general/get',
         expect.objectContaining({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ path: ['private', 'bridge'] }),
+          body: JSON.stringify({ path: ['*bridge*'] }),
         })
       );
     });
   });
 
   describe('admin operations', () => {
-    it('should save incoming bridge config', async () => {
+    it('should save reciprocal bridge config', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
       const result = await service.saveBridge({
         name: 'peer-name',
         endpoint: 'https://peer.example/api/v1/journal/interface',
-        direction: 'incoming',
-        policy: { publish: 'push', subscribe: 'none' },
         remoteName: 'local-journal',
       });
 
@@ -502,112 +706,55 @@ describe('JournalService API', () => {
           },
           body: JSON.stringify({
             name: 'peer-name',
-            'info-local': {
-              interface: { '*type/string*': 'https://peer.example/api/v1/journal/interface' },
-              policy: { publish: 'push', subscribe: 'none' },
-              role: false,
-              'remote-name': 'local-journal',
-            },
+            interface: { '*type/string*': 'https://peer.example/api/v1/journal/interface' },
+            'remote-name': 'local-journal',
           }),
         })
       );
     });
 
-    it('should save outgoing subscriber config', async () => {
+    it('should delete reciprocal bridge config', async () => {
       mockFetch.mockResolvedValueOnce(mockTextResponse('true'));
 
-      const result = await service.saveBridge({
-        name: 'peer-name',
-        endpoint: 'https://peer.example/api/v1/journal/interface',
-        direction: 'outgoing',
-        policy: { publish: 'pull', subscribe: 'pull' },
-        remoteName: 'local-journal',
-      });
+      await expect(service.deleteBridge('peer-name')).resolves.toBe(true);
 
-      expect(result).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://test-endpoint.com/api/v1/general/bridge',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: 'peer-name',
-            'info-local': {
-              interface: { '*type/string*': 'https://peer.example/api/v1/journal/interface' },
-              policy: { publish: 'pull', subscribe: 'pull' },
-              role: 'publisher',
-              'remote-name': 'local-journal',
-            },
-          }),
-        })
-      );
-    });
-
-    it('should delete incoming and outgoing bridge config through separate endpoints', async () => {
-      mockFetch
-        .mockResolvedValueOnce(mockTextResponse('true'))
-        .mockResolvedValueOnce(mockTextResponse('true'));
-
-      await expect(service.deleteBridge('peer-in', 'incoming')).resolves.toBe(true);
-      await expect(service.deleteBridge('peer-out', 'outgoing')).resolves.toBe(true);
-
-      expect(mockFetch).toHaveBeenNthCalledWith(
-        1,
         'http://test-endpoint.com/api/v1/general/delete-bridge',
         expect.objectContaining({
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ name: 'peer-in' }),
-        })
-      );
-      expect(mockFetch).toHaveBeenNthCalledWith(
-        2,
-        'http://test-endpoint.com/api/v1/general/delete-subscriber',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ name: 'peer-out' }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'peer-name' }),
         })
       );
     });
 
     it('should read admin config from admin and config endpoints', async () => {
       mockFetch
-        .mockResolvedValueOnce(mockJsonResponse(['alice', 'admin']))
+        .mockResolvedValueOnce(mockJsonResponse([['*state*', 'alice'], ['*state*', 'admin']]))
         .mockResolvedValueOnce(
           mockJsonResponse({
-            public: { window: 12, name: { '*type/string*': 'journal-0' } },
+            public: {
+              window: 12,
+              name: { '*type/string*': 'journal-0' },
+              'bridge-accept': 'preapproved',
+            },
             private: {
               bridge: {
-                peer2: { interface: { '*type/string*': 'http://peer2/api/v1/journal/interface' } },
+                peer2: {
+                  interface: { '*type/string*': 'http://peer2/api/v1/journal/interface' },
+                  initiation: 'remote',
+                  'remote-name': 'local-two',
+                  'last-index': 4,
+                },
                 peer1: {
                   interface: { '*type/string*': 'http://peer1/api/v1/journal/interface' },
-                  local: { interface: { '*type/string*': 'http://stale-peer1/api/v1/journal/interface' } },
-                  policy: {
-                    local: { publish: 'push', subscribe: 'pull' },
-                    remote: { publish: 'push', subscribe: 'pull' },
-                    mode: 'push',
-                  },
+                  initiation: 'local',
+                  'remote-name': 'local-one',
+                  'last-index': 8,
+                  'remote-index': 7,
                 },
               },
-              subscriber: {
-                peer3: {
-                  interface: { '*type/string*': 'http://peer3/api/v1/journal/interface' },
-                  'remote-name': 'remote-peer3',
-                  'disabled?': true,
-                  policy: {
-                    local: { publish: 'none', subscribe: 'pull' },
-                    remote: { publish: 'push', subscribe: 'pull' },
-                    mode: 'none',
-                  },
-                },
-              },
+              'bridge-preapproval': { peer3: { '*type/byte-vector*': 'aabb' } },
             },
           })
         );
@@ -620,38 +767,24 @@ describe('JournalService API', () => {
           {
             name: 'peer1',
             endpoint: 'http://peer1/api/v1/journal/interface',
-            direction: 'incoming',
-            localPolicy: { publish: 'push', subscribe: 'pull' },
-            remotePolicy: { publish: 'push', subscribe: 'pull' },
-            mode: 'push',
-            disabled: false,
-            remoteName: undefined,
+            remoteName: 'local-one',
+            initiation: 'local',
+            lastIndex: 8,
+            remoteIndex: 7,
           },
           {
             name: 'peer2',
             endpoint: 'http://peer2/api/v1/journal/interface',
-            direction: 'incoming',
-            localPolicy: { publish: 'push', subscribe: 'pull' },
-            remotePolicy: { publish: 'push', subscribe: 'pull' },
-            mode: 'none',
-            disabled: false,
-            remoteName: undefined,
-          },
-        ],
-        subscribers: [
-          {
-            name: 'peer3',
-            endpoint: 'http://peer3/api/v1/journal/interface',
-            direction: 'outgoing',
-            localPolicy: { publish: 'none', subscribe: 'pull' },
-            remotePolicy: { publish: 'push', subscribe: 'pull' },
-            mode: 'none',
-            disabled: true,
-            remoteName: 'remote-peer3',
+            remoteName: 'local-two',
+            initiation: 'remote',
+            lastIndex: 4,
           },
         ],
         localName: 'journal-0',
+        localEndpoint: null,
         windowSize: 12,
+        bridgeAccept: 'preapproved',
+        bridgePreapprovals: { peer3: { '*type/byte-vector*': 'aabb' } },
       });
       expect(mockFetch).toHaveBeenNthCalledWith(
         1,
@@ -690,7 +823,7 @@ describe('JournalService API', () => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ admins: ['admin', 'alice'] }),
+          body: JSON.stringify({ admins: [['*state*', 'admin'], ['*state*', 'alice']] }),
         })
       );
     });
