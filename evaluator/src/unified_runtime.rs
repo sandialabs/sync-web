@@ -313,12 +313,19 @@ impl GcObject {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RootMetaCar {
+    builtin: BuiltinId,
+    expected: GcValue,
+}
+
 #[derive(Debug)]
 struct Slot {
     epoch: u32,
     marked: bool,
     request_generation: u32,
     age: u8,
+    root_meta_car: Option<RootMetaCar>,
     object: Option<GcObject>,
 }
 
@@ -329,6 +336,7 @@ impl Slot {
             marked: false,
             request_generation: 0,
             age: 0,
+            root_meta_car: None,
             object: None,
         }
     }
@@ -423,6 +431,15 @@ impl GcHeap {
         }
     }
 
+    #[cfg(test)]
+    fn root_meta_car_count(&self) -> usize {
+        self.pages
+            .iter()
+            .flatten()
+            .filter(|slot| slot.object.is_some() && slot.root_meta_car.is_some())
+            .count()
+    }
+
     pub(crate) fn root(&mut self, value: GcValue) -> Result<RootLease, HeapError> {
         if value.is_heap() {
             self.slot(value)?;
@@ -476,6 +493,7 @@ impl GcHeap {
                     slot.age = slot.age.saturating_add(1);
                 } else {
                     slot.object = None;
+                    slot.root_meta_car = None;
                     slot.epoch = next_epoch(slot.epoch);
                     reclaimed += 1;
                 }
@@ -511,6 +529,7 @@ impl GcHeap {
                     slot.age = slot.age.saturating_add(1);
                 } else {
                     slot.object = None;
+                    slot.root_meta_car = None;
                     slot.epoch = next_epoch(slot.epoch);
                     reclaimed += 1;
                 }
@@ -557,6 +576,7 @@ impl GcHeap {
             slot.request_generation = generation;
             slot.marked = false;
             slot.age = 0;
+            slot.root_meta_car = None;
             slot.epoch
         };
         self.live += 1;
@@ -786,6 +806,27 @@ impl GcHeap {
             .ok_or(HeapError::StaleHandle)
     }
 
+    fn pair_root_meta_car(&self, pair: GcValue) -> Result<Option<RootMetaCar>, HeapError> {
+        let slot = self.slot(pair)?;
+        if !matches!(slot.object, Some(GcObject::Pair { .. })) {
+            return Err(HeapError::WrongType);
+        }
+        Ok(slot.root_meta_car)
+    }
+
+    fn set_pair_root_meta_car(
+        &mut self,
+        pair: GcValue,
+        builtin: Option<RootMetaCar>,
+    ) -> Result<(), HeapError> {
+        let slot = self.slot_mut(pair)?;
+        if !matches!(slot.object, Some(GcObject::Pair { .. })) {
+            return Err(HeapError::WrongType);
+        }
+        slot.root_meta_car = builtin;
+        Ok(())
+    }
+
     pub(crate) fn set_pair_car(&mut self, pair: GcValue, value: GcValue) -> Result<(), HeapError> {
         match self.object_mut(pair)? {
             GcObject::Pair { car, .. } => {
@@ -982,6 +1023,9 @@ impl GcHeap {
                 .as_ref()
                 .expect("checked above")
                 .trace(&mut pending);
+            if let Some(root_meta_car) = slot.root_meta_car {
+                pending.push(root_meta_car.expected);
+            }
         }
         Ok(())
     }
@@ -1981,7 +2025,6 @@ pub(crate) struct UnifiedVm {
     star_defaults: HashMap<(GcValue, u16), GcValue>,
     provided: HashSet<String>,
     macroexpand_quote_result: bool,
-    root_meta_cars: HashSet<GcValue>,
 }
 
 impl UnifiedVm {
@@ -2056,7 +2099,6 @@ impl UnifiedVm {
             star_defaults: HashMap::new(),
             provided: HashSet::new(),
             macroexpand_quote_result: false,
-            root_meta_cars: HashSet::new(),
         }
     }
 
@@ -2151,7 +2193,6 @@ impl UnifiedVm {
         self.star_defaults.clear();
         self.provided.clear();
         self.macroexpand_quote_result = false;
-        self.root_meta_cars.clear();
     }
 
     pub(crate) fn run(
@@ -2642,6 +2683,28 @@ impl UnifiedVm {
 
     fn builtin_value(&mut self, builtin: BuiltinId) -> Result<GcValue, VmError> {
         self.builtin_value_named(builtin, Arc::from(format!("#{builtin:?}")))
+    }
+
+    fn root_meta_car_name(
+        &self,
+        pair: GcValue,
+        car: GcValue,
+    ) -> Result<Option<&str>, VmError> {
+        let Some(root_meta_car) = self.heap.pair_root_meta_car(pair)? else {
+            return Ok(None);
+        };
+        if car != root_meta_car.expected
+            || !matches!(self.heap.object(car), Ok(GcObject::Builtin(actual)) if *actual == root_meta_car.builtin)
+        {
+            return Ok(None);
+        }
+        let Some(name) = self.builtin_names.get(&car) else {
+            return Ok(None);
+        };
+        if self.builtin_values.get(name) != Some(&car) {
+            return Ok(None);
+        }
+        Ok(Some(name.as_ref()))
     }
 
     fn default_port(&mut self, kind: DefaultPortKind) -> Result<GcValue, VmError> {
@@ -3681,10 +3744,25 @@ impl UnifiedVm {
             }
             UnifiedInstruction::MarkRootMetaCar => {
                 let pair = *self.values.last().ok_or(VmError::StackUnderflow)?;
-                if !matches!(self.heap.object(pair), Ok(GcObject::Pair { .. })) {
+                let car = match self.heap.object(pair)? {
+                    GcObject::Pair { car, .. } => *car,
+                    _ => return Err(VmError::WrongType),
+                };
+                let builtin = match self.heap.object(car)? {
+                    GcObject::Builtin(builtin) => *builtin,
+                    _ => return Err(VmError::WrongType),
+                };
+                let name = self.builtin_names.get(&car).ok_or(VmError::WrongType)?;
+                if self.builtin_values.get(name) != Some(&car) {
                     return Err(VmError::WrongType);
                 }
-                self.root_meta_cars.insert(pair);
+                self.heap.set_pair_root_meta_car(
+                    pair,
+                    Some(RootMetaCar {
+                        builtin,
+                        expected: car,
+                    }),
+                )?;
             }
             UnifiedInstruction::BuildMultiVector(dims, kind) => {
                 let length = dims.iter().product::<usize>();
@@ -6584,8 +6662,7 @@ impl UnifiedVm {
                 if !first {
                     output.push(' ');
                 }
-                if vm.root_meta_cars.contains(&cursor) {
-                    let name = vm.builtin_names.get(car).ok_or(VmError::WrongType)?;
+                if let Some(name) = vm.root_meta_car_name(cursor, *car)? {
                     output.push_str("#_");
                     output.push_str(name);
                 } else {
@@ -6770,8 +6847,7 @@ impl UnifiedVm {
                     if !first {
                         output.push(' ');
                     }
-                    if self.root_meta_cars.contains(&cursor) {
-                        let name = self.builtin_names.get(car).ok_or(VmError::WrongType)?;
+                    if let Some(name) = self.root_meta_car_name(cursor, *car)? {
                         output.push_str("#_");
                         output.push_str(name);
                     } else {
@@ -8672,7 +8748,6 @@ impl UnifiedVm {
         roots.extend(self.procedure_sources.values().copied());
         roots.extend(self.star_defaults.keys().map(|(closure, _)| *closure));
         roots.extend(self.star_defaults.values().copied());
-        roots.extend(self.root_meta_cars.iter().copied());
         for pending in &self.pending_outputs {
             roots.push(pending.port)
         }
@@ -8808,8 +8883,7 @@ impl UnifiedVm {
                         if !first {
                             output.push(' ');
                         }
-                        if vm.root_meta_cars.contains(&cursor) {
-                            let name = vm.builtin_names.get(car).ok_or(VmError::WrongType)?;
+                        if let Some(name) = vm.root_meta_car_name(cursor, *car)? {
                             output.push_str("#_");
                             output.push_str(name);
                         } else {
@@ -9422,9 +9496,6 @@ impl UnifiedVm {
                 }));
                 memo.insert(value, output.clone());
                 Ok(output)
-            }
-            GcObject::RawDisplay(text) if text.starts_with("#_") => {
-                Ok(Value::RootMeta(Rc::new(text[2..].to_string())))
             }
             GcObject::Builtin(_) => {
                 let marker = Rc::new(format!("dynamic-builtin-{}", literals.len()));
@@ -11253,16 +11324,14 @@ impl UnifiedVm {
         let object = self.heap.object(value)?.clone();
         match object {
             GcObject::Pair { car, cdr } => {
-                let root_meta_car = self.root_meta_cars.contains(&value);
+                let root_meta_car = self.heap.pair_root_meta_car(value)?;
                 let car = self.copy_value(car)?;
                 let cdr = self.copy_value(cdr)?;
                 let roots = self.active_roots_with(&[car, cdr]);
                 let copy = self
                     .heap
                     .allocate_with_roots(GcObject::Pair { car, cdr }, &roots)?;
-                if root_meta_car {
-                    self.root_meta_cars.insert(copy);
-                }
+                self.heap.set_pair_root_meta_car(copy, root_meta_car)?;
                 Ok(copy)
             }
             GcObject::MultiVector { dims, values, kind } => {
@@ -27831,6 +27900,159 @@ mod tests {
     }
 
     #[test]
+    fn nested_quasiquote_edge_metadata_is_collected_with_dead_pairs() {
+        for source in [
+            "(let loop ((i 0)) (if (= i 100) 'ok (begin `(lambda (xs) `(,i ,@xs)) (loop (+ i 1)))))",
+            "(let loop ((i 0)) (if (= i 100) 'ok (begin (catch #t (lambda () `(lambda (xs) `(,i ,@xs)) (error 'drop \"drop\")) (lambda args 'caught)) (loop (+ i 1)))))",
+        ] {
+            let module = UnifiedCompiler::compile(ModuleId(0), source).unwrap();
+            let mut completed = false;
+            for quota in 256..=768 {
+                let mut vm = UnifiedVm::new(quota, 20_000_000);
+                vm.install_module(module.clone());
+                match vm.run(ModuleId(0), FunctionId(0), &[]) {
+                    Ok(result) => {
+                        assert_eq!(vm.format_value(result.value()).unwrap(), "ok");
+                        assert!(vm.heap.stats().collections > 0);
+                        assert_eq!(vm.heap.root_meta_car_count(), 0);
+                        completed = true;
+                        break;
+                    }
+                    Err(VmError::Heap(HeapError::QuotaExceeded { .. })) => {}
+                    Err(error) => panic!("nested quasiquote quota {quota}: {error:?}"),
+                }
+            }
+            assert!(completed, "dead marked pairs prevented bounded completion");
+        }
+
+        let source = "(let loop ((i 0)) (if (= i 1000) 'ok (begin `(lambda (xs) `(,i ,@xs)) (loop (+ i 1)))))";
+        let module = UnifiedCompiler::compile(ModuleId(0), source).unwrap();
+        let mut limited = UnifiedVm::new(768, 100);
+        limited.install_module(module);
+        assert!(matches!(
+            limited.run(ModuleId(0), FunctionId(0), &[]),
+            Err(VmError::StepLimit)
+        ));
+        assert_eq!(limited.heap.root_meta_car_count(), 0);
+
+        let error_module = UnifiedCompiler::compile(
+            ModuleId(0),
+            "(begin `(lambda (xs) `(1 ,@xs)) (error 'drop \"drop\"))",
+        )
+        .unwrap();
+        let mut failed = UnifiedVm::new(768, 2_000_000);
+        failed.install_module(error_module);
+        assert!(matches!(
+            failed.run(ModuleId(0), FunctionId(0), &[]),
+            Err(VmError::Rendered(_))
+        ));
+        assert_eq!(failed.heap.root_meta_car_count(), 0);
+
+        let cancel_module = UnifiedCompiler::compile(
+            ModuleId(0),
+            "(begin `(lambda (xs) `(1 ,@xs)) (checked))",
+        )
+        .unwrap();
+        let cancelled = Rc::new(Cell::new(true));
+        let mut cancelled_vm = UnifiedVm::with_host(
+            768,
+            2_000_000,
+            vec![PrimitiveSpec::fixed("checked", 0, |_, context| {
+                context.check_cancelled()?;
+                Ok(HostOutput::Bool(true))
+            })],
+            cancelled,
+            Rc::new(Cell::new(false)),
+        );
+        cancelled_vm.install_module(cancel_module);
+        assert!(matches!(
+            cancelled_vm.run(ModuleId(0), FunctionId(0), &[]),
+            Err(VmError::Rendered(_))
+        ));
+        assert_eq!(cancelled_vm.heap.root_meta_car_count(), 0);
+
+        let retained_module = UnifiedCompiler::compile(
+            ModuleId(0),
+            "(let ((list-values (lambda args 'shadowed))) `(lambda (x) `(a ,x)))",
+        )
+        .unwrap();
+        let next_module = UnifiedCompiler::compile(ModuleId(1), "'next").unwrap();
+        let mut retained_vm = UnifiedVm::new(4_096, 2_000_000);
+        retained_vm.install_module(retained_module);
+        retained_vm.install_module(next_module);
+        let retained = retained_vm.run(ModuleId(0), FunctionId(0), &[]).unwrap();
+        let retained_body = match retained_vm.heap.object(retained.value()).unwrap() {
+            GcObject::Pair { cdr, .. } => *cdr,
+            _ => panic!("retained generated source"),
+        };
+        let retained_body_tail = match retained_vm.heap.object(retained_body).unwrap() {
+            GcObject::Pair { cdr, .. } => *cdr,
+            _ => panic!("retained generated parameters"),
+        };
+        let retained_operator_pair = match retained_vm.heap.object(retained_body_tail).unwrap() {
+            GcObject::Pair { car, .. } => *car,
+            _ => panic!("retained generated body"),
+        };
+        let retained_meta = retained_vm
+            .heap
+            .pair_root_meta_car(retained_operator_pair)
+            .unwrap();
+        let before = retained_vm.format_value(retained.value()).unwrap();
+        assert_eq!(before, "(lambda (x) (#_list-values 'a x))");
+        let expected = match retained_vm.heap.object(retained_operator_pair).unwrap() {
+            GcObject::Pair { car, .. } => *car,
+            _ => unreachable!(),
+        };
+        retained_vm
+            .builtin_names
+            .insert(expected, Arc::from("alias-list-values"));
+        assert_eq!(
+            retained_vm.format_value(retained.value()).unwrap(),
+            "(lambda (x) (alias-list-values 'a x))"
+        );
+        retained_vm
+            .builtin_names
+            .insert(expected, Arc::from("list-values"));
+        assert_eq!(retained_vm.format_value(retained.value()).unwrap(), before);
+        let roots = retained_vm.active_roots_with(&[retained.value(), expected]);
+        let duplicate = retained_vm
+            .heap
+            .allocate_with_roots(GcObject::Builtin(BuiltinId::ListValues), &roots)
+            .unwrap();
+        retained_vm
+            .builtin_names
+            .insert(duplicate, Arc::from("list-values"));
+        retained_vm
+            .heap
+            .set_pair_car(retained_operator_pair, duplicate)
+            .unwrap();
+        assert_eq!(
+            retained_vm.format_value(retained.value()).unwrap(),
+            "(lambda (x) (list-values 'a x))"
+        );
+        retained_vm
+            .heap
+            .set_pair_car(retained_operator_pair, expected)
+            .unwrap();
+        assert_eq!(retained_vm.format_value(retained.value()).unwrap(), before);
+        let next = retained_vm.run(ModuleId(1), FunctionId(0), &[]).unwrap();
+        assert_eq!(retained_vm.format_value(next.value()).unwrap(), "next");
+        // RootLease permits memory-safe observation after reset, but the current public
+        // boundary intentionally does not preserve request-local builtin display names.
+        assert_eq!(
+            retained_vm.format_value(retained.value()).unwrap(),
+            "(lambda (x) (#<builtin> 'a x))"
+        );
+        assert_eq!(
+            retained_vm
+                .heap
+                .pair_root_meta_car(retained_operator_pair)
+                .unwrap(),
+            retained_meta
+        );
+    }
+
+    #[test]
     fn nested_quasiquote_runtime_provenance_matches_s7() {
         assert_eq!(
             run_source_output("(let ((f `(lambda (x) `(a ,x)))) ((eval f) 1))").unwrap(),
@@ -27901,8 +28123,12 @@ mod tests {
             "(\"(lambda (x) (list-values (list-values 'a x) (list-values 'b x)))\" #t #t #t)"
         );
         assert_eq!(
-            run_source_output("(let ((list-values (lambda args 'shadowed)) (apply-values (lambda args 'shadowed))) (let* ((f `(lambda (x xs) `(a ,x ,@xs))) (p (caddr f)) (root ((rootlet) 'list-values))) (let ((a (object->string f))) (set-car! p root) (let ((b (object->string f))) (set-car! p 'other) (set-car! p root) (list a b (object->string f) (object->string (copy f)))))))").unwrap(),
-            "(\"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\")"
+            run_source_output("(let ((list-values (lambda args 'shadowed)) (apply-values (lambda args 'shadowed))) (let* ((f `(lambda (x xs) `(a ,x ,@xs))) (p (caddr f)) (root ((rootlet) 'list-values)) (plus ((rootlet) '+))) (let ((a (object->string f))) (set-car! p root) (let ((b (object->string f))) (set-car! p 'other) (let ((c (object->string f))) (set-car! p plus) (let ((d (object->string f))) (set-car! p root) (list a b c d (object->string f) (object->string (copy f))))))))))").unwrap(),
+            "(\"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (other 'a x (#_apply-values xs)))\" \"(lambda (x xs) (+ 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\")"
+        );
+        assert_eq!(
+            run_source_output("(let ((list-values (lambda args 'shadowed))) (let* ((f `(lambda (x) `(a ,x))) (p (caddr f))) (set-cdr! p p) (object->string f)))").unwrap(),
+            "\"(lambda (x) #1=(#_list-values . #1#))\""
         );
         assert_eq!(
             run_source_output("(let ((x 'z)) ``(a . ,,x))").unwrap(),
