@@ -639,6 +639,10 @@ mod tests {
             .evaluate("(let ((n (sync-null))) (list (sync-node? n) (equal? n (sync-null)) n))")
             .unwrap();
         assert_eq!(value.to_string(), "(#t #t #<sync-null>)");
+        assert_eq!(
+            host.evaluate_unified_output("(let ((n (sync-null))) (list (sync-node? n) (equal? n (sync-null)) n))"),
+            Ok("(#t #t #<sync-null>)".into())
+        );
     }
     #[cfg(panic = "unwind")]
     #[test]
@@ -712,6 +716,30 @@ mod tests {
             "#<sync-node 42>"
         );
     }
+    #[test]
+    fn unified_host_expression_can_be_evaluated_and_applied() {
+        let mut host = RustHost::new();
+        host.register_codecs();
+        host.register(PrimitiveSpec::fixed("loader", 2, |_, _| {
+            Ok(HostOutput::Expression(
+                "(lambda (state) (define* (self (arg #f)) (if arg arg state)))".into(),
+            ))
+        }));
+        host.register(PrimitiveSpec::fixed("make-node", 0, |_, _| {
+            Ok(HostOutput::Host(Rc::new(Node { id: 7, text: "#<sync-node 7>".into() })))
+        }));
+        assert_eq!(
+            host.evaluate_unified_output("(let ((code '(lambda (state) (define* (self (arg #f)) (if arg arg state))))) (byte-vector->expression (expression->byte-vector code)))"),
+            Ok("(lambda (state) (define* (self (arg #f)) (if arg arg state)))".into())
+        );
+        assert_eq!(host.evaluate_unified_output("(loader #f #f)"), Ok("(lambda (state) (define* (self (arg #f)) (if arg arg state)))".into()));
+        host.initialize_with("(varlet (rootlet) 'sync-eval (lambda* (node (strict #t) :rest rest) (with-let (curlet) ((eval (loader node strict) (rootlet)) node))))");
+        assert_eq!(
+            host.evaluate_unified_output("((sync-eval (make-node) #f) 'hello)"),
+            Ok("hello".into())
+        );
+    }
+
     #[test]
     fn native_codecs_round_trip_scheme_and_hex() {
         let mut host = RustHost::new();

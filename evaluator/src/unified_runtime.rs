@@ -2213,8 +2213,9 @@ impl UnifiedVm {
         let closure = self
             .heap
             .closure_with_roots(module, function.0, outer, &[outer, pi])?;
-        self.push_call(module, function, closure, outer, arguments.to_vec(), false)?;
         self.root_environment = Some(outer);
+        self.install_host_bindings(outer)?;
+        self.push_call(module, function, closure, outer, arguments.to_vec(), false)?;
         loop {
             if self.steps >= self.step_limit {
                 return Err(VmError::StepLimit);
@@ -7567,9 +7568,12 @@ impl UnifiedVm {
             _ => None,
         });
         let object_string = self.format_value(value)?;
-        let code_string = self
-            .readable_code_repr(value)
-            .unwrap_or_else(|_| object_string.clone());
+        let code_string = if matches!(object, Some(GcObject::Closure { .. } | GcObject::Macro(..))) {
+            self.readable_code_repr(value)
+                .unwrap_or_else(|_| object_string.clone())
+        } else {
+            object_string.clone()
+        };
         Ok(HostArgument {
             kind,
             boolean: match value {
@@ -9234,7 +9238,11 @@ impl UnifiedVm {
                     output.push('>');
                 }
                 GcObject::HostHandle(handle) => output.push_str(
-                    &vm.host_objects.get(handle).map_or_else(|| "#<host>".to_string(), |object| object.display())
+                    &vm.host_objects.get(handle).map_or_else(
+                        || "#<host>".to_string(),
+                        |object| catch_unwind(AssertUnwindSafe(|| object.display()))
+                            .unwrap_or_else(|_| "#<host-value-error>".to_string()),
+                    )
                 ),
             }
             active.remove(&value);
@@ -9582,7 +9590,7 @@ impl UnifiedVm {
             BuiltinId::VectorPredicate => matches!(object, Some(GcObject::Vector(_) | GcObject::IntVector(_) | GcObject::FloatVector(_) | GcObject::MultiVector { .. } | GcObject::MultiVectorView { .. })),
             BuiltinId::ByteVectorPredicate => matches!(object, Some(GcObject::ByteVector(_))),
             BuiltinId::HashTablePredicate => matches!(object, Some(GcObject::HashTable(_))),
-            BuiltinId::ProcedurePredicate => matches!(object, Some(GcObject::Closure { .. } | GcObject::Builtin(_) | GcObject::Dilambda { .. })),
+            BuiltinId::ProcedurePredicate => matches!(object, Some(GcObject::Closure { .. } | GcObject::Builtin(_) | GcObject::HostProcedure(_) | GcObject::Dilambda { .. })),
             BuiltinId::MacroPredicate => matches!(object, Some(GcObject::Macro(..))),
             BuiltinId::EnvironmentPredicate => matches!(object, Some(GcObject::Environment(_) | GcObject::LexicalFrame(_))),
             BuiltinId::UndefinedPredicate => value == GcValue::UNDEFINED,
@@ -9804,6 +9812,14 @@ impl UnifiedVm {
                     if a == b => {}
                 (Ok(GcObject::BignumLiteral(a)), Ok(GcObject::BignumLiteral(b)))
                     if a == b => {}
+                (Ok(GcObject::HostHandle(a)), Ok(GcObject::HostHandle(b))) => {
+                    let (Some(a), Some(b)) = (self.host_objects.get(a), self.host_objects.get(b)) else {
+                        return Ok(false);
+                    };
+                    if !catch_unwind(AssertUnwindSafe(|| a.equals(b.as_ref()))).unwrap_or(false) {
+                        return Ok(false);
+                    }
+                }
                 _ => return Ok(false),
             }
         }
@@ -10072,9 +10088,30 @@ impl UnifiedVm {
             .allocate_with_roots(GcObject::Float(float), &roots)?)
     }
 
+    fn install_host_bindings(&mut self, root: GcValue) -> Result<(), VmError> {
+        let host_names = self
+            .host_primitives
+            .iter()
+            .enumerate()
+            .map(|(index, spec)| Ok((u16::try_from(index).map_err(|_| VmError::InvalidInstruction)?, spec.name)))
+            .collect::<Result<Vec<_>, VmError>>()?;
+        for (index, name) in host_names {
+            if matches!(self.heap.lookup(root, name)?.and_then(|value| self.heap.object(value).ok()), Some(GcObject::HostProcedure(existing)) if *existing == index) {
+                continue;
+            }
+            let roots = self.active_roots_with(&[root]);
+            let procedure = self
+                .heap
+                .allocate_with_roots(GcObject::HostProcedure(index), &roots)?;
+            self.heap.define(root, name, procedure)?;
+        }
+        Ok(())
+    }
+
     fn ensure_root_bindings(&mut self) -> Result<GcValue, VmError> {
         let root = self.root_environment.ok_or(VmError::InvalidInstruction)?;
         if self.heap.lookup(root, "car")?.is_some() {
+            self.install_host_bindings(root)?;
             return Ok(root);
         }
         for &name in APPROVED_ROOT_BUILTINS {
@@ -10099,19 +10136,7 @@ impl UnifiedVm {
             self.heap.define(root, name, value)?;
         }
         self.heap.define(root, "sync-eval", GcValue::UNDEFINED)?;
-        let host_names = self
-            .host_primitives
-            .iter()
-            .enumerate()
-            .map(|(index, spec)| Ok((u16::try_from(index).map_err(|_| VmError::InvalidInstruction)?, spec.name)))
-            .collect::<Result<Vec<_>, VmError>>()?;
-        for (index, name) in host_names {
-            let roots = self.active_roots_with(&[root]);
-            let procedure = self
-                .heap
-                .allocate_with_roots(GcObject::HostProcedure(index), &roots)?;
-            self.heap.define(root, name, procedure)?;
-        }
+        self.install_host_bindings(root)?;
         Ok(root)
     }
     fn environment_binding_list(&mut self, environment: GcValue) -> Result<GcValue, VmError> {
@@ -15082,7 +15107,7 @@ impl UnifiedVm {
                         GcObject::ByteVector(_) => "byte-vector?",
                         GcObject::HashTable(_) => "hash-table",
                         GcObject::Environment(_) | GcObject::LexicalFrame(_) => "let?",
-                        GcObject::Closure { .. } | GcObject::Builtin(_) => "procedure",
+                        GcObject::Closure { .. } | GcObject::Builtin(_) | GcObject::HostProcedure(_) => "procedure",
                         GcObject::Macro(..) => "macro",
                         _ => "object",
                     }
@@ -15646,6 +15671,7 @@ impl UnifiedVm {
                         self.heap.object(value),
                         Ok(GcObject::Closure { .. }
                             | GcObject::Builtin(_)
+                            | GcObject::HostProcedure(_)
                             | GcObject::Dilambda { .. })
                     ),
                     BuiltinId::SyntaxPredicate => {
@@ -17987,6 +18013,10 @@ impl UnifiedVm {
                     Ok(GcObject::Builtin(BuiltinId::SetCar | BuiltinId::SetCdr | BuiltinId::SetOutlet | BuiltinId::SetPortPosition)) => Some((2, 2)),
                     Ok(GcObject::Builtin(BuiltinId::LetSet)) => Some((3, 3)),
                     Ok(GcObject::Builtin(BuiltinId::Unlet)) => Some((0, 0)),
+                    Ok(GcObject::HostProcedure(index)) => self
+                        .host_primitives
+                        .get(*index as usize)
+                        .map(|spec| (spec.min as i64, spec.max.map_or(536_870_912, |max| max as i64))),
                     _ => None,
                 }
                 .or_else(|| {
