@@ -1,4 +1,6 @@
 use super::*;
+use sha2::Digest;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -308,6 +310,44 @@ fn external_call_and_state_change_never_commit() {
         "second call must be a cache hit"
     );
     PERSISTOR.root_delete(record).expect("delete probe record");
+}
+
+#[test]
+fn rdf_nested_quasiquote_preserves_transition_bytes_and_wildcard_state() {
+    let record = create_probe_record();
+    let code = fs::read_to_string("lisp/rdf.scm").expect("read RDF fixture");
+    assert_eq!(
+        with_runtime(|| evaluate_record_unified(record, &code)),
+        "\"Installed RDF interface\""
+    );
+    let installed_root = PERSISTOR.root_get(record).expect("read RDF install root");
+    assert_eq!(
+        hex::encode(installed_root),
+        "93477c89feea547803b570b512697525cb9c375afae8a48deecc4ff3a27d4df5"
+    );
+    let (transition_leaf, initial_state, _) = PERSISTOR
+        .branch_get(installed_root)
+        .expect("read RDF install branch");
+    assert_eq!(initial_state, NULL);
+    let transition = PERSISTOR
+        .leaf_get(transition_leaf)
+        .expect("read RDF transition leaf");
+    assert_eq!(transition.len(), 5047);
+    assert_eq!(
+        hex::encode(sha2::Sha256::digest(&transition)),
+        "9e7949ba64ad03d6e54a57639bc455d713de6c202edc6e0877fef2af6331d9e0"
+    );
+    assert_eq!(evaluate_record_unified(record, "(insert a b c)"), "(a b c)");
+    assert_eq!(evaluate_record_unified(record, "(insert a b d)"), "(a b d)");
+    assert_eq!(
+        evaluate_record_unified(record, "(select a b ())"),
+        "((a b c) (a b d))"
+    );
+    assert_eq!(
+        evaluate_record_unified(record, "(select a b c)"),
+        "((a b c))"
+    );
+    PERSISTOR.root_delete(record).expect("delete RDF probe record");
 }
 
 #[test]

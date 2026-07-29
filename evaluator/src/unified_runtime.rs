@@ -1155,6 +1155,8 @@ pub(crate) enum UnifiedInstruction {
     BuildMultiVector(Arc<[usize]>, Option<char>),
     WrapCommented,
     WrapSyntax(Arc<str>),
+    WrapHiddenRootMeta,
+    MarkRootMetaCar,
     Catch,
     EndCatch,
     Call(u16),
@@ -1979,6 +1981,7 @@ pub(crate) struct UnifiedVm {
     star_defaults: HashMap<(GcValue, u16), GcValue>,
     provided: HashSet<String>,
     macroexpand_quote_result: bool,
+    root_meta_cars: HashSet<GcValue>,
 }
 
 impl UnifiedVm {
@@ -2053,6 +2056,7 @@ impl UnifiedVm {
             star_defaults: HashMap::new(),
             provided: HashSet::new(),
             macroexpand_quote_result: false,
+            root_meta_cars: HashSet::new(),
         }
     }
 
@@ -2147,6 +2151,7 @@ impl UnifiedVm {
         self.star_defaults.clear();
         self.provided.clear();
         self.macroexpand_quote_result = false;
+        self.root_meta_cars.clear();
     }
 
     pub(crate) fn run(
@@ -3094,7 +3099,11 @@ impl UnifiedVm {
             }
             UnifiedInstruction::RaiseCyclicSyntax => return Err(VmError::WrongType),
             UnifiedInstruction::DynamicLiteral(index) => {
-                self.values.push(*self.dynamic_literals.get(&(frame.module, index)).ok_or(VmError::InvalidInstruction)?);
+                let value = *self
+                    .dynamic_literals
+                    .get(&(frame.module, index))
+                    .ok_or(VmError::InvalidInstruction)?;
+                self.values.push(value);
             }
             UnifiedInstruction::DynamicQuotedLiteral(index) => {
                 let payload = *self.dynamic_literals.get(&(frame.module, index)).ok_or(VmError::InvalidInstruction)?;
@@ -3660,6 +3669,22 @@ impl UnifiedVm {
                     .heap
                     .allocate_with_roots(GcObject::Syntax(kind, value), &roots)?;
                 self.values.push(wrapped);
+            }
+            UnifiedInstruction::WrapHiddenRootMeta => {
+                let value = self.pop()?;
+                let roots = self.active_roots_with(&[value]);
+                let wrapped = self.heap.allocate_with_roots(
+                    GcObject::Syntax(Arc::from("\0root-meta"), value),
+                    &roots,
+                )?;
+                self.values.push(wrapped);
+            }
+            UnifiedInstruction::MarkRootMetaCar => {
+                let pair = *self.values.last().ok_or(VmError::StackUnderflow)?;
+                if !matches!(self.heap.object(pair), Ok(GcObject::Pair { .. })) {
+                    return Err(VmError::WrongType);
+                }
+                self.root_meta_cars.insert(pair);
             }
             UnifiedInstruction::BuildMultiVector(dims, kind) => {
                 let length = dims.iter().product::<usize>();
@@ -6559,7 +6584,13 @@ impl UnifiedVm {
                 if !first {
                     output.push(' ');
                 }
-                write_value(vm, *car, labels, emitted, output)?;
+                if vm.root_meta_cars.contains(&cursor) {
+                    let name = vm.builtin_names.get(car).ok_or(VmError::WrongType)?;
+                    output.push_str("#_");
+                    output.push_str(name);
+                } else {
+                    write_value(vm, *car, labels, emitted, output)?;
+                }
                 written += 1;
                 first = false;
                 if *cdr == GcValue::NIL {
@@ -6739,7 +6770,13 @@ impl UnifiedVm {
                     if !first {
                         output.push(' ');
                     }
-                    output.push_str(&self.readable_literal_repr(*car)?);
+                    if self.root_meta_cars.contains(&cursor) {
+                        let name = self.builtin_names.get(car).ok_or(VmError::WrongType)?;
+                        output.push_str("#_");
+                        output.push_str(name);
+                    } else {
+                        output.push_str(&self.readable_literal_repr(*car)?);
+                    }
                     first = false;
                     cursor = *cdr;
                 }
@@ -8635,6 +8672,7 @@ impl UnifiedVm {
         roots.extend(self.procedure_sources.values().copied());
         roots.extend(self.star_defaults.keys().map(|(closure, _)| *closure));
         roots.extend(self.star_defaults.values().copied());
+        roots.extend(self.root_meta_cars.iter().copied());
         for pending in &self.pending_outputs {
             roots.push(pending.port)
         }
@@ -8770,7 +8808,13 @@ impl UnifiedVm {
                         if !first {
                             output.push(' ');
                         }
-                        write(vm, *car, output, active)?;
+                        if vm.root_meta_cars.contains(&cursor) {
+                            let name = vm.builtin_names.get(car).ok_or(VmError::WrongType)?;
+                            output.push_str("#_");
+                            output.push_str(name);
+                        } else {
+                            write(vm, *car, output, active)?;
+                        }
                         first = false;
                         if *cdr == GcValue::NIL {
                             break;
@@ -9342,9 +9386,25 @@ impl UnifiedVm {
                 for (index, value) in converted.into_iter().enumerate() { vector.set(index, value); }
                 Ok(output)
             }
+            GcObject::Syntax(kind, payload) if kind.as_ref() == "\0root-meta" => {
+                let GcObject::Symbol(name) = self.heap.object(*payload)? else {
+                    return Err(VmError::WrongType);
+                };
+                Ok(Value::RootMeta(Rc::new(name.to_string())))
+            }
             GcObject::Syntax(kind, payload) => {
                 let payload = self.export_runtime_syntax(*payload, memo, literals)?;
                 let output = Value::list(vec![Value::RootMeta(Rc::new(kind.to_string())), payload]);
+                if let Value::Pair(pair) = &output {
+                    let origin = match kind.as_ref() {
+                        "quote" => crate::core::SyntaxOrigin::Quote,
+                        "quasiquote" => crate::core::SyntaxOrigin::Quasiquote,
+                        "unquote" => crate::core::SyntaxOrigin::Unquote,
+                        "unquote-splicing" => crate::core::SyntaxOrigin::UnquoteSplicing,
+                        _ => crate::core::SyntaxOrigin::Explicit,
+                    };
+                    pair.set_syntax_origin(origin);
+                }
                 memo.insert(value, output.clone());
                 Ok(output)
             }
@@ -9362,6 +9422,14 @@ impl UnifiedVm {
                 }));
                 memo.insert(value, output.clone());
                 Ok(output)
+            }
+            GcObject::RawDisplay(text) if text.starts_with("#_") => {
+                Ok(Value::RootMeta(Rc::new(text[2..].to_string())))
+            }
+            GcObject::Builtin(_) => {
+                let marker = Rc::new(format!("dynamic-builtin-{}", literals.len()));
+                literals.push((marker.clone(), value));
+                Ok(Value::RootMeta(marker))
             }
             _ => self.export_syntax(value, memo),
         }
@@ -9441,6 +9509,12 @@ impl UnifiedVm {
             GcObject::Text(text) => Value::string(text),
             GcObject::ByteVector(values) => {
                 Value::ByteVector(Rc::new(std::cell::RefCell::new(values.clone())))
+            }
+            GcObject::Syntax(kind, value) if kind.as_ref() == "\0root-meta" => {
+                let GcObject::Symbol(name) = self.heap.object(*value)? else {
+                    return Err(VmError::WrongType);
+                };
+                Value::RootMeta(Rc::new(name.to_string()))
             }
             GcObject::Syntax(kind, value) => {
                 let value = self.export_syntax(*value, memo)?;
@@ -11179,12 +11253,17 @@ impl UnifiedVm {
         let object = self.heap.object(value)?.clone();
         match object {
             GcObject::Pair { car, cdr } => {
+                let root_meta_car = self.root_meta_cars.contains(&value);
                 let car = self.copy_value(car)?;
                 let cdr = self.copy_value(cdr)?;
                 let roots = self.active_roots_with(&[car, cdr]);
-                Ok(self
+                let copy = self
                     .heap
-                    .allocate_with_roots(GcObject::Pair { car, cdr }, &roots)?)
+                    .allocate_with_roots(GcObject::Pair { car, cdr }, &roots)?;
+                if root_meta_car {
+                    self.root_meta_cars.insert(copy);
+                }
+                Ok(copy)
             }
             GcObject::MultiVector { dims, values, kind } => {
                 let roots = self.active_roots_with(&values);
@@ -15108,8 +15187,8 @@ impl UnifiedVm {
                         GcObject::ByteVector(_) => "byte-vector?",
                         GcObject::HashTable(_) => "hash-table",
                         GcObject::Environment(_) | GcObject::LexicalFrame(_) => "let?",
-                        GcObject::Closure { .. } | GcObject::Builtin(_) | GcObject::HostProcedure(_) => "procedure",
-                        GcObject::Macro(..) => "macro",
+                        GcObject::Closure { .. } | GcObject::Builtin(_) | GcObject::HostProcedure(_) => "procedure?",
+                        GcObject::Macro(..) => "macro?",
                         _ => "object",
                     }
                 };
@@ -17969,6 +18048,8 @@ impl UnifiedVm {
                 }
                 let code = match self.heap.object(arguments[0]) {
                     Ok(GcObject::HashTable(entries)) => entries.len() as i64,
+                    Ok(GcObject::Builtin(BuiltinId::ListValues)) => 48,
+                    Ok(GcObject::Builtin(BuiltinId::ApplyValues)) => 47,
                     Ok(GcObject::BignumLiteral(_)) => 4,
                     Ok(GcObject::Text(text)) => text.len() as i64,
                     Ok(GcObject::Float(value))
@@ -22125,6 +22206,18 @@ impl UnifiedCompiler {
         let Some(operator) = fields.first() else {
             return Err(CompileError::Syntax);
         };
+        if matches!(operator, Value::RootMeta(marker) if self.dynamic_literals.contains_key(&Rc::as_ptr(marker))) {
+            self.compile_expression(function, operator, false)?;
+            for argument in &fields[1..] {
+                self.compile_expression(function, argument, false)?;
+            }
+            function.code.push(if tail {
+                UnifiedInstruction::TailCall((fields.len() - 1) as u16)
+            } else {
+                UnifiedInstruction::Call((fields.len() - 1) as u16)
+            });
+            return Ok(());
+        }
         if let Some(name) = self.authenticated_internal_form(operator) {
             match name {
                 "#_let-temporarily-set" => return self.compile_temporary_set(function, &fields),
@@ -23403,91 +23496,125 @@ impl UnifiedCompiler {
         function: &mut FunctionBuilder,
         value: &Value,
     ) -> Result<(), CompileError> {
-        let fields = proper_list(value)?;
-        if fields.len() == 2
-            && matches!(fields.first(), Some(Value::RootMeta(name)) if name.as_str() == "unquote")
-        {
-            return self.compile_quote(function, &fields[1]);
-        }
-        self.compile_quote(function, &Value::symbol("list-values"))?;
-        for field in &fields {
-            let mut handled = false;
-            if let Value::Pair(field_pair) = field {
-                let parts = proper_list(field)?;
-                if parts.len() == 2
-                    && matches!(parts.first(),Some(Value::RootMeta(name)) if name.as_str()=="unquote")
-                {
-                    let argument = &parts[1];
-                    if let Value::Pair(pair) = argument {
-                        if matches!(pair.syntax_origin(), crate::core::SyntaxOrigin::Unquote | crate::core::SyntaxOrigin::UnquoteSplicing) {
-                            let nested = proper_list(argument)?;
-                            if nested.len() == 2 {
-                                if pair.syntax_origin() == crate::core::SyntaxOrigin::UnquoteSplicing {
-                                    let application = list_from_values(&[Value::symbol("apply-values"), nested[1].clone()]);
-                                    self.compile_expression(function, &application, false)?;
-                                } else {
-                                    self.compile_expression(function, &nested[1], false)?;
-                                }
-                                handled = true;
-                            }
-                        } else if pair.syntax_origin() == crate::core::SyntaxOrigin::Quote {
-                            let quoted = argument
-                                .cdr()
-                                .map_err(|_| CompileError::Syntax)?
-                                .car()
-                                .map_err(|_| CompileError::Syntax)?;
-                            if let Value::Pair(inner) = &quoted {
-                                if inner.syntax_origin() == crate::core::SyntaxOrigin::Unquote {
-                                    let expression = quoted
-                                        .cdr()
-                                        .map_err(|_| CompileError::Syntax)?
-                                        .car()
-                                        .map_err(|_| CompileError::Syntax)?;
-                                    self.compile_expression(function, &expression, false)?;
-                                    function
-                                        .code
-                                        .push(UnifiedInstruction::WrapSyntax(Arc::from("quote")));
-                                    handled = true
-                                }
-                            }
-                        }
-                    }
-                    if !handled {
-                        self.compile_quote(function, argument)?;
-                        handled = true
-                    }
-                } else if parts.len() == 2
-                    && field_pair.syntax_origin() == crate::core::SyntaxOrigin::UnquoteSplicing
-                {
-                    let application = list_from_values(&[Value::symbol("apply-values"), parts[1].clone()]);
-                    self.compile_quote(function, &application)?;
-                    handled = true;
+        let representation = nested_quasiquote_representation(value)?;
+        let shadowed = ["list-values", "apply-values", "vector", "<list*>"]
+            .into_iter()
+            .filter(|name| Self::resolve(function, name).is_some())
+            .collect::<HashSet<_>>();
+        let representation =
+            protect_nested_quasiquote_operators(&representation, &shadowed, true)?;
+        self.compile_dynamic_datum(function, &representation)
+    }
+
+    fn compile_dynamic_datum(
+        &mut self,
+        function: &mut FunctionBuilder,
+        value: &Value,
+    ) -> Result<(), CompileError> {
+        self.compile_dynamic_datum_inner(function, value, &mut HashSet::new())
+    }
+
+    fn compile_dynamic_datum_inner(
+        &mut self,
+        function: &mut FunctionBuilder,
+        value: &Value,
+        active: &mut HashSet<usize>,
+    ) -> Result<(), CompileError> {
+        match value {
+            Value::Pair(pair) => {
+                if let Some(expression) = nested_quasiquote_evaluated_expression(value) {
+                    return self.compile_expression(function, &expression, false);
                 }
-            }
-            if !handled {
-                self.compile_quote(function, field)?;
-                if !matches!(
-                    field,
-                    Value::Int(_)
-                        | Value::Float(_)
-                        | Value::RationalValue(_)
-                        | Value::ComplexValue(_)
-                        | Value::NumberLiteral(..)
-                        | Value::Bool(_)
-                        | Value::Char(_)
-                        | Value::String(_)
-                ) {
+                let identity = pair.as_ptr() as usize;
+                if !active.insert(identity) {
+                    return Err(CompileError::Syntax);
+                }
+                let origin = pair.syntax_origin();
+                if origin != crate::core::SyntaxOrigin::Explicit {
+                    let argument = value
+                        .cdr()
+                        .map_err(|_| CompileError::Syntax)?
+                        .car()
+                        .map_err(|_| CompileError::Syntax)?;
+                    if origin == crate::core::SyntaxOrigin::Quote
+                        && !nested_quasiquote_contains_root_meta(&argument)
+                    {
+                        self.compile_quote(function, &argument)?;
+                    } else {
+                        self.compile_dynamic_datum_inner(function, &argument, active)?;
+                    }
+                    let kind = match origin {
+                        crate::core::SyntaxOrigin::Quote => "quote",
+                        crate::core::SyntaxOrigin::Quasiquote => "quasiquote",
+                        crate::core::SyntaxOrigin::Unquote => "unquote",
+                        crate::core::SyntaxOrigin::UnquoteSplicing => "unquote-splicing",
+                        crate::core::SyntaxOrigin::Explicit => unreachable!(),
+                    };
                     function
                         .code
-                        .push(UnifiedInstruction::WrapSyntax(Arc::from("quote")));
+                        .push(UnifiedInstruction::WrapSyntax(Arc::from(kind)));
+                } else {
+                    let car = value.car().map_err(|_| CompileError::Syntax)?;
+                    let cdr = value.cdr().map_err(|_| CompileError::Syntax)?;
+                    let root_meta_car = matches!(car, Value::RootMeta(_));
+                    self.compile_dynamic_datum_inner(function, &car, active)?;
+                    self.compile_dynamic_datum_inner(function, &cdr, active)?;
+                    function
+                        .code
+                        .push(UnifiedInstruction::Builtin(BuiltinId::Cons, 2));
+                    if root_meta_car {
+                        function.code.push(UnifiedInstruction::MarkRootMetaCar);
+                    }
                 }
+                active.remove(&identity);
+                Ok(())
             }
+            Value::Vector(values) => {
+                let identity = Rc::as_ptr(values) as usize;
+                if !active.insert(identity) {
+                    return Err(CompileError::Syntax);
+                }
+                let values = values.values();
+                for field in &values {
+                    self.compile_dynamic_datum_inner(function, field, active)?;
+                }
+                function
+                    .code
+                    .push(UnifiedInstruction::BuildVector(values.len() as u16));
+                active.remove(&identity);
+                Ok(())
+            }
+            Value::RootMeta(name) => {
+                if let Some(id) = builtin(name) {
+                    function.code.push(UnifiedInstruction::PushBuiltin(
+                        id,
+                        Arc::from(name.as_str()),
+                    ));
+                } else {
+                    self.emit_constant(
+                        function,
+                        FrozenConstant::RawDisplay(Arc::from(format!("#_{name}"))),
+                    );
+                }
+                Ok(())
+            }
+            Value::RawDisplay(marker)
+                if marker.starts_with(NESTED_QUASIQUOTE_HIDDEN_ROOT_PREFIX) =>
+            {
+                let name = &marker[NESTED_QUASIQUOTE_HIDDEN_ROOT_PREFIX.len()..];
+                if let Some(id) = builtin(name) {
+                    function.code.push(UnifiedInstruction::PushBuiltin(
+                        id,
+                        Arc::from(name),
+                    ));
+                } else {
+                    self.emit_constant(function, FrozenConstant::Symbol(Arc::from(name)));
+                    function.code.push(UnifiedInstruction::WrapHiddenRootMeta);
+                }
+                Ok(())
+            }
+            _ => self.compile_quote(function, value),
         }
-        function.code.push(UnifiedInstruction::Builtin(
-            BuiltinId::List,
-            (fields.len() + 1) as u16,
-        ));
-        Ok(())
     }
 
     fn compile_quasiquote(
@@ -23537,8 +23664,27 @@ impl UnifiedCompiler {
         if !matches!(value, Value::Pair(_)) {
             return self.compile_quote(function, value);
         }
+        if let Value::Pair(pair) = value {
+            if pair.syntax_origin() == crate::core::SyntaxOrigin::Quote {
+                let syntax = proper_list(value)?;
+                if syntax.len() != 2 {
+                    return Err(CompileError::Syntax);
+                }
+                self.compile_quasiquote(function, &syntax[1], depth)?;
+                function
+                    .code
+                    .push(UnifiedInstruction::WrapSyntax(Arc::from("quote")));
+                return Ok(());
+            }
+        }
         if let Ok(syntax) = proper_list(value) {
             if let Some(name) = syntax.first().and_then(source_name) {
+                if name == "quote"
+                    && syntax.len() == 2
+                    && matches!(value, Value::Pair(pair) if pair.syntax_origin() == crate::core::SyntaxOrigin::Explicit)
+                {
+                    return self.compile_quote(function, value);
+                }
                 if name == "unquote" && syntax.len() == 2 {
                     if depth == 1 {
                         return self.compile_expression(function, &syntax[1], false);
@@ -24859,7 +25005,11 @@ impl UnifiedCompiler {
     ) -> Result<(), CompileError> {
         if let Value::RootMeta(marker) = value {
             if let Some(index) = self.dynamic_literals.get(&Rc::as_ptr(marker)).copied() {
-                function.code.push(UnifiedInstruction::DynamicQuotedLiteral(index));
+                function.code.push(if marker.starts_with("dynamic-builtin-") {
+                    UnifiedInstruction::DynamicLiteral(index)
+                } else {
+                    UnifiedInstruction::DynamicQuotedLiteral(index)
+                });
                 return Ok(());
             }
         }
@@ -25113,13 +25263,17 @@ impl UnifiedCompiler {
 fn quasiquote_parts(value: &Value) -> Result<(Vec<Value>, Option<Value>), CompileError> {
     let mut fields = Vec::new();
     let mut cursor = value.clone();
+    let mut seen = HashSet::new();
     loop {
         match cursor {
             Value::Nil => return Ok((fields, None)),
             Value::Pair(ref pair) if pair.syntax_origin() == crate::core::SyntaxOrigin::Unquote => {
                 return Ok((fields, Some(cursor)))
             }
-            Value::Pair(_) => {
+            Value::Pair(ref pair) => {
+                if !seen.insert(pair.as_ptr() as usize) {
+                    return Err(CompileError::Syntax);
+                }
                 fields.push(cursor.car().map_err(|_| CompileError::Syntax)?);
                 cursor = cursor.cdr().map_err(|_| CompileError::Syntax)?
             }
@@ -25138,7 +25292,12 @@ fn expand_nested_quasiquotes(value: &Value) -> Result<Value, CompileError> {
             .map_err(|_| CompileError::Syntax)?
             .car()
             .map_err(|_| CompileError::Syntax)?;
-        return nested_quasiquote_representation(&inner);
+        let representation = nested_quasiquote_representation(&inner)?;
+        return protect_nested_quasiquote_operators(
+            &representation,
+            &HashSet::new(),
+            false,
+        );
     }
     let car = expand_nested_quasiquotes(&value.car().map_err(|_| CompileError::Syntax)?)?;
     let cdr = expand_nested_quasiquotes(&value.cdr().map_err(|_| CompileError::Syntax)?)?;
@@ -25150,54 +25309,366 @@ fn expand_nested_quasiquotes(value: &Value) -> Result<Value, CompileError> {
 }
 
 fn nested_quasiquote_representation(value: &Value) -> Result<Value, CompileError> {
-    let fields = proper_list(value)?;
-    let mut result = vec![Value::symbol("list-values")];
-    for field in fields {
-        if let Value::Pair(field_pair) = &field {
-            let parts = proper_list(&field)?;
-            if field_pair.syntax_origin() == crate::core::SyntaxOrigin::UnquoteSplicing
-                && parts.len() == 2
+    nested_quasiquote_sequence(value)
+}
+
+fn nested_quasiquote_contains_root_meta(value: &Value) -> bool {
+    fn visit(value: &Value, seen: &mut HashSet<usize>) -> bool {
+        match value {
+            Value::RootMeta(_) => true,
+            Value::RawDisplay(marker)
+                if marker.starts_with(NESTED_QUASIQUOTE_HIDDEN_ROOT_PREFIX) =>
             {
-                result.push(list_from_values(&[Value::symbol("apply-values"), parts[1].clone()]));
-                continue;
+                true
             }
-            if parts.len() == 2
-                && matches!(parts.first(),Some(Value::RootMeta(name)) if name.as_str()=="unquote")
-            {
-                if let Value::Pair(inner) = &parts[1] {
-                    let inner_parts = proper_list(&parts[1])?;
-                    if inner.syntax_origin() == crate::core::SyntaxOrigin::UnquoteSplicing
-                        && inner_parts.len() == 2
-                    {
-                        result.push(list_from_values(&[Value::symbol("apply-values"), inner_parts[1].clone()]));
-                        continue;
-                    }
+            Value::Pair(pair) => {
+                if !seen.insert(pair.as_ptr() as usize) {
+                    return false;
                 }
-                result.push(parts[1].clone());
-                continue;
+                let data = pair.borrow();
+                visit(&data.car, seen) || visit(&data.cdr, seen)
             }
-        }
-        if matches!(
-            field,
-            Value::Int(_)
-                | Value::Float(_)
-                | Value::RationalValue(_)
-                | Value::ComplexValue(_)
-                | Value::NumberLiteral(..)
-                | Value::Bool(_)
-                | Value::Char(_)
-                | Value::String(_)
-        ) {
-            result.push(field);
-        } else {
-            let quoted = list_from_values(&[Value::symbol("quote"), field]);
-            if let Value::Pair(pair) = &quoted {
-                pair.set_syntax_origin(crate::core::SyntaxOrigin::Quote);
+            Value::Vector(values) => {
+                if !seen.insert(Rc::as_ptr(values) as usize) {
+                    return false;
+                }
+                values.values().iter().any(|field| visit(field, seen))
             }
-            result.push(quoted);
+            _ => false,
         }
     }
-    Ok(list_from_values(&result))
+    visit(value, &mut HashSet::new())
+}
+
+const NESTED_QUASIQUOTE_OPERATOR_PREFIX: &str = "\0nested-quasiquote-operator:";
+const NESTED_QUASIQUOTE_HIDDEN_ROOT_PREFIX: &str = "\0nested-quasiquote-hidden-root:";
+const NESTED_QUASIQUOTE_EVALUATE: &str = "\0nested-quasiquote-evaluate";
+
+fn nested_quasiquote_evaluate(expression: Value) -> Value {
+    list_from_values(&[
+        Value::RawDisplay(Rc::new(NESTED_QUASIQUOTE_EVALUATE.to_string())),
+        expression,
+    ])
+}
+
+fn nested_quasiquote_evaluated_expression(value: &Value) -> Option<Value> {
+    let fields = proper_list(value).ok()?;
+    (fields.len() == 2
+        && matches!(&fields[0], Value::RawDisplay(marker) if marker.as_str() == NESTED_QUASIQUOTE_EVALUATE))
+    .then(|| fields[1].clone())
+}
+
+fn nested_quasiquote_operator(name: &str) -> Value {
+    Value::RawDisplay(Rc::new(format!(
+        "{NESTED_QUASIQUOTE_OPERATOR_PREFIX}{name}"
+    )))
+}
+
+fn protect_nested_quasiquote_operators(
+    value: &Value,
+    shadowed: &HashSet<&str>,
+    preserve_root_provenance: bool,
+) -> Result<Value, CompileError> {
+    protect_nested_quasiquote_operators_inner(
+        value,
+        shadowed,
+        preserve_root_provenance,
+        &mut HashMap::new(),
+    )
+}
+
+fn protect_nested_quasiquote_operators_inner(
+    value: &Value,
+    shadowed: &HashSet<&str>,
+    preserve_root_provenance: bool,
+    memo: &mut HashMap<usize, Value>,
+) -> Result<Value, CompileError> {
+    match value {
+        Value::RawDisplay(marker) => Ok(marker
+            .strip_prefix(NESTED_QUASIQUOTE_OPERATOR_PREFIX)
+            .map(|name| {
+                if shadowed.contains(name) {
+                    Value::RootMeta(Rc::new(name.to_string()))
+                } else if preserve_root_provenance {
+                    Value::RawDisplay(Rc::new(format!(
+                        "{NESTED_QUASIQUOTE_HIDDEN_ROOT_PREFIX}{name}"
+                    )))
+                } else {
+                    Value::symbol(name)
+                }
+            })
+            .unwrap_or_else(|| value.clone())),
+        Value::Pair(pair) => {
+            let identity = pair.as_ptr() as usize;
+            if let Some(existing) = memo.get(&identity) {
+                return Ok(existing.clone());
+            }
+            let output = Value::cons(Value::Unspecified, Value::Unspecified);
+            memo.insert(identity, output.clone());
+            let origin = pair.syntax_origin();
+            let data = pair.borrow();
+            let car = data.car.clone();
+            let cdr = data.cdr.clone();
+            drop(data);
+            let car = protect_nested_quasiquote_operators_inner(
+                &car,
+                shadowed,
+                preserve_root_provenance,
+                memo,
+            )?;
+            let cdr = protect_nested_quasiquote_operators_inner(
+                &cdr,
+                shadowed,
+                preserve_root_provenance,
+                memo,
+            )?;
+            output.set_car(car).map_err(|_| CompileError::Syntax)?;
+            output.set_cdr(cdr).map_err(|_| CompileError::Syntax)?;
+            let Value::Pair(output_pair) = &output else {
+                unreachable!()
+            };
+            output_pair.set_syntax_origin(origin);
+            Ok(output)
+        }
+        Value::Vector(values) => {
+            let identity = Rc::as_ptr(values) as usize;
+            if let Some(existing) = memo.get(&identity) {
+                return Ok(existing.clone());
+            }
+            let source = values.values();
+            let output = Value::Vector(Rc::new(crate::core::VectorData::new(vec![
+                Value::Unspecified;
+                source.len()
+            ])));
+            memo.insert(identity, output.clone());
+            let Value::Vector(output_values) = &output else {
+                unreachable!()
+            };
+            for (index, field) in source.iter().enumerate() {
+                output_values.set(
+                    index,
+                    protect_nested_quasiquote_operators_inner(
+                        field,
+                        shadowed,
+                        preserve_root_provenance,
+                        memo,
+                    )?,
+                );
+            }
+            Ok(output)
+        }
+        _ => Ok(value.clone()),
+    }
+}
+
+fn nested_quasiquote_sequence(value: &Value) -> Result<Value, CompileError> {
+    match value {
+        Value::Vector(values) => {
+            let mut transformed = Vec::new();
+            for field in values.values() {
+                if let Some((splicing, expression)) = nested_quasiquote_escape(&field)? {
+                    if splicing {
+                        let application = list_from_values(&[
+                            nested_quasiquote_operator("apply-values"),
+                            expression,
+                        ]);
+                        let wrapped = list_from_values(&[
+                            Value::symbol("unquote"),
+                            application,
+                        ]);
+                        if let Value::Pair(pair) = &wrapped {
+                            pair.set_syntax_origin(crate::core::SyntaxOrigin::Unquote);
+                        }
+                        transformed.push(wrapped);
+                    } else {
+                        transformed.push(field);
+                    }
+                } else {
+                    transformed.push(field);
+                }
+            }
+            Ok(Value::Vector(Rc::new(crate::core::VectorData::new(
+                transformed,
+            ))))
+        }
+        Value::Pair(_) => {
+            let (fields, tail) = quasiquote_parts(value)?;
+            if let Some(tail) = tail {
+                let mut prefix = vec![nested_quasiquote_operator("list-values")];
+                for field in fields {
+                    prefix.push(nested_quasiquote_field(&field)?);
+                }
+                Ok(list_from_values(&[
+                    nested_quasiquote_operator("<list*>"),
+                    list_from_values(&prefix),
+                    nested_quasiquote_field(&tail)?,
+                ]))
+            } else {
+                let mut result = vec![nested_quasiquote_operator("list-values")];
+                for field in fields {
+                    result.push(nested_quasiquote_field(&field)?);
+                }
+                Ok(list_from_values(&result))
+            }
+        }
+        _ => nested_quasiquote_literal(value),
+    }
+}
+
+fn nested_quasiquote_field(value: &Value) -> Result<Value, CompileError> {
+    if let Value::Pair(pair) = value {
+        if pair.syntax_origin() == crate::core::SyntaxOrigin::Quasiquote {
+            let parts = proper_list(value)?;
+            if parts.len() != 2 {
+                return Err(CompileError::Syntax);
+            }
+            let inner = nested_quasiquote_sequence(&parts[1])?;
+            let fields = proper_list(&inner)?;
+            let mut promoted = vec![nested_quasiquote_operator("list-values")];
+            for (index, field) in fields.into_iter().enumerate() {
+                if index == 0
+                    && matches!(&field, Value::RawDisplay(marker) if marker.starts_with(NESTED_QUASIQUOTE_OPERATOR_PREFIX))
+                {
+                    promoted.push(field);
+                } else if matches!(&field, Value::Pair(inner) if inner.syntax_origin() == crate::core::SyntaxOrigin::Quote)
+                {
+                    promoted.push(nested_quasiquote_literal(&field)?);
+                } else if let Some(expression) = nested_quasiquote_evaluated_expression(&field) {
+                    promoted.push(expression);
+                } else if let Some((splicing, expression)) = nested_quasiquote_escape(&field)? {
+                    promoted.push(if splicing {
+                        list_from_values(&[
+                            nested_quasiquote_operator("apply-values"),
+                            expression,
+                        ])
+                    } else {
+                        expression
+                    });
+                } else {
+                    promoted.push(field);
+                }
+            }
+            return Ok(list_from_values(&promoted));
+        }
+    }
+    if let Some((splicing, expression)) = nested_quasiquote_escape(value)? {
+        if let Some((inner_splicing, inner_expression)) = nested_quasiquote_escape(&expression)? {
+            return if inner_splicing {
+                Ok(nested_quasiquote_evaluate(list_from_values(&[
+                    nested_quasiquote_operator("apply-values"),
+                    inner_expression,
+                ])))
+            } else {
+                Ok(nested_quasiquote_evaluate(inner_expression))
+            };
+        }
+        return if splicing {
+            Ok(list_from_values(&[
+                nested_quasiquote_operator("apply-values"),
+                expression,
+            ]))
+        } else {
+            Ok(expression)
+        };
+    }
+    if nested_quasiquote_contains_escape(value)? {
+        return nested_quasiquote_sequence(value);
+    }
+    nested_quasiquote_literal(value)
+}
+
+fn nested_quasiquote_escape(value: &Value) -> Result<Option<(bool, Value)>, CompileError> {
+    let Value::Pair(pair) = value else {
+        return Ok(None);
+    };
+    let Ok(parts) = proper_list(value) else {
+        return Ok(None);
+    };
+    if parts.len() != 2 {
+        return Ok(None);
+    }
+    let origin = pair.syntax_origin();
+    let name = parts.first().and_then(source_name);
+    let splicing = origin == crate::core::SyntaxOrigin::UnquoteSplicing
+        || name == Some("unquote-splicing");
+    let unquote = origin == crate::core::SyntaxOrigin::Unquote || name == Some("unquote");
+    Ok((splicing || unquote).then(|| (splicing, parts[1].clone())))
+}
+
+fn nested_quasiquote_contains_escape(value: &Value) -> Result<bool, CompileError> {
+    nested_quasiquote_contains_escape_inner(value, &mut HashSet::new())
+}
+
+fn nested_quasiquote_contains_escape_inner(
+    value: &Value,
+    seen: &mut HashSet<usize>,
+) -> Result<bool, CompileError> {
+    if nested_quasiquote_escape(value)?.is_some() {
+        return Ok(true);
+    }
+    match value {
+        Value::Vector(values) => {
+            if !seen.insert(Rc::as_ptr(values) as usize) {
+                return Ok(false);
+            }
+            for field in values.values() {
+                if nested_quasiquote_contains_escape_inner(&field, seen)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        Value::Pair(pair)
+            if pair.syntax_origin() == crate::core::SyntaxOrigin::Quasiquote =>
+        {
+            Ok(false)
+        }
+        Value::Pair(_) => {
+            let mut cursor = value.clone();
+            loop {
+                match cursor {
+                    Value::Nil => return Ok(false),
+                    Value::Pair(pair) => {
+                        if !seen.insert(pair.as_ptr() as usize) {
+                            return Ok(false);
+                        }
+                        let data = pair.borrow();
+                        let car = data.car.clone();
+                        let cdr = data.cdr.clone();
+                        drop(data);
+                        if nested_quasiquote_contains_escape_inner(&car, seen)? {
+                            return Ok(true);
+                        }
+                        cursor = cdr;
+                    }
+                    tail => return nested_quasiquote_contains_escape_inner(&tail, seen),
+                }
+            }
+        }
+        _ => Ok(false),
+    }
+}
+
+fn nested_quasiquote_literal(value: &Value) -> Result<Value, CompileError> {
+    if matches!(
+        value,
+        Value::Nil
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::RationalValue(_)
+            | Value::ComplexValue(_)
+            | Value::NumberLiteral(..)
+            | Value::Bool(_)
+            | Value::Char(_)
+            | Value::String(_)
+    ) {
+        return Ok(value.clone());
+    }
+    let quoted = list_from_values(&[Value::symbol("quote"), value.clone()]);
+    if let Value::Pair(pair) = &quoted {
+        pair.set_syntax_origin(crate::core::SyntaxOrigin::Quote);
+    }
+    Ok(quoted)
 }
 
 fn cyclic_list_cars(value: &Value) -> Option<Vec<Value>> {
@@ -27356,6 +27827,106 @@ mod tests {
         assert_eq!(
             run_source_output("`#(1 ,@(list 2 3) 4)").unwrap(),
             "#(1 ,(apply-values (list 2 3)) 4)"
+        );
+    }
+
+    #[test]
+    fn nested_quasiquote_runtime_provenance_matches_s7() {
+        assert_eq!(
+            run_source_output("(let ((f `(lambda (x) `(a ,x)))) ((eval f) 1))").unwrap(),
+            "(a 1)"
+        );
+        assert_eq!(
+            run_source_output("(let ((f `(lambda (x xs) `(a ,x ,@xs)))) ((eval f) 1 '(2 3)))").unwrap(),
+            "(a 1 2 3)"
+        );
+        assert_eq!(
+            run_source_output("(object->string `(lambda (x xs) `(a ,x ,@xs)))").unwrap(),
+            "\"(lambda (x xs) (list-values 'a x (apply-values xs)))\""
+        );
+        assert_eq!(
+            run_source_output("(let ((type 'division-by-zero)) (list `(error ',type) (object->string `(error ',type))))").unwrap(),
+            "((error 'division-by-zero) \"(error 'division-by-zero)\")"
+        );
+        assert_eq!(
+            run_source_output("(let ((x 'tag)) (list `(,(quote x)) `(,'x) `(,(list 'quote x))))").unwrap(),
+            "((x) (x) ((quote tag)))"
+        );
+        assert_eq!(
+            run_source_output("(let ((f `(lambda (x xs) `#(a ,x ,@xs)))) (list (object->string f) ((eval f) 1 '(2 3))))").unwrap(),
+            "(\"(lambda (x xs) #(a ,x ,(apply-values xs)))\" #(a ,x ,(apply-values xs)))"
+        );
+        assert_eq!(
+            run_source_output("(let* ((p (list 1)) (f (eval `(lambda (x) `(a ,x)))) (r (f p))) (set-car! p 9) (list (eq? p (cadr r)) r))").unwrap(),
+            "(#t (a (9)))"
+        );
+        assert_eq!(
+            run_source_output("(let ((f (eval `(lambda (x) `(a ,@x))))) (f 1))").unwrap_or_else(|error| error),
+            "(error (wrong-type-arg (\"apply's last argument should be a proper list: ~S\" (1))))"
+        );
+        assert_eq!(
+            run_source_output("(object->string `(lambda (x) `(outer `(inner ,,x))))").unwrap(),
+            "\"(lambda (x) (list-values 'outer (list-values list-values ''inner x)))\""
+        );
+        assert_eq!(
+            run_source_output("(object->string `(lambda (*sync-state* query) (let ((x query) (xs '(a b))) `(,x ,@xs))))").unwrap(),
+            "\"(lambda (*sync-state* query) (let ((x query) (xs '(a b))) (list-values x (apply-values xs))))\""
+        );
+        assert_eq!(
+            run_source_output("(let ((x 'outer-x) (xs '(outer-xs))) (object->string `(lambda (x xs) `(a ,x ,@xs))))").unwrap(),
+            "\"(lambda (x xs) (list-values 'a x (apply-values xs)))\""
+        );
+        assert_eq!(
+            run_source_output("(let ((list-values (lambda args 'shadowed)) (apply-values (lambda args 'shadowed))) (object->string `(lambda (x xs) `(a ,x ,@xs))))").unwrap(),
+            "\"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\""
+        );
+        assert_eq!(
+            run_source_output("(begin (define calls 0) (define list-values (lambda args (set! calls (+ calls 1)) 'shadowed)) (define apply-values (lambda args (set! calls (+ calls 1)) 'shadowed)) (let ((f (eval `(lambda (x xs) `(a ,x ,@xs))))) (list (f 1 '(2 3)) calls)))").unwrap(),
+            "((a 1 2 3) 0)"
+        );
+        assert_eq!(
+            run_source_output("(let ((f `(lambda (list-values apply-values x xs) `(a ,x ,@xs)))) (list (object->string f) ((eval f) (lambda args 'shadowed) (lambda args 'shadowed) 1 '(2 3))))").unwrap(),
+            "(\"(lambda (list-values apply-values x xs) (list-values 'a x (apply-values xs)))\" (a 1 2 3))"
+        );
+        assert_eq!(
+            run_source_output("(let ((f `(lambda (x xs) `(a ,x ,@xs)))) (let ((op (car (caddr f)))) (list (procedure? op) (symbol? op) (syntax? op) (type-of op) (eq? op ((rootlet) 'list-values)) (equal? op ((rootlet) 'list-values)) (hash-code op) (eq? op (copy op)))))").unwrap(),
+            "(#t #f #f procedure? #t #t 48 #t)"
+        );
+        assert_eq!(
+            run_source_output("(let ((list-values (lambda args 'shadowed)) (apply-values (lambda args 'shadowed))) (let* ((f `(lambda (x xs) `(a ,x ,@xs))) (op (car (caddr f)))) (list (object->string f) (procedure? op) (symbol? op) (syntax? op) (type-of op) (eq? op ((rootlet) 'list-values)) (equal? op ((rootlet) 'list-values)) (hash-code op) (eq? op (copy op)))))").unwrap(),
+            "(\"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" #t #f #f procedure? #t #t 48 #t)"
+        );
+        assert_eq!(
+            run_source_output("(let* ((f `(lambda (x) `((a ,x) (b ,x)))) (body (caddr f)) (outer (car body)) (inner1 (car (cadr body))) (inner2 (car (caddr body)))) (list (object->string f) (eq? outer inner1) (eq? inner1 inner2) (procedure? outer)))").unwrap(),
+            "(\"(lambda (x) (list-values (list-values 'a x) (list-values 'b x)))\" #t #t #t)"
+        );
+        assert_eq!(
+            run_source_output("(let ((list-values (lambda args 'shadowed)) (apply-values (lambda args 'shadowed))) (let* ((f `(lambda (x xs) `(a ,x ,@xs))) (p (caddr f)) (root ((rootlet) 'list-values))) (let ((a (object->string f))) (set-car! p root) (let ((b (object->string f))) (set-car! p 'other) (set-car! p root) (list a b (object->string f) (object->string (copy f)))))))").unwrap(),
+            "(\"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\" \"(lambda (x xs) (#_list-values 'a x (#_apply-values xs)))\")"
+        );
+        assert_eq!(
+            run_source_output("(let ((x 'z)) ``(a . ,,x))").unwrap(),
+            "(<list*> (list-values 'a) z)"
+        );
+        assert_eq!(
+            run_source_output("(let ((x 'z)) ``((,,x) . tail))").unwrap(),
+            "(<list*> (list-values (list-values z)) 'tail)"
+        );
+        assert_eq!(
+            run_source_output("(let ((tail 'z)) ``(a b . ,,tail))").unwrap(),
+            "(<list*> (list-values 'a 'b) z)"
+        );
+        assert_eq!(
+            run_source_output("(let ((x 'z)) `'(,x))").unwrap(),
+            "'(z)"
+        );
+        assert_eq!(
+            run_source_output("(let ((x 'z)) `(quote (unquote x)))").unwrap(),
+            "(quote (unquote x))"
+        );
+        assert_eq!(
+            run_source_output("(let ((n 0)) (list `(a ,(begin (set! n (+ n 1)) (values 1)) ,@(begin (set! n (+ n 1)) (list 2 3)) ,(begin (set! n (+ n 1)) 4)) n))").unwrap(),
+            "((a 1 2 3 4) 3)"
         );
     }
 
