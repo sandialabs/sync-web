@@ -824,6 +824,9 @@ fn evaluate_record_with(record: Word, query: &str, unified: bool) -> String {
 }
 
 #[cfg(test)]
+mod probes;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
