@@ -863,7 +863,7 @@ unsafe fn is_proper_assoc_list(sc: *mut s7_scheme, obj: s7_pointer) -> bool {
     }
 }
 
-static REMOVE: [&'static CStr; 83] = [
+pub(crate) static REMOVE: [&'static CStr; 83] = [
     c"*autoload*",
     c"*autoload-hook*",
     c"*cload-directory*",

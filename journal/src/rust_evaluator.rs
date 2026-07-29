@@ -7,11 +7,15 @@ use crate::{CallOnDrop, GENESIS_STR, JOURNAL, LOCK, NULL, RUNS, Word, warn_on_er
 use crystals_dilithium::dilithium2::*;
 use crystals_dilithium::sign::lvl2::*;
 use log::{debug, info};
+use rand::RngCore;
+use rand::rngs::OsRng;
 use s7_rust::{BorrowedValue, HostError, HostObject, HostOutput, PrimitiveSpec, RustHost};
 use sha2::{Digest, Sha256};
 use std::any::Any;
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -51,10 +55,13 @@ struct RustSession {
     record: Word,
     state: Word,
     persistor: MemoryPersistor,
+    cache: Arc<Mutex<HashMap<(String, String, Vec<u8>), Vec<u8>>>>,
     external_called: Rc<Cell<bool>>,
 }
 
 type SharedSession = Rc<RefCell<RustSession>>;
+
+const PRINT_INITIALIZATION: &str = "(varlet (rootlet) 'print (lambda args (let ((result (apply %print args))) (if (null? args) result (car (reverse args))))))";
 
 fn node(value: &BorrowedValue<'_>, name: &str, index: usize) -> Result<Word, HostError> {
     value
@@ -166,6 +173,35 @@ fn bytes_arg(value: &BorrowedValue<'_>, name: &str, index: usize) -> Result<Vec<
 
 fn register_core(host: &mut RustHost, session: SharedSession) {
     host.register_codecs();
+    host.register_indirect_primitive("sync-eval");
+    host.register_indirect_primitive("print");
+    host.register(PrimitiveSpec::fixed(
+        "random-byte-vector",
+        1,
+        |args, context| {
+            context.check_cancelled()?;
+            let length = args[0].as_i64().ok_or_else(|| {
+                HostError::wrong_type("random-byte-vector", 1, "a non-negative integer", &args[0])
+            })?;
+            let length = usize::try_from(length).map_err(|_| {
+                HostError::wrong_type("random-byte-vector", 1, "a non-negative integer", &args[0])
+            })?;
+            let mut bytes = vec![0; length];
+            OsRng.fill_bytes(&mut bytes);
+            context.check_cancelled()?;
+            Ok(HostOutput::ByteVector(bytes))
+        },
+    ));
+    host.register(PrimitiveSpec::new("%print", 0, None, |args, _| {
+        println!(
+            "{}",
+            args.iter()
+                .map(BorrowedValue::object_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        Ok(HostOutput::Unspecified)
+    }));
     host.register(PrimitiveSpec::new("stacktrace", 0, None, |_, _| {
         Ok(HostOutput::String("<unavailable>".to_string()))
     }));
@@ -325,6 +361,135 @@ fn register_core(host: &mut RustHost, session: SharedSession) {
         let _ = strict;
         Ok(HostOutput::Expression(source))
     }));
+
+    let http_session = session.clone();
+    host.register(PrimitiveSpec::new(
+        "sync-http",
+        2,
+        Some(4),
+        move |args, context| {
+            context.check_cancelled()?;
+            let (external_called, cache) = {
+                let session = http_session.borrow();
+                (session.external_called.clone(), session.cache.clone())
+            };
+            external_called.set(true);
+            let method_key = args[0].object_string();
+            let method = method_key.to_lowercase();
+            if !matches!(method.as_str(), "get" | "post") {
+                return Err(HostError::new(
+                    "sync-web-error",
+                    "Unsupported HTTP method (sync-http)",
+                ));
+            }
+            let url_key = args[1].object_string();
+            let url = args[1]
+                .as_string()
+                .ok_or_else(|| HostError::wrong_type("sync-http", 2, "a URL string", &args[1]))?;
+            let (body_key, body) = if let Some(body) = args.get(2) {
+                (
+                    body.object_string().into_bytes(),
+                    body.as_string()
+                        .ok_or_else(|| HostError::wrong_type("sync-http", 3, "a string", body))?,
+                )
+            } else {
+                (Vec::new(), String::new())
+            };
+            let key = (method_key, url_key, body_key);
+            let mut cache = cache.lock().map_err(|_| {
+                HostError::new("sync-web-error", "Journal HTTP cache lock is unavailable")
+            })?;
+            if let Some(bytes) = cache.get(&key) {
+                return Ok(HostOutput::ByteVector(bytes.clone()));
+            }
+            let request_url = url.clone();
+            let request_body = body.clone();
+            let result = tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(async move {
+                    match method.as_str() {
+                        "get" => JOURNAL.client.get(&request_url).send().await?.bytes().await,
+                        "post" => {
+                            JOURNAL
+                                .client
+                                .post(&request_url)
+                                .body(request_body)
+                                .send()
+                                .await?
+                                .bytes()
+                                .await
+                        }
+                        _ => unreachable!("HTTP method validated before request"),
+                    }
+                })
+            });
+            let bytes = result
+                .map_err(|_| {
+                    HostError::new(
+                        "sync-web-error",
+                        "Journal is unable to fulfill HTTP request (sync-http)",
+                    )
+                })?
+                .to_vec();
+            context.check_cancelled()?;
+            cache.insert(key, bytes.clone());
+            Ok(HostOutput::ByteVector(bytes))
+        },
+    ));
+
+    let remote_session = session.clone();
+    host.register(PrimitiveSpec::fixed(
+        "sync-remote",
+        2,
+        move |args, context| {
+            context.check_cancelled()?;
+            let (external_called, cache) = {
+                let session = remote_session.borrow();
+                (session.external_called.clone(), session.cache.clone())
+            };
+            external_called.set(true);
+            let url_key = args[0].object_string();
+            let url = args[0]
+                .as_string()
+                .ok_or_else(|| HostError::wrong_type("sync-remote", 1, "a URL string", &args[0]))?;
+            let body = args[1].object_string();
+            let key = ("post".to_string(), url_key, body.as_bytes().to_vec());
+            let mut cache = cache.lock().map_err(|_| {
+                HostError::new("sync-web-error", "Journal remote cache lock is unavailable")
+            })?;
+            let bytes = if let Some(bytes) = cache.get(&key) {
+                bytes.clone()
+            } else {
+                let request_url = url.clone();
+                let request_body = body.clone();
+                let bytes = tokio::task::block_in_place(move || {
+                    tokio::runtime::Handle::current().block_on(async move {
+                        JOURNAL
+                            .client
+                            .post(&request_url)
+                            .body(request_body)
+                            .send()
+                            .await?
+                            .bytes()
+                            .await
+                    })
+                })
+                .map_err(|_| {
+                    HostError::new(
+                        "sync-web-error",
+                        "Journal is unable to query remote peer (sync-remote)",
+                    )
+                })?
+                .to_vec();
+                context.check_cancelled()?;
+                cache.insert(key, bytes.clone());
+                bytes
+            };
+            let source = String::from_utf8(bytes).map_err(|_| {
+                HostError::new("encoding-error", "Remote response is not valid Scheme text")
+            })?;
+            Ok(HostOutput::Expression(format!("'{source}")))
+        },
+    ));
 
     host.register(PrimitiveSpec::fixed("sync-create", 1, |args, _| {
         let record = fixed_word(&args[0], "sync-create", 1)?;
@@ -517,6 +682,23 @@ fn parse_result(result: &str, state_old: Word) -> (String, Word) {
     }
 }
 
+fn unified_removed_bindings_source() -> String {
+    let mut seen = HashSet::new();
+    let mut source = String::from("(begin");
+    for name in crate::evaluator::REMOVE
+        .iter()
+        .filter_map(|name| name.to_str().ok())
+    {
+        if seen.insert(name) {
+            source.push_str(" (varlet (rootlet) '");
+            source.push_str(name);
+            source.push_str(" '*removed*)");
+        }
+    }
+    source.push(')');
+    source
+}
+
 pub(crate) fn evaluate_record(record: Word, query: &str) -> String {
     evaluate_record_with(record, query, false)
 }
@@ -527,6 +709,7 @@ pub(crate) fn evaluate_record_unified(record: Word, query: &str) -> String {
 
 fn evaluate_record_with(record: Word, query: &str, unified: bool) -> String {
     let mut runs = 0;
+    let cache = Arc::new(Mutex::new(HashMap::new()));
     debug!(
         "Evaluating with Rust evaluator ({})",
         query.chars().take(128).collect::<String>()
@@ -575,10 +758,20 @@ fn evaluate_record_with(record: Word, query: &str, unified: bool) -> String {
             record,
             state: state_old,
             persistor: persistor.clone(),
+            cache: cache.clone(),
             external_called: external_called.clone(),
         }));
         let mut host = RustHost::new();
         register_core(&mut host, session);
+        if let Some(missing) = host.missing_sync_web_primitives().first() {
+            return format!(
+                "(error 'configuration-error \"Missing Rust host primitive: {missing}\")"
+            );
+        }
+        if unified {
+            host.initialize_with(unified_removed_bindings_source());
+        }
+        host.initialize_with(PRINT_INITIALIZATION);
         host.initialize_with("(varlet (rootlet) 'sync-eval (lambda* (node (strict #t) :rest rest) (with-let (curlet) ((eval (%sync-loader node strict) (rootlet)) node))))");
         let expression = format!("({} (sync-state) (quote {}))", genesis_str, query);
         let result = if unified {
@@ -627,5 +820,53 @@ fn evaluate_record_with(record: Word, query: &str, unified: bool) -> String {
             runs,
             query.chars().take(128).collect::<String>()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unified_inventory_includes_indirect_sync_eval() {
+        let session = Rc::new(RefCell::new(RustSession {
+            record: NULL,
+            state: NULL,
+            persistor: MemoryPersistor::new(),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+            external_called: Rc::new(Cell::new(false)),
+        }));
+        let mut host = RustHost::new();
+        register_core(&mut host, session);
+        assert!(host.missing_sync_web_primitives().is_empty());
+        assert!(!host.registered_primitive_names().contains(&"sync-eval"));
+        assert!(!host.registered_primitive_names().contains(&"print"));
+        assert!(host.provided_primitive_names().contains(&"sync-eval"));
+        assert!(host.provided_primitive_names().contains(&"print"));
+        host.initialize_with(PRINT_INITIALIZATION);
+        assert_eq!(
+            host.evaluate("(let ((x (list 1))) (eq? x (print x)))")
+                .unwrap()
+                .to_string(),
+            "#t"
+        );
+        assert_eq!(
+            host.evaluate_unified_output("(let ((x (list 1))) (eq? x (print x)))"),
+            Ok("#t".into())
+        );
+    }
+
+    #[test]
+    fn unified_removed_bindings_are_exact_and_integration_only() {
+        let unique = crate::evaluator::REMOVE
+            .iter()
+            .filter_map(|name| name.to_str().ok())
+            .collect::<HashSet<_>>();
+        assert_eq!(unique.len(), 82);
+        let source = unified_removed_bindings_source();
+        assert_eq!(source.matches("(varlet (rootlet)").count(), unique.len());
+        for name in unique {
+            assert!(source.contains(&format!("'{name} '*removed*")));
+        }
     }
 }

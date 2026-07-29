@@ -329,6 +329,7 @@ pub const SYNC_WEB_HOST_PRIMITIVES: &[&str] = &[
 
 pub struct RustHost {
     primitives: Vec<PrimitiveSpec>,
+    indirect_primitives: Vec<&'static str>,
     initialization: Vec<String>,
     cancelled: Rc<Cell<bool>>,
     in_callback: Rc<Cell<bool>>,
@@ -342,6 +343,7 @@ impl RustHost {
     pub fn new() -> Self {
         Self {
             primitives: Vec::new(),
+            indirect_primitives: Vec::new(),
             initialization: Vec::new(),
             cancelled: Rc::new(Cell::new(false)),
             in_callback: Rc::new(Cell::new(false)),
@@ -411,11 +413,26 @@ impl RustHost {
     pub fn registered_primitive_names(&self) -> Vec<&'static str> {
         self.primitives.iter().map(|spec| spec.name).collect()
     }
+    /// Record a public primitive supplied by initialization code around a
+    /// private typed adapter rather than by a direct callback binding.
+    pub fn register_indirect_primitive(&mut self, name: &'static str) {
+        if !self.indirect_primitives.contains(&name) {
+            self.indirect_primitives.push(name);
+        }
+    }
+    pub fn provided_primitive_names(&self) -> Vec<&'static str> {
+        let mut names = self.registered_primitive_names();
+        names.extend(self.indirect_primitives.iter().copied());
+        names
+    }
     pub fn missing_sync_web_primitives(&self) -> Vec<&'static str> {
         SYNC_WEB_HOST_PRIMITIVES
             .iter()
             .copied()
-            .filter(|name| !self.primitives.iter().any(|spec| spec.name == *name))
+            .filter(|name| {
+                !self.primitives.iter().any(|spec| spec.name == *name)
+                    && !self.indirect_primitives.contains(name)
+            })
             .collect()
     }
     pub fn initialize_with(&mut self, source: impl Into<String>) {
@@ -630,6 +647,16 @@ mod tests {
             .copied()
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(unique.len(), SYNC_WEB_HOST_PRIMITIVES.len());
+    }
+
+    #[test]
+    fn indirect_primitives_satisfy_inventory_without_callbacks() {
+        let mut host = RustHost::new();
+        assert!(host.missing_sync_web_primitives().contains(&"sync-eval"));
+        host.register_indirect_primitive("sync-eval");
+        assert!(!host.missing_sync_web_primitives().contains(&"sync-eval"));
+        assert!(!host.registered_primitive_names().contains(&"sync-eval"));
+        assert!(host.provided_primitive_names().contains(&"sync-eval"));
     }
 
     #[test]
