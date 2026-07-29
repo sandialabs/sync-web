@@ -12653,6 +12653,7 @@ impl UnifiedVm {
                         self.heap.object(procedure),
                         Ok(GcObject::Closure { .. }
                             | GcObject::Builtin(_)
+                            | GcObject::HostProcedure(_)
                             | GcObject::Macro(..)
                             | GcObject::Dilambda { .. }
                             | GcObject::HashTable(_)

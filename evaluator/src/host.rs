@@ -795,6 +795,40 @@ mod tests {
         assert_eq!(host.evaluate("(let ((v (list (car ''x) '(*crypto* public-key)))) (byte-vector->hex-string (expression->byte-vector (list (car ''x) v))))").unwrap().to_string(),"\"2727282a63727970746f2a207075626c69632d6b657929\"");
     }
     #[test]
+    fn unified_apply_calls_host_once_without_replay_or_identity_loss() {
+        let calls = Rc::new(Cell::new(0));
+        let callback_calls = calls.clone();
+        let failures = Rc::new(Cell::new(0));
+        let callback_failures = failures.clone();
+        let mut host = RustHost::new();
+        host.register(PrimitiveSpec::fixed("%touch", 1, move |_, _| {
+            callback_calls.set(callback_calls.get() + 1);
+            Ok(HostOutput::Unspecified)
+        }));
+        host.register(PrimitiveSpec::fixed("%fail", 0, move |_, _| {
+            callback_failures.set(callback_failures.get() + 1);
+            Err(HostError::new("applied-host-error", "expected failure"))
+        }));
+        host.initialize_with("(varlet (rootlet) 'touch (lambda (value) (apply %touch (list value)) value))");
+        assert_eq!(
+            host.evaluate_unified_output("(let* ((p (list 1)) (returned (touch p))) (set-car! returned 9) (list (eq? p returned) (car p)))"),
+            Ok("(#t 9)".into())
+        );
+        assert_eq!(calls.get(), 1);
+        let error = host
+            .evaluate_unified_output("(apply %fail '())")
+            .expect_err("applied host error must propagate");
+        assert!(error.contains("applied-host-error"));
+        assert_eq!(failures.get(), 1);
+        let nonapplicable = host
+            .evaluate_unified_output("(apply 1 '(2))")
+            .expect_err("integer must remain nonapplicable");
+        assert!(nonapplicable.contains("syntax-error"));
+        assert_eq!(calls.get(), 1);
+        assert_eq!(failures.get(), 1);
+    }
+
+    #[test]
     fn controlled_host_apply_releases_callback_guard() {
         let mut host = RustHost::new();
         host.register(PrimitiveSpec::fixed("inner", 0, |_, _| {
