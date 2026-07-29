@@ -773,7 +773,7 @@ fn evaluate_record_with(record: Word, query: &str, unified: bool) -> String {
         }
         host.initialize_with(PRINT_INITIALIZATION);
         host.initialize_with("(varlet (rootlet) 'sync-eval (lambda* (node (strict #t) :rest rest) (with-let (curlet) ((eval (%sync-loader node strict) (rootlet)) node))))");
-        let expression = format!("({} (sync-state) (quote {}))", genesis_str, query);
+        let expression = format!("({} (sync-state) (quote {}\n))", genesis_str, query);
         let result = if unified {
             match host.evaluate_unified_output(&expression) {
                 Ok(value) | Err(value) => value,

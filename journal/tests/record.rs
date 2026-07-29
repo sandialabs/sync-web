@@ -51,8 +51,15 @@ fn test_standard() {
 
 #[test]
 fn test_trailing_comment_at_end() {
-    let result = JOURNAL.evaluate("(+ 2 2) ; trailing comment");
-    assert_eq!(result, "4");
+    for source in [
+        "(+ 2 2)",
+        "(+ 2 2) ; trailing comment",
+        "(+ 2 2) ; trailing comment\n",
+    ] {
+        let original = source.as_bytes().to_vec();
+        assert_eq!(JOURNAL.evaluate(source), "4");
+        assert_eq!(source.as_bytes(), original);
+    }
 }
 
 #[test]
