@@ -1,0 +1,16 @@
+[package]
+name = "s7-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cranelift-codegen = "0.133"
+cranelift-frontend = "0.133"
+cranelift-jit = "0.133"
+cranelift-module = "0.133"
+cranelift-native = "0.133"
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+opt-level = 3

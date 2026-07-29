@@ -9,6 +9,10 @@ path = "../deploy/bin/ledger/src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+rust-evaluator = ["dep:s7-rust"]
+
 [profile.release]
 lto = true
 
@@ -37,6 +41,7 @@ pqcrypto = { version = "0.17.0", default-features = false }
 tokio = { version = "1.0", features = ["time", "rt", "rt-multi-thread", "macros"] }
 serde_json = "1.0.149"
 time = { version = "=0.3.44", features = ["formatting"] }
+s7-rust = { path = "../evaluator", optional = true }
 
 [dev-dependencies]
 mockito = "1.4.0"

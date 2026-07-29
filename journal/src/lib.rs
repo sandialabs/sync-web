@@ -27,6 +27,8 @@ use std::ffi::{CStr, CString};
 mod config;
 mod cache;
 pub mod evaluator;
+#[cfg(feature = "rust-evaluator")]
+mod rust_evaluator;
 mod persistor;
 mod extensions {
     pub mod crypto;
@@ -249,6 +251,22 @@ impl Journal {
     }
 
     fn evaluate_record(&self, record: Word, query: &str) -> String {
+        match std::env::var("SYNC_WEB_EVALUATOR").as_deref() {
+            Ok("rust") => {
+                #[cfg(feature = "rust-evaluator")]
+                return rust_evaluator::evaluate_record(record, query);
+                #[cfg(not(feature = "rust-evaluator"))]
+                return "(error 'configuration-error \"Rust evaluator support is not compiled in\")".to_string();
+            }
+            Ok("unified") => {
+                #[cfg(feature = "rust-evaluator")]
+                return rust_evaluator::evaluate_record_unified(record, query);
+                #[cfg(not(feature = "rust-evaluator"))]
+                return "(error 'configuration-error \"Unified evaluator support is not compiled in\")".to_string();
+            }
+            _ => {}
+        }
+
         let mut runs = 0;
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
