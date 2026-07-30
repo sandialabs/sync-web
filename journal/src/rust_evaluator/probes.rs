@@ -338,7 +338,15 @@ fn rdf_nested_quasiquote_preserves_transition_bytes_and_wildcard_state() {
         "9e7949ba64ad03d6e54a57639bc455d713de6c202edc6e0877fef2af6331d9e0"
     );
     assert_eq!(evaluate_record_unified(record, "(insert a b c)"), "(a b c)");
+    assert_eq!(
+        hex::encode(PERSISTOR.root_get(record).expect("read RDF R1")),
+        "82d7bb4e4b85470f9fdc99dc3c00d37ec8b89029acee8862ef9abdfff168a021"
+    );
     assert_eq!(evaluate_record_unified(record, "(insert a b d)"), "(a b d)");
+    assert_eq!(
+        hex::encode(PERSISTOR.root_get(record).expect("read RDF R2")),
+        "d6121e9aaa2af3f93f4d2a74dac78da6710349f20612ba478db26f80fc5801d6"
+    );
     assert_eq!(
         evaluate_record_unified(record, "(select a b ())"),
         "((a b c) (a b d))"
@@ -346,6 +354,10 @@ fn rdf_nested_quasiquote_preserves_transition_bytes_and_wildcard_state() {
     assert_eq!(
         evaluate_record_unified(record, "(select a b c)"),
         "((a b c))"
+    );
+    assert_eq!(
+        hex::encode(PERSISTOR.root_get(record).expect("read RDF R3")),
+        "d6121e9aaa2af3f93f4d2a74dac78da6710349f20612ba478db26f80fc5801d6"
     );
     PERSISTOR.root_delete(record).expect("delete RDF probe record");
 }
