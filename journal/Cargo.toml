@@ -45,3 +45,4 @@ s7-rust = { path = "../evaluator", optional = true }
 
 [dev-dependencies]
 mockito = "1.4.0"
+serde = { version = "1", features = ["derive"] }
