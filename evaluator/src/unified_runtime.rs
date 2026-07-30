@@ -12710,8 +12710,22 @@ impl UnifiedVm {
                     let GcObject::Text(text) = self.heap.object(arguments[0])? else {
                         return Err(VmError::WrongType);
                     };
-                    let values =
-                        crate::parse_all(text).map_err(|_| VmError::Compile("Read".into()))?;
+                    let text = text.clone();
+                    let values = match crate::parse_all(&text) {
+                        Ok(values) => values,
+                        Err(error) => {
+                            let tag = self.symbol_value(&error.tag)?;
+                            let mut items = Vec::with_capacity(error.args.len());
+                            for value in &error.args {
+                                items.push(self.import_value(value, &arguments)?);
+                            }
+                            let info = self.list_from_values(&items)?;
+                            return Err(VmError::Scheme(SchemeCondition {
+                                tag,
+                                args: vec![info],
+                            }));
+                        }
+                    };
                     values
                         .into_iter()
                         .next()
@@ -27237,6 +27251,10 @@ mod tests {
         assert_eq!(
             run_source_output("(list (read (open-input-string \"#1=#1#\")) (read (open-input-string \"#1=(a . #1#)\")) (read (open-input-string \"#1=#(#1#)\")) (read (open-input-string \"#;1 2\")) (read (open-input-string \"#;(a b) c\")) (object->string (read (open-input-string \"#;(a b) c\")) :readable) (read (open-input-string \"#| a #| b |# c |# 7\")) (read (open-input-string \"`a\")))").unwrap(),
             "(#1=#1# #1= #1=# #;1 #; \"(with-input-from-string \\\"#;\\\" read)\" c 'a)"
+        );
+        assert_eq!(
+            run_source_output("(catch #t (lambda () (eval-string \"\\\"x\")) (lambda args args))").unwrap(),
+            "(string-read-error (\"end of input encountered while in a string\"))"
         );
     }
 

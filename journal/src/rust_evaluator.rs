@@ -3,7 +3,10 @@ use crate::cache::{
     resolve_stump_with,
 };
 use crate::persistor::{MemoryPersistor, PERSISTOR, Persistor, SIZE};
-use crate::{CallOnDrop, GENESIS_STR, JOURNAL, LOCK, NULL, RUNS, Word, warn_on_error_result};
+use crate::{
+    CallOnDrop, GENESIS_STR, JOURNAL, LOCK, NULL, RUNS, Word, escape_scheme_string,
+    warn_on_error_result,
+};
 use crystals_dilithium::dilithium2::*;
 use crystals_dilithium::sign::lvl2::*;
 use log::{debug, info};
@@ -62,6 +65,22 @@ struct RustSession {
 type SharedSession = Rc<RefCell<RustSession>>;
 
 const PRINT_INITIALIZATION: &str = "(varlet (rootlet) 'print (lambda args (let ((result (apply %print args))) (if (null? args) result (car (reverse args))))))";
+const JOURNAL_CONDITION_HANDLER: &str = concat!(
+    "(let* ((type (car x)) ",
+    "(data (if (pair? (cdr x)) (cadr x) '())) ",
+    "(message (catch #t ",
+    "(lambda () (if (and (pair? data) (string? (car data))) ",
+    "(apply format (cons #f data)) ",
+    "(object->string data))) ",
+    "(lambda args (object->string data))))) ",
+    "`(error ',type ,message ((data ,data))))",
+);
+
+fn wrap_journal_conditions(expression: &str) -> String {
+    format!(
+        "(catch #t (lambda () {expression}) (lambda x {JOURNAL_CONDITION_HANDLER}))"
+    )
+}
 
 fn node(value: &BorrowedValue<'_>, name: &str, index: usize) -> Result<Word, HostError> {
     value
@@ -773,7 +792,13 @@ fn evaluate_record_with(record: Word, query: &str, unified: bool) -> String {
         }
         host.initialize_with(PRINT_INITIALIZATION);
         host.initialize_with("(varlet (rootlet) 'sync-eval (lambda* (node (strict #t) :rest rest) (with-let (curlet) ((eval (%sync-loader node strict) (rootlet)) node))))");
-        let expression = format!("({} (sync-state) (quote {}\n))", genesis_str, query);
+        let quoted_query = format!("(quote {}\n)", query);
+        let expression = format!(
+            "({} (sync-state) (eval-string \"{}\"))",
+            genesis_str,
+            escape_scheme_string(&quoted_query),
+        );
+        let expression = wrap_journal_conditions(&expression);
         let result = if unified {
             match host.evaluate_unified_output(&expression) {
                 Ok(value) | Err(value) => value,
@@ -829,6 +854,37 @@ mod probes;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journal_condition_boundary_runs_effects_once_without_replay() {
+        let calls = Rc::new(Cell::new(0));
+        let callback_calls = calls.clone();
+        let mut host = RustHost::new();
+        host.register(PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            callback_calls.set(callback_calls.get() + 1);
+            Ok(HostOutput::Unspecified)
+        }));
+        let error = host
+            .evaluate_unified_output(&wrap_journal_conditions("(begin (tick) (/ 1 0))"))
+            .expect("Journal boundary must convert the condition to data");
+        assert_eq!(
+            error,
+            "(error 'division-by-zero \"/: division by zero, (/ 1 0)\" ((data (\"~A: division by zero, (~A ~S ~S)\" / / 1 0))))"
+        );
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            host.evaluate_unified_output(&wrap_journal_conditions(
+                "(begin (tick) (catch #t (lambda () (/ 1 0)) (lambda args 'caught)))"
+            )),
+            Ok("caught".into())
+        );
+        assert_eq!(calls.get(), 2);
+        assert_eq!(
+            host.evaluate_unified_output(&wrap_journal_conditions("(begin (tick) 4)")),
+            Ok("4".into())
+        );
+        assert_eq!(calls.get(), 3);
+    }
 
     #[test]
     fn unified_inventory_includes_indirect_sync_eval() {
