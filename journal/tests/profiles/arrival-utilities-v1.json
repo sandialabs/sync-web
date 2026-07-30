@@ -4,8 +4,10 @@
   "c_oracle_source_sha256": "91bb94c6b5604b8081a6f49c221f923c586c6d76ad717554592fe8d9fd4ce525",
   "evaluator_source_sha256": "0a728c08ef32488ca294050e671c85ac5bef668fe275158926baeb48927ea245",
   "utilities_source_sha256": "5ae2db1ca7bc68e18228edf01a288e99909f95a86ce149ffb3078636da3c32be",
+  "c_exclusion_probe_sha256": "130c37558e52124a6dcef0f5da502f5fb7daa4badf617e3510e0cf10cd6315b4",
+  "c_exclusion_expected_sha256": "37f50f03d1dc566ec64d343e91a3442413f34309058172fed48edeca2b5a4e34",
   "upstream_keep_count": 256,
-  "included_count": 204,
+  "retained_binding_count": 204,
   "excluded_capabilities": [
     {
       "name": "metacircular-utilities-composition",

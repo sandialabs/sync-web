@@ -6,6 +6,8 @@ use std::collections::HashSet;
 use std::fs;
 
 const PROFILE_PATH: &str = "tests/profiles/arrival-utilities-v1.json";
+const EXCLUSION_PROBE_PATH: &str = "tests/profiles/arrival-utilities-v1-exclusions.scm";
+const EXCLUSION_EXPECTED_PATH: &str = "tests/profiles/arrival-utilities-v1-exclusions.expected.scm";
 const C_ORACLE_PATH: &str = "external/s7/s7.c";
 const EVALUATOR_PATH: &str = "lisp/evaluator.scm";
 const UTILITIES_PATH: &str = "lisp/utils.scm";
@@ -17,8 +19,10 @@ struct Profile {
     c_oracle_source_sha256: String,
     evaluator_source_sha256: String,
     utilities_source_sha256: String,
+    c_exclusion_probe_sha256: String,
+    c_exclusion_expected_sha256: String,
     upstream_keep_count: usize,
-    included_count: usize,
+    retained_binding_count: usize,
     excluded_capabilities: Vec<ExcludedCapability>,
     excluded: Vec<Exclusion>,
 }
@@ -87,17 +91,27 @@ fn deterministic_authority_safe_utilities_profile_v1() {
     let utilities_source = fs::read_to_string(UTILITIES_PATH).expect("read archived utilities");
     assert_eq!(sha256(&evaluator_source), profile.evaluator_source_sha256);
     assert_eq!(sha256(&utilities_source), profile.utilities_source_sha256);
+    let exclusion_probe = fs::read_to_string(EXCLUSION_PROBE_PATH).expect("read C exclusion probe");
+    let exclusion_expected = fs::read_to_string(EXCLUSION_EXPECTED_PATH).expect("read C exclusion snapshot");
+    assert_eq!(sha256(&exclusion_probe), profile.c_exclusion_probe_sha256);
+    assert_eq!(sha256(&exclusion_expected), profile.c_exclusion_expected_sha256);
 
     let (start, end) = keep_list_range(&evaluator_source);
     let upstream: Vec<&str> = evaluator_source[start..end].split_whitespace().collect();
     assert_eq!(upstream.len(), profile.upstream_keep_count);
     assert_eq!(profile.excluded.len(), 52);
-    assert_eq!(profile.included_count + profile.excluded.len(), upstream.len());
+    assert_eq!(profile.retained_binding_count + profile.excluded.len(), upstream.len());
 
     let upstream_names: HashSet<&str> = upstream.iter().copied().collect();
     let mut excluded_names = HashSet::new();
+    let expected_probe = format!(
+        "(list {})\n",
+        profile.excluded.iter().map(|x| format!("(list '{} (arity {}) (signature {}))", x.name, x.name, x.name)).collect::<Vec<_>>().join(" ")
+    );
+    assert_eq!(exclusion_probe, expected_probe);
     for exclusion in &profile.excluded {
         assert!(upstream_names.contains(exclusion.name.as_str()), "unknown excluded root {}", exclusion.name);
+        assert!(exclusion_expected.contains(&format!("({} (", exclusion.name)), "C snapshot missing {}", exclusion.name);
         assert!(excluded_names.insert(exclusion.name.as_str()), "duplicate excluded root {}", exclusion.name);
         assert!(!exclusion.c_arity.is_empty());
         assert!(!exclusion.c_signature.is_empty());
@@ -115,7 +129,7 @@ fn deterministic_authority_safe_utilities_profile_v1() {
         .copied()
         .filter(|name| !excluded_names.contains(name))
         .collect();
-    assert_eq!(included.len(), profile.included_count);
+    assert_eq!(included.len(), profile.retained_binding_count);
 
     assert_eq!(profile.excluded_capabilities.len(), 1);
     let capability = &profile.excluded_capabilities[0];
@@ -124,6 +138,7 @@ fn deterministic_authority_safe_utilities_profile_v1() {
     assert!(capability.reason.contains("<list*>"));
 
     let assert = setup(0x5a);
+    assert("(list (defined? 'random) random (procedure? random))", "(#t *removed* #f)");
     if std::env::var("SYNC_WEB_EVALUATOR").as_deref() == Ok("unified") {
         let inventory = format!(
             "(let loop ((xs '({})) (missing '())) (if (null? xs) (reverse missing) (loop (cdr xs) (if (defined? (car xs)) missing (cons (car xs) missing)))))",
@@ -161,7 +176,7 @@ fn deterministic_authority_safe_utilities_profile_v1() {
     assert_eq!(sha256(&fs::read_to_string(EVALUATOR_PATH).unwrap()), profile.evaluator_source_sha256);
     assert_eq!(sha256(&fs::read_to_string(UTILITIES_PATH).unwrap()), profile.utilities_source_sha256);
     println!(
-        "arrival-utilities-profile: upstream={} included={} excluded={}",
+        "arrival-utilities-profile: upstream={} retained-bindings={} excluded={}",
         upstream.len(), included.len(), profile.excluded.len()
     );
 }
