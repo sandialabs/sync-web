@@ -779,7 +779,8 @@ mod tests {
 
     #[test]
     fn unified_explicit_quote_splicing_matches_s7() {
-        let host = RustHost::new();
+        let mut host = RustHost::new();
+        host.register_codecs();
         let cases = [
             ("(eval '(let ((x 'z)) `(quote ,x)))", "(quote z)"),
             ("(eval '(let ((x 'z)) `(a (quote ,x) z)))", "(a (quote z) z)"),
@@ -792,6 +793,12 @@ mod tests {
             ("(eval '(let ((x '(1 2))) `(a (quote (b ,@x c)) d)))", "(a (quote (b 1 2 c)) d)"),
             ("(eval '(let ((x '(1 2))) `(a . (quote ,@x))))", "(a quote 1 2)"),
             ("(eval '(let ((x '(1 2))) `#((quote ,@x))))", "#((quote ,(apply-values x)))"),
+            ("(eval '(let ((x '(1 2))) `#((quote (a ,@x b)))))", "#((quote (a ,(apply-values x) b)))"),
+            ("(eval '(let ((x '(1 2))) `#((outer (quote (a ,@x b))))))", "#((outer (quote (a ,(apply-values x) b))))"),
+            ("(eval '(let ((x 7)) `#((quote (a ,x b)))))", "#((quote (a ,x b)))"),
+            ("(eval '(let ((x '(1 2)) (y '(3 4))) `#((quote (a ,@x b ,@y c)))))", "#((quote (a ,(apply-values x) b ,(apply-values y) c)))"),
+            ("(eval '(let ((n 0) (x '(1 2))) (list `#((quote (a ,@(begin (set! n (+ n 1)) x) b))) n)))", "(#((quote (a ,(apply-values (begin (set! n (+ n 1)) x)) b))) 0)"),
+            ("(equal? (expression->byte-vector (eval '(let ((x '(1 2))) `#((quote (a ,@x b)))))) (expression->byte-vector '#((quote (a ,(apply-values x) b)))))", "#t"),
             ("(eval '(let ((n 0) (x '(1 2))) (list `(quote ,@(begin (set! n (+ n 1)) x)) n)))", "((quote 1 2) 1)"),
             ("(eval '(let ((n 0)) (list `(quote ,@(begin (set! n (+ n 1)) (list n)) ,@(begin (set! n (+ n 1)) (list n))) n)))", "((quote 1 2) 2)"),
             ("(eval '(let* ((x (list 1 2)) (r `(quote ,@x))) (set-car! x 9) r))", "(quote 1 2)"),

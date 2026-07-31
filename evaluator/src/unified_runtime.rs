@@ -23865,6 +23865,133 @@ impl UnifiedCompiler {
         false
     }
 
+    fn compile_vector_staged_datum(
+        &mut self,
+        function: &mut FunctionBuilder,
+        value: &Value,
+        depth: usize,
+        inside_explicit_quote: bool,
+    ) -> Result<(), CompileError> {
+        match value {
+            Value::Pair(pair) => {
+                match pair.syntax_origin() {
+                    crate::core::SyntaxOrigin::UnquoteSplicing
+                        if inside_explicit_quote && depth == 1 =>
+                    {
+                        let splice = proper_list(value)?;
+                        if splice.len() != 2 {
+                            return Err(CompileError::Syntax);
+                        }
+                        let application = list_from_values(&[
+                            Value::symbol("apply-values"),
+                            splice[1].clone(),
+                        ]);
+                        self.compile_quote(function, &application)?;
+                        function
+                            .code
+                            .push(UnifiedInstruction::WrapSyntax(Arc::from("unquote")));
+                        return Ok(());
+                    }
+                    crate::core::SyntaxOrigin::Unquote
+                    | crate::core::SyntaxOrigin::UnquoteSplicing
+                        if depth == 1 =>
+                    {
+                        return self.compile_quote(function, value);
+                    }
+                    crate::core::SyntaxOrigin::Unquote
+                    | crate::core::SyntaxOrigin::UnquoteSplicing
+                    | crate::core::SyntaxOrigin::Quasiquote
+                    | crate::core::SyntaxOrigin::Quote => {
+                        let syntax = proper_list(value)?;
+                        if syntax.len() != 2 {
+                            return Err(CompileError::Syntax);
+                        }
+                        let payload_depth = match pair.syntax_origin() {
+                            crate::core::SyntaxOrigin::Unquote
+                            | crate::core::SyntaxOrigin::UnquoteSplicing => {
+                                depth.saturating_sub(1)
+                            }
+                            crate::core::SyntaxOrigin::Quasiquote => {
+                                depth.saturating_add(1)
+                            }
+                            _ => depth,
+                        };
+                        self.compile_vector_staged_datum(
+                            function,
+                            &syntax[1],
+                            payload_depth,
+                            inside_explicit_quote,
+                        )?;
+                        let kind = match pair.syntax_origin() {
+                            crate::core::SyntaxOrigin::Unquote => "unquote",
+                            crate::core::SyntaxOrigin::UnquoteSplicing => "unquote-splicing",
+                            crate::core::SyntaxOrigin::Quasiquote => "quasiquote",
+                            crate::core::SyntaxOrigin::Quote => "quote",
+                            _ => unreachable!(),
+                        };
+                        function
+                            .code
+                            .push(UnifiedInstruction::WrapSyntax(Arc::from(kind)));
+                        self.cache_quoted_value(function);
+                        return Ok(());
+                    }
+                    crate::core::SyntaxOrigin::Explicit => {}
+                }
+                if let Ok(parts) = proper_list(value) {
+                    if parts.len() == 2 && source_name(&parts[0]) == Some("quote") {
+                        self.compile_quote(function, &Value::symbol("quote"))?;
+                        self.compile_vector_staged_datum(
+                            function,
+                            &parts[1],
+                            depth,
+                            true,
+                        )?;
+                        function
+                            .code
+                            .push(UnifiedInstruction::Builtin(BuiltinId::List, 2));
+                        self.cache_quoted_value(function);
+                        return Ok(());
+                    }
+                }
+                let pair = pair.borrow();
+                self.compile_vector_staged_datum(
+                    function,
+                    &pair.car,
+                    depth,
+                    inside_explicit_quote,
+                )?;
+                self.compile_vector_staged_datum(
+                    function,
+                    &pair.cdr,
+                    depth,
+                    inside_explicit_quote,
+                )?;
+                function
+                    .code
+                    .push(UnifiedInstruction::Builtin(BuiltinId::Cons, 2));
+                self.cache_quoted_value(function);
+                Ok(())
+            }
+            Value::Vector(values) => {
+                let values = values.values();
+                for value in &values {
+                    self.compile_vector_staged_datum(
+                        function,
+                        value,
+                        depth,
+                        inside_explicit_quote,
+                    )?;
+                }
+                function
+                    .code
+                    .push(UnifiedInstruction::BuildVector(values.len() as u16));
+                self.cache_quoted_value(function);
+                Ok(())
+            }
+            _ => self.compile_quote(function, value),
+        }
+    }
+
     fn compile_quasiquote(
         &mut self,
         function: &mut FunctionBuilder,
@@ -23947,6 +24074,8 @@ impl UnifiedCompiler {
                         .push(UnifiedInstruction::WrapSyntax(Arc::from("unquote")));
                 } else if matches!(value, Value::RootMeta(name) if name.as_str() == "unquote") {
                     self.compile_quote(function, &Value::RawDisplay(Rc::new("<unquote>".into())))?;
+                } else if depth == 1 && Self::syntax_value_has_active_escape(value, depth) {
+                    self.compile_vector_staged_datum(function, value, depth, false)?;
                 } else {
                     self.compile_quote(function, value)?;
                 }
