@@ -23920,7 +23920,8 @@ impl UnifiedCompiler {
                             function,
                             &syntax[1],
                             payload_depth,
-                            inside_explicit_quote,
+                            inside_explicit_quote
+                                || pair.syntax_origin() == crate::core::SyntaxOrigin::Quote,
                         )?;
                         let kind = match pair.syntax_origin() {
                             crate::core::SyntaxOrigin::Unquote => "unquote",
