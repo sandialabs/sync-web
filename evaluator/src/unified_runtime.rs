@@ -23742,6 +23742,53 @@ impl UnifiedCompiler {
         if let Value::Vector(values) = value {
             let values = values.values();
             for value in &values {
+                if depth == 1 {
+                    if let Ok(quote) = proper_list(value) {
+                        if quote.len() == 2
+                            && source_name(&quote[0]) == Some("quote")
+                            && matches!(
+                                value,
+                                Value::Pair(pair)
+                                    if pair.syntax_origin() == crate::core::SyntaxOrigin::Explicit
+                            )
+                        {
+                            if let Value::Pair(payload) = &quote[1] {
+                                match payload.syntax_origin() {
+                                    crate::core::SyntaxOrigin::Unquote => {
+                                        self.compile_quote(function, &Value::symbol("quote"))?;
+                                        self.compile_quote(function, &quote[1])?;
+                                        function.code.push(UnifiedInstruction::Builtin(
+                                            BuiltinId::List,
+                                            2,
+                                        ));
+                                        continue;
+                                    }
+                                    crate::core::SyntaxOrigin::UnquoteSplicing => {
+                                        let splice = proper_list(&quote[1])?;
+                                        if splice.len() != 2 {
+                                            return Err(CompileError::Syntax);
+                                        }
+                                        self.compile_quote(function, &Value::symbol("quote"))?;
+                                        let application = list_from_values(&[
+                                            Value::symbol("apply-values"),
+                                            splice[1].clone(),
+                                        ]);
+                                        self.compile_quote(function, &application)?;
+                                        function.code.push(UnifiedInstruction::WrapSyntax(
+                                            Arc::from("unquote"),
+                                        ));
+                                        function.code.push(UnifiedInstruction::Builtin(
+                                            BuiltinId::List,
+                                            2,
+                                        ));
+                                        continue;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
                 let origin = match value {
                     Value::Pair(pair) => pair.syntax_origin(),
                     _ => crate::core::SyntaxOrigin::Explicit,
@@ -23800,21 +23847,36 @@ impl UnifiedCompiler {
                     && depth == 1
                     && matches!(value, Value::Pair(pair) if pair.syntax_origin() == crate::core::SyntaxOrigin::Explicit)
                 {
-                    if matches!(
-                        &syntax[1],
-                        Value::Pair(pair)
-                            if matches!(
-                                pair.syntax_origin(),
-                                crate::core::SyntaxOrigin::Unquote
-                                    | crate::core::SyntaxOrigin::UnquoteSplicing
-                            )
-                    ) {
-                        self.compile_quote(function, &Value::symbol("quote"))?;
-                        self.compile_quasiquote(function, &syntax[1], depth)?;
-                        function
-                            .code
-                            .push(UnifiedInstruction::Builtin(BuiltinId::List, 2));
-                        return Ok(());
+                    if let Value::Pair(pair) = &syntax[1] {
+                        match pair.syntax_origin() {
+                            crate::core::SyntaxOrigin::Unquote => {
+                                self.compile_quote(function, &Value::symbol("quote"))?;
+                                self.compile_quasiquote(function, &syntax[1], depth)?;
+                                function
+                                    .code
+                                    .push(UnifiedInstruction::Builtin(BuiltinId::List, 2));
+                                return Ok(());
+                            }
+                            crate::core::SyntaxOrigin::UnquoteSplicing => {
+                                let splice = proper_list(&syntax[1])?;
+                                if splice.len() != 2 {
+                                    return Err(CompileError::Syntax);
+                                }
+                                self.compile_quote(function, &Value::symbol("quote"))?;
+                                function
+                                    .code
+                                    .push(UnifiedInstruction::Builtin(BuiltinId::List, 1));
+                                self.compile_expression(function, &splice[1], false)?;
+                                function
+                                    .code
+                                    .push(UnifiedInstruction::ValidateQuasiquoteSplice);
+                                function
+                                    .code
+                                    .push(UnifiedInstruction::Builtin(BuiltinId::Append, 2));
+                                return Ok(());
+                            }
+                            _ => {}
+                        }
                     }
                     return self.compile_quote(function, value);
                 }

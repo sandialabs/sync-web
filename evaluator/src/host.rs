@@ -778,6 +778,28 @@ mod tests {
     }
 
     #[test]
+    fn unified_explicit_quote_splicing_matches_s7() {
+        let host = RustHost::new();
+        let cases = [
+            ("(eval '(let ((x 'z)) `(quote ,x)))", "(quote z)"),
+            ("(eval '(let ((x 'z)) `(a (quote ,x) z)))", "(a (quote z) z)"),
+            ("(eval '(let ((x '())) `(quote ,@x)))", "(quote)"),
+            ("(eval '(let ((x '(1))) `(quote ,@x)))", "(quote 1)"),
+            ("(eval '(let ((x '(1 2))) `(quote ,@x)))", "(quote 1 2)"),
+            ("(eval '(let ((x '(1 2))) `(a (quote ,@x) z)))", "(a (quote 1 2) z)"),
+            ("(eval '(let ((x '(1 2))) `(a . (quote ,@x))))", "(a quote 1 2)"),
+            ("(eval '(let ((x '(1 2))) `#((quote ,@x))))", "#((quote ,(apply-values x)))"),
+            ("(eval '(let ((n 0) (x '(1 2))) (list `(quote ,@(begin (set! n (+ n 1)) x)) n)))", "((quote 1 2) 1)"),
+            ("(catch #t (lambda () (eval '(let ((x '(1 . 2))) `(quote ,@x)))) (lambda args args))", "(wrong-type-arg (\"apply's last argument should be a proper list: ~S\" ((1 . 2))))"),
+            ("(let ((x 'z)) `(quote (unquote x)))", "(quote (unquote x))"),
+            ("(let ((x 'z)) `'(,x))", "'(z)"),
+        ];
+        for (source, expected) in cases {
+            assert_eq!(host.evaluate_unified_output(source), Ok(expected.into()), "{source}");
+        }
+    }
+
+    #[test]
     fn native_codecs_round_trip_scheme_and_hex() {
         let mut host = RustHost::new();
         host.register_codecs();
