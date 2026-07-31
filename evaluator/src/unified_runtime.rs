@@ -12605,6 +12605,7 @@ impl UnifiedVm {
                     self.heap.object(arguments[0]),
                     Ok(GcObject::Closure { .. }
                         | GcObject::Builtin(_)
+                        | GcObject::HostProcedure(_)
                         | GcObject::Dilambda { .. }
                         | GcObject::HashTable(_)
                         | GcObject::Pair { .. }
@@ -14759,9 +14760,9 @@ impl UnifiedVm {
                 }
             }
             BuiltinId::Subvector => {
-                if arguments.len() != 3 {
+                if !(2..=3).contains(&arguments.len()) {
                     return Err(VmError::WrongArity {
-                        expected: 3,
+                        expected: 2,
                         actual: arguments.len(),
                     });
                 }
@@ -14774,20 +14775,23 @@ impl UnifiedVm {
                         actual: self.value_kind_text(arguments[1]),
                         expected: "an integer",
                     })?;
-                let end = arguments[2]
-                    .as_fixnum()
-                    .ok_or_else(|| VmError::TypeArgument {
-                        procedure: "subvector",
-                        position: 3,
-                        value: arguments[2],
-                        actual: self.value_kind_text(arguments[2]),
-                        expected: "an integer",
-                    })?;
                 let length = match self.heap.object(arguments[0])? {
                     GcObject::Vector(values) => values.len(),
                     GcObject::IntVector(values) => values.len(),
                     GcObject::FloatVector(values) => values.len(),
+                    GcObject::ByteVector(values) => values.len(),
                     _ => return Err(VmError::WrongType),
+                };
+                let end = if let Some(value) = arguments.get(2) {
+                    value.as_fixnum().ok_or_else(|| VmError::TypeArgument {
+                        procedure: "subvector",
+                        position: 3,
+                        value: *value,
+                        actual: self.value_kind_text(*value),
+                        expected: "an integer",
+                    })?
+                } else {
+                    length as i64
                 };
                 let start = usize::try_from(start).map_err(|_| VmError::RangeArgument {
                     procedure: "subvector",
@@ -14848,6 +14852,15 @@ impl UnifiedVm {
                         let roots = self.active_roots_with(&[]);
                         self.heap
                             .allocate_with_roots(GcObject::FloatVector(values), &roots)?
+                    }
+                    GcObject::ByteVector(values) => {
+                        if start > end || end > values.len() {
+                            return Err(VmError::WrongType);
+                        }
+                        let values = values[start..end].to_vec();
+                        let roots = self.active_roots_with(&[]);
+                        self.heap
+                            .allocate_with_roots(GcObject::ByteVector(values), &roots)?
                     }
                     _ => return Err(VmError::WrongType),
                 };

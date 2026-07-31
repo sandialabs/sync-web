@@ -847,6 +847,8 @@ mod tests {
         );
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector ''x))").unwrap().to_string(),"\"2778\"");
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '(quote x)))").unwrap().to_string(),"\"2871756f7465207829\"");
+        assert_eq!(host.evaluate_unified_output("(subvector #u(1 40 41) 1)"), Ok("#u(40 41)".into()));
+        assert_eq!(host.evaluate_unified_output("(let* ((v #u(1 2 3)) (s (subvector v 1))) (set! (s 0) 9) v)"), Ok("#u(1 9 3)".into()));
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '`(a ,x)))").unwrap().to_string(),"\"286c6973742d76616c756573202761207829\"");
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '`(a . ,x)))").unwrap().to_string(),"\"283c6c6973742a3e20286c6973742d76616c75657320276129207829\"");
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '(quasiquote (a (unquote x)))))").unwrap().to_string(),"\"28717561736971756f74652028612028756e71756f74652078292929\"");
@@ -871,12 +873,19 @@ mod tests {
             callback_failures.set(callback_failures.get() + 1);
             Err(HostError::new("applied-host-error", "expected failure"))
         }));
+        host.register_codecs();
         host.initialize_with("(varlet (rootlet) 'touch (lambda (value) (apply %touch (list value)) value))");
+        assert_eq!(
+            host.evaluate_unified_output("(map byte-vector->hex-string (map expression->byte-vector '(a b)))"),
+            Ok("(\"61\" \"62\")".into())
+        );
+        assert_eq!(host.evaluate_unified_output("(for-each %touch '(1 2 3))"), Ok("#<unspecified>".into()));
+        assert_eq!(calls.get(), 3);
         assert_eq!(
             host.evaluate_unified_output("(let* ((p (list 1)) (returned (touch p))) (set-car! returned 9) (list (eq? p returned) (car p)))"),
             Ok("(#t 9)".into())
         );
-        assert_eq!(calls.get(), 1);
+        assert_eq!(calls.get(), 4);
         let error = host
             .evaluate_unified_output("(apply %fail '())")
             .expect_err("applied host error must propagate");
@@ -886,7 +895,7 @@ mod tests {
             .evaluate_unified_output("(apply 1 '(2))")
             .expect_err("integer must remain nonapplicable");
         assert!(nonapplicable.contains("syntax-error"));
-        assert_eq!(calls.get(), 1);
+        assert_eq!(calls.get(), 4);
         assert_eq!(failures.get(), 1);
     }
 
