@@ -7410,11 +7410,66 @@ impl UnifiedVm {
         }))
     }
 
+    fn ultimate_subvector_base(&self, target: GcValue) -> Result<(GcValue, usize), VmError> {
+        let mut base = target;
+        let mut offset = 0usize;
+        let mut seen = HashSet::new();
+        while seen.insert(base) {
+            let Some((parent, parent_offset)) = self.subvectors.get(&base).copied() else {
+                return Ok((base, offset));
+            };
+            offset = offset.checked_add(parent_offset).ok_or(VmError::ArithmeticOverflow)?;
+            base = parent;
+        }
+        Err(VmError::WrongType)
+    }
+
+    fn sync_subvector_views(&mut self, target: GcValue) -> Result<(), VmError> {
+        let (ultimate, _) = self.ultimate_subvector_base(target)?;
+        let mut views = Vec::new();
+        for view in self.subvectors.keys().copied() {
+            let (base, offset) = self.ultimate_subvector_base(view)?;
+            if base == ultimate {
+                views.push((view, offset));
+            }
+        }
+        for (view, offset) in views {
+            let length = match self.heap.object(view)? {
+                GcObject::Vector(values) => values.len(),
+                GcObject::IntVector(values) => values.len(),
+                GcObject::FloatVector(values) => values.len(),
+                GcObject::ByteVector(values) => values.len(),
+                _ => continue,
+            };
+            let end = offset.checked_add(length).ok_or(VmError::ArithmeticOverflow)?;
+            let replacement = match self.heap.object(ultimate)? {
+                GcObject::Vector(values) => GcObject::Vector(
+                    values.get(offset..end).ok_or(VmError::OutOfRange)?.to_vec(),
+                ),
+                GcObject::IntVector(values) => GcObject::IntVector(
+                    values.get(offset..end).ok_or(VmError::OutOfRange)?.to_vec(),
+                ),
+                GcObject::FloatVector(values) => GcObject::FloatVector(
+                    values.get(offset..end).ok_or(VmError::OutOfRange)?.to_vec(),
+                ),
+                GcObject::ByteVector(values) => GcObject::ByteVector(
+                    values.get(offset..end).ok_or(VmError::OutOfRange)?.to_vec(),
+                ),
+                _ => return Err(VmError::WrongType),
+            };
+            *self.heap.object_mut(view)? = replacement;
+        }
+        Ok(())
+    }
+
     fn direct_applicable_ref(
         &mut self,
         target: GcValue,
         index: GcValue,
     ) -> Result<GcValue, VmError> {
+        if self.subvectors.contains_key(&target) {
+            self.sync_subvector_views(target)?;
+        }
         match self.heap.object(target)? {
             GcObject::Pair { .. } => {
                 let integer = index.as_fixnum().ok_or(VmError::WrongType)?;
@@ -14570,6 +14625,9 @@ impl UnifiedVm {
                             expected: "a mutable object",
                         });
                     }
+                    if self.subvectors.contains_key(&source) {
+                        self.sync_subvector_views(source)?;
+                    }
                     match (
                         self.heap.object(source)?.clone(),
                         self.heap.object(target)?.clone(),
@@ -14591,46 +14649,61 @@ impl UnifiedVm {
                                     return Err(VmError::WrongType);
                                 };
                                 for (destination, value) in
-                                    base_values[offset..].iter_mut().zip(copied.into_iter())
+                                    base_values[offset..].iter_mut().zip(copied.iter().copied())
                                 {
                                     *destination = value
                                 }
                             }
                         }
                         (GcObject::ByteVector(source), GcObject::ByteVector(_)) => {
-                            let GcObject::ByteVector(target_values) =
-                                self.heap.object_mut(target)?
-                            else {
+                            let copied = source.into_iter().skip(start).collect::<Vec<_>>();
+                            let GcObject::ByteVector(target_values) = self.heap.object_mut(target)? else {
                                 unreachable!()
                             };
-                            for (destination, value) in
-                                target_values.iter_mut().zip(source.into_iter().skip(start))
-                            {
+                            for (destination, value) in target_values.iter_mut().zip(copied.iter().copied()) {
                                 *destination = value
+                            }
+                            if let Some((base, offset)) = self.subvectors.get(&target).copied() {
+                                let GcObject::ByteVector(base_values) = self.heap.object_mut(base)? else {
+                                    return Err(VmError::WrongType);
+                                };
+                                for (destination, value) in base_values[offset..].iter_mut().zip(copied.iter().copied()) {
+                                    *destination = value
+                                }
                             }
                         }
                         (GcObject::IntVector(source), GcObject::IntVector(_)) => {
-                            let GcObject::IntVector(target_values) =
-                                self.heap.object_mut(target)?
-                            else {
+                            let copied = source.into_iter().skip(start).collect::<Vec<_>>();
+                            let GcObject::IntVector(target_values) = self.heap.object_mut(target)? else {
                                 unreachable!()
                             };
-                            for (destination, value) in
-                                target_values.iter_mut().zip(source.into_iter().skip(start))
-                            {
+                            for (destination, value) in target_values.iter_mut().zip(copied.iter().copied()) {
                                 *destination = value
+                            }
+                            if let Some((base, offset)) = self.subvectors.get(&target).copied() {
+                                let GcObject::IntVector(base_values) = self.heap.object_mut(base)? else {
+                                    return Err(VmError::WrongType);
+                                };
+                                for (destination, value) in base_values[offset..].iter_mut().zip(copied.iter().copied()) {
+                                    *destination = value
+                                }
                             }
                         }
                         (GcObject::FloatVector(source), GcObject::FloatVector(_)) => {
-                            let GcObject::FloatVector(target_values) =
-                                self.heap.object_mut(target)?
-                            else {
+                            let copied = source.into_iter().skip(start).collect::<Vec<_>>();
+                            let GcObject::FloatVector(target_values) = self.heap.object_mut(target)? else {
                                 unreachable!()
                             };
-                            for (destination, value) in
-                                target_values.iter_mut().zip(source.into_iter().skip(start))
-                            {
+                            for (destination, value) in target_values.iter_mut().zip(copied.iter().copied()) {
                                 *destination = value
+                            }
+                            if let Some((base, offset)) = self.subvectors.get(&target).copied() {
+                                let GcObject::FloatVector(base_values) = self.heap.object_mut(base)? else {
+                                    return Err(VmError::WrongType);
+                                };
+                                for (destination, value) in base_values[offset..].iter_mut().zip(copied.iter().copied()) {
+                                    *destination = value
+                                }
                             }
                         }
                         (
@@ -14724,6 +14797,7 @@ impl UnifiedVm {
                         }
                         _ => return Err(VmError::WrongType),
                     }
+                    self.sync_subvector_views(target)?;
                     target
                 }
             }
@@ -14766,6 +14840,10 @@ impl UnifiedVm {
                         actual: arguments.len(),
                     });
                 }
+                if self.subvectors.contains_key(&arguments[0]) {
+                    self.sync_subvector_views(arguments[0])?;
+                }
+                let (ultimate_base, base_offset) = self.ultimate_subvector_base(arguments[0])?;
                 let start = arguments[1]
                     .as_fixnum()
                     .ok_or_else(|| VmError::TypeArgument {
@@ -14864,7 +14942,13 @@ impl UnifiedVm {
                     }
                     _ => return Err(VmError::WrongType),
                 };
-                self.subvectors.insert(result, (arguments[0], start));
+                self.subvectors.insert(
+                    result,
+                    (
+                        ultimate_base,
+                        base_offset.checked_add(start).ok_or(VmError::ArithmeticOverflow)?,
+                    ),
+                );
                 if let Some(checker) = self.vector_typers.get(&arguments[0]).copied() {
                     self.vector_typers.insert(result, checker);
                 }
@@ -15170,20 +15254,23 @@ impl UnifiedVm {
                     }
                 }
                 if let Some((base, offset)) = self.subvectors.get(&target).copied() {
+                    let range_start = offset.checked_add(start).ok_or(VmError::ArithmeticOverflow)?;
+                    let range_end = offset.checked_add(end).ok_or(VmError::ArithmeticOverflow)?;
                     match self.heap.object_mut(base)? {
-                        GcObject::Vector(values) => values[offset + start..offset + end].fill(fill),
+                        GcObject::Vector(values) => values[range_start..range_end].fill(fill),
                         GcObject::IntVector(values) => {
-                            values[offset + start..offset + end].fill(fill_int.unwrap())
+                            values[range_start..range_end].fill(fill_int.unwrap())
                         }
                         GcObject::FloatVector(values) => {
-                            values[offset + start..offset + end].fill(fill_float.unwrap())
+                            values[range_start..range_end].fill(fill_float.unwrap())
                         }
                         GcObject::ByteVector(values) => {
-                            values[offset + start..offset + end].fill(fill_byte.unwrap())
+                            values[range_start..range_end].fill(fill_byte.unwrap())
                         }
                         _ => {}
                     }
                 }
+                self.sync_subvector_views(target)?;
                 fill
             }
             BuiltinId::BooleanPredicate
@@ -20637,7 +20724,7 @@ impl UnifiedVm {
                     _ => return Err(VmError::WrongType),
                 }
                 if let Some((base, offset)) = self.subvectors.get(&arguments[0]).copied() {
-                    let parent_index = offset + index;
+                    let parent_index = offset.checked_add(index).ok_or(VmError::ArithmeticOverflow)?;
                     match self.heap.object_mut(base)? {
                         GcObject::Vector(values) => {
                             if let Some(slot) = values.get_mut(parent_index) {
@@ -20662,6 +20749,7 @@ impl UnifiedVm {
                         _ => {}
                     }
                 }
+                self.sync_subvector_views(arguments[0])?;
                 arguments[2]
             }
             BuiltinId::HashTable | BuiltinId::WeakHashTable => {
