@@ -9412,6 +9412,71 @@ impl UnifiedVm {
         ])
     }
 
+    fn runtime_syntax_has_active_escape(&self, value: GcValue) -> Result<bool, VmError> {
+        let mut pending = vec![(value, 1usize, false)];
+        let mut active = HashSet::new();
+        let mut seen = HashSet::new();
+        while let Some((value, depth, exiting)) = pending.pop() {
+            if exiting {
+                active.remove(&value);
+                continue;
+            }
+            if value.as_fixnum().is_some()
+                || value.as_character().is_some()
+                || matches!(
+                    value,
+                    GcValue::FALSE
+                        | GcValue::TRUE
+                        | GcValue::NIL
+                        | GcValue::UNSPECIFIED
+                        | GcValue::UNDEFINED
+                        | GcValue::EOF
+                )
+                || active.contains(&value)
+                || !seen.insert((value, depth))
+            {
+                continue;
+            }
+            active.insert(value);
+            pending.push((value, depth, true));
+            match self.heap.object(value)? {
+                GcObject::Pair { car, cdr } => {
+                    pending.push((*cdr, depth, false));
+                    pending.push((*car, depth, false));
+                }
+                GcObject::Vector(values) => {
+                    pending.extend(
+                        values
+                            .iter()
+                            .rev()
+                            .map(|value| (*value, depth, false)),
+                    );
+                }
+                GcObject::MultiVector { values, .. } => {
+                    pending.extend(
+                        values
+                            .iter()
+                            .rev()
+                            .map(|value| (*value, depth, false)),
+                    );
+                }
+                GcObject::Syntax(kind, payload) => match kind.as_ref() {
+                    "unquote" | "unquote-splicing" if depth == 1 => return Ok(true),
+                    "unquote" | "unquote-splicing" => {
+                        pending.push((*payload, depth.saturating_sub(1), false));
+                    }
+                    "quasiquote" => {
+                        pending.push((*payload, depth.saturating_add(1), false));
+                    }
+                    _ => pending.push((*payload, depth, false)),
+                },
+                GcObject::Commented(payload) => pending.push((*payload, depth, false)),
+                _ => {}
+            }
+        }
+        Ok(false)
+    }
+
     fn export_runtime_syntax(
         &self,
         value: GcValue,
@@ -9445,15 +9510,11 @@ impl UnifiedVm {
             _ => None,
         };
         if let Some(payload) = quoted_payload {
-            // In s7, an explicit quote directly inside the outer quasiquote
-            // does not suppress a reader-originated unquote in its payload.
-            let direct_outer_unquote = direct_outer_quasiquote
-                && matches!(
-                    self.heap.object(payload),
-                    Ok(GcObject::Syntax(kind, _))
-                        if matches!(kind.as_ref(), "unquote" | "unquote-splicing")
-                );
-            if !direct_outer_unquote {
+            // Explicit quote does not suppress reader escapes at the active
+            // outer quasiquote depth, even when they are nested in its datum.
+            let active_escape = direct_outer_quasiquote
+                && self.runtime_syntax_has_active_escape(payload)?;
+            if !active_escape {
                 let marker = Rc::new(format!("dynamic-literal-{}", literals.len()));
                 literals.push((marker.clone(), payload));
                 return Ok(Value::RootMeta(marker));
@@ -23733,6 +23794,77 @@ impl UnifiedCompiler {
         }
     }
 
+    fn syntax_value_has_active_escape(value: &Value, initial_depth: usize) -> bool {
+        let mut pending = vec![(value.clone(), initial_depth)];
+        let mut seen_pairs = HashSet::new();
+        let mut seen_vectors = HashSet::new();
+        while let Some((value, depth)) = pending.pop() {
+            match value {
+                Value::Pair(pair) => {
+                    if !seen_pairs.insert((pair.as_ptr() as usize, depth)) {
+                        continue;
+                    }
+                    match pair.syntax_origin() {
+                        crate::core::SyntaxOrigin::Unquote
+                        | crate::core::SyntaxOrigin::UnquoteSplicing
+                            if depth == 1 =>
+                        {
+                            return true;
+                        }
+                        crate::core::SyntaxOrigin::Unquote
+                        | crate::core::SyntaxOrigin::UnquoteSplicing => {
+                            if let Ok(payload) = Value::Pair(pair).cdr().and_then(|cdr| cdr.car()) {
+                                pending.push((payload, depth.saturating_sub(1)));
+                            }
+                        }
+                        crate::core::SyntaxOrigin::Quasiquote => {
+                            if let Ok(payload) = Value::Pair(pair).cdr().and_then(|cdr| cdr.car()) {
+                                pending.push((payload, depth.saturating_add(1)));
+                            }
+                        }
+                        crate::core::SyntaxOrigin::Quote => {
+                            if let Ok(payload) = Value::Pair(pair).cdr().and_then(|cdr| cdr.car()) {
+                                pending.push((payload, depth));
+                            }
+                        }
+                        crate::core::SyntaxOrigin::Explicit => {
+                            let pair = pair.borrow();
+                            pending.push((pair.cdr.clone(), depth));
+                            pending.push((pair.car.clone(), depth));
+                        }
+                    }
+                }
+                Value::Vector(values) => {
+                    if seen_vectors.insert((Rc::as_ptr(&values) as usize, depth)) {
+                        pending.extend(
+                            values
+                                .values()
+                                .into_iter()
+                                .rev()
+                                .map(|value| (value, depth)),
+                        );
+                    }
+                }
+                Value::MultiVector(values) => {
+                    if seen_vectors.insert((Rc::as_ptr(&values) as usize, depth)) {
+                        pending.extend(
+                            values
+                                .data
+                                .borrow()
+                                .iter()
+                                .rev()
+                                .cloned()
+                                .map(|value| (value, depth)),
+                        );
+                    }
+                }
+                Value::Commented(value) => pending.push((*value, depth)),
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn compile_quasiquote(
         &mut self,
         function: &mut FunctionBuilder,
@@ -23870,15 +24002,18 @@ impl UnifiedCompiler {
                                 function
                                     .code
                                     .push(UnifiedInstruction::ValidateQuasiquoteSplice);
+                                self.compile_quote(function, &Value::Nil)?;
                                 function
                                     .code
-                                    .push(UnifiedInstruction::Builtin(BuiltinId::Append, 2));
+                                    .push(UnifiedInstruction::Builtin(BuiltinId::Append, 3));
                                 return Ok(());
                             }
                             _ => {}
                         }
                     }
-                    return self.compile_quote(function, value);
+                    if !Self::syntax_value_has_active_escape(&syntax[1], depth) {
+                        return self.compile_quote(function, value);
+                    }
                 }
                 if name == "unquote" && syntax.len() == 2 {
                     if depth == 1 {
@@ -23938,14 +24073,23 @@ impl UnifiedCompiler {
                         .push(UnifiedInstruction::ValidateQuasiquoteSpliceTail(
                             segments as u16,
                         ));
+                    self.compile_quote(function, &Value::Nil)?;
                     function.code.push(UnifiedInstruction::Builtin(
                         BuiltinId::Append,
-                        (segments + 1) as u16,
+                        (segments + 2) as u16,
                     ));
                     return Ok(());
                 }
             }
         }
+        let terminal_splice = depth == 1
+            && tail.is_none()
+            && fields.last().is_some_and(|field| {
+                proper_list(field).ok().is_some_and(|parts| {
+                    parts.len() == 2
+                        && parts.first().and_then(source_name) == Some("unquote-splicing")
+                })
+            });
         let mut segments = 0usize;
         for field in &fields {
             if depth == 1 {
@@ -23967,6 +24111,10 @@ impl UnifiedCompiler {
             function
                 .code
                 .push(UnifiedInstruction::Builtin(BuiltinId::List, 1));
+            segments += 1;
+        }
+        if terminal_splice {
+            self.compile_quote(function, &Value::Nil)?;
             segments += 1;
         }
         if let Some(tail) = tail {
