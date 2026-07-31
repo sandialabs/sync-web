@@ -5375,6 +5375,7 @@ impl UnifiedVm {
                 sort.values.swap(left, right)
             }
             sort.network_stage += 1;
+            self.sync_sort_target()?;
             return self.schedule_network_step();
         }
         if self.pending_sorts.last().unwrap().mode == SortMode::Merge {
@@ -19118,7 +19119,7 @@ impl UnifiedVm {
                     let n = values.len().saturating_sub(1);
                     let k = n / 2 + 1;
                     let detected_mode = self.sort_mode(arguments[1]);
-                    let mode = if values.len() == 3 && detected_mode == SortMode::Merge {
+                    let mode = if values.len() == 3 {
                         SortMode::Network3
                     } else {
                         detected_mode
