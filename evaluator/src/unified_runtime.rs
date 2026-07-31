@@ -9465,9 +9465,9 @@ impl UnifiedVm {
                     "unquote" | "unquote-splicing" => {
                         pending.push((*payload, depth.saturating_sub(1), false));
                     }
-                    "quasiquote" => {
-                        pending.push((*payload, depth.saturating_add(1), false));
-                    }
+                    // Nested quasiquote lowering is not yet exact; do not
+                    // partially open an enclosing quote across that boundary.
+                    "quasiquote" => {}
                     _ => pending.push((*payload, depth, false)),
                 },
                 GcObject::Commented(payload) => pending.push((*payload, depth, false)),
@@ -23817,11 +23817,9 @@ impl UnifiedCompiler {
                                 pending.push((payload, depth.saturating_sub(1)));
                             }
                         }
-                        crate::core::SyntaxOrigin::Quasiquote => {
-                            if let Ok(payload) = Value::Pair(pair).cdr().and_then(|cdr| cdr.car()) {
-                                pending.push((payload, depth.saturating_add(1)));
-                            }
-                        }
+                        // Keep nested quasiquote opaque unless the complete
+                        // nested lowering path is selected.
+                        crate::core::SyntaxOrigin::Quasiquote => {}
                         crate::core::SyntaxOrigin::Quote => {
                             if let Ok(payload) = Value::Pair(pair).cdr().and_then(|cdr| cdr.car()) {
                                 pending.push((payload, depth));
@@ -23896,6 +23894,9 @@ impl UnifiedCompiler {
                     | crate::core::SyntaxOrigin::UnquoteSplicing
                         if depth == 1 =>
                     {
+                        return self.compile_quote(function, value);
+                    }
+                    crate::core::SyntaxOrigin::Quasiquote if inside_explicit_quote => {
                         return self.compile_quote(function, value);
                     }
                     crate::core::SyntaxOrigin::Unquote
