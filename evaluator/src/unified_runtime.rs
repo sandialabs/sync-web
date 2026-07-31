@@ -9418,6 +9418,17 @@ impl UnifiedVm {
         memo: &mut HashMap<GcValue, Value>,
         literals: &mut Vec<(Rc<String>, GcValue)>,
     ) -> Result<Value, VmError> {
+        self.export_runtime_syntax_inner(value, memo, literals, 0, false)
+    }
+
+    fn export_runtime_syntax_inner(
+        &self,
+        value: GcValue,
+        memo: &mut HashMap<GcValue, Value>,
+        literals: &mut Vec<(Rc<String>, GcValue)>,
+        quasiquote_depth: usize,
+        direct_outer_quasiquote: bool,
+    ) -> Result<Value, VmError> {
         if value.as_fixnum().is_some() || value.as_character().is_some()
             || matches!(value, GcValue::FALSE | GcValue::TRUE | GcValue::NIL | GcValue::UNSPECIFIED | GcValue::UNDEFINED | GcValue::EOF)
         {
@@ -9434,9 +9445,19 @@ impl UnifiedVm {
             _ => None,
         };
         if let Some(payload) = quoted_payload {
-            let marker = Rc::new(format!("dynamic-literal-{}", literals.len()));
-            literals.push((marker.clone(), payload));
-            return Ok(Value::RootMeta(marker));
+            // In s7, an explicit quote directly inside the outer quasiquote
+            // does not suppress a reader-originated unquote in its payload.
+            let direct_outer_unquote = direct_outer_quasiquote
+                && matches!(
+                    self.heap.object(payload),
+                    Ok(GcObject::Syntax(kind, _))
+                        if matches!(kind.as_ref(), "unquote" | "unquote-splicing")
+                );
+            if !direct_outer_unquote {
+                let marker = Rc::new(format!("dynamic-literal-{}", literals.len()));
+                literals.push((marker.clone(), payload));
+                return Ok(Value::RootMeta(marker));
+            }
         }
         if self.gc_value_is_self_referential(value)? {
             return Ok(Self::deferred_cyclic_syntax_value(self.pair_object_string(value)?));
@@ -9446,8 +9467,8 @@ impl UnifiedVm {
             GcObject::Pair { car, cdr } => {
                 let output = Value::cons(Value::Unspecified, Value::Unspecified);
                 memo.insert(value, output.clone());
-                let car = self.export_runtime_syntax(*car, memo, literals)?;
-                let cdr = self.export_runtime_syntax(*cdr, memo, literals)?;
+                let car = self.export_runtime_syntax_inner(*car, memo, literals, quasiquote_depth, direct_outer_quasiquote)?;
+                let cdr = self.export_runtime_syntax_inner(*cdr, memo, literals, quasiquote_depth, direct_outer_quasiquote)?;
                 output.set_car(car).map_err(|_| VmError::WrongType)?;
                 output.set_cdr(cdr).map_err(|_| VmError::WrongType)?;
                 Ok(output)
@@ -9455,7 +9476,7 @@ impl UnifiedVm {
             GcObject::Vector(values) => {
                 let output = Value::Vector(Rc::new(crate::core::VectorData::new(vec![Value::Unspecified; values.len()])));
                 memo.insert(value, output.clone());
-                let converted = values.iter().map(|value| self.export_runtime_syntax(*value, memo, literals)).collect::<Result<Vec<_>, _>>()?;
+                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote)).collect::<Result<Vec<_>, _>>()?;
                 let Value::Vector(vector) = &output else { unreachable!() };
                 for (index, value) in converted.into_iter().enumerate() { vector.set(index, value); }
                 Ok(output)
@@ -9467,7 +9488,19 @@ impl UnifiedVm {
                 Ok(Value::RootMeta(Rc::new(name.to_string())))
             }
             GcObject::Syntax(kind, payload) => {
-                let payload = self.export_runtime_syntax(*payload, memo, literals)?;
+                let payload_depth = match kind.as_ref() {
+                    "quasiquote" => quasiquote_depth.saturating_add(1),
+                    "unquote" | "unquote-splicing" => quasiquote_depth.saturating_sub(1),
+                    _ => quasiquote_depth,
+                };
+                // Nested quasiquotes and escapes leave this narrow outer
+                // context so their existing staged provenance stays intact.
+                let payload_direct = match kind.as_ref() {
+                    "quasiquote" => quasiquote_depth == 0,
+                    "unquote" | "unquote-splicing" => false,
+                    _ => direct_outer_quasiquote,
+                };
+                let payload = self.export_runtime_syntax_inner(*payload, memo, literals, payload_depth, payload_direct)?;
                 let output = Value::list(vec![Value::RootMeta(Rc::new(kind.to_string())), payload]);
                 if let Value::Pair(pair) = &output {
                     let origin = match kind.as_ref() {
@@ -9483,12 +9516,12 @@ impl UnifiedVm {
                 Ok(output)
             }
             GcObject::Commented(payload) => {
-                let output = Value::Commented(Box::new(self.export_runtime_syntax(*payload, memo, literals)?));
+                let output = Value::Commented(Box::new(self.export_runtime_syntax_inner(*payload, memo, literals, quasiquote_depth, direct_outer_quasiquote)?));
                 memo.insert(value, output.clone());
                 Ok(output)
             }
             GcObject::MultiVector { dims, values, kind } => {
-                let converted = values.iter().map(|value| self.export_runtime_syntax(*value, memo, literals)).collect::<Result<Vec<_>, _>>()?;
+                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote)).collect::<Result<Vec<_>, _>>()?;
                 let output = Value::MultiVector(Rc::new(crate::core::MultiVectorData {
                     dims: Rc::new(dims.clone()),
                     data: Rc::new(std::cell::RefCell::new(converted)),
@@ -23764,8 +23797,25 @@ impl UnifiedCompiler {
             if let Some(name) = syntax.first().and_then(source_name) {
                 if name == "quote"
                     && syntax.len() == 2
+                    && depth == 1
                     && matches!(value, Value::Pair(pair) if pair.syntax_origin() == crate::core::SyntaxOrigin::Explicit)
                 {
+                    if matches!(
+                        &syntax[1],
+                        Value::Pair(pair)
+                            if matches!(
+                                pair.syntax_origin(),
+                                crate::core::SyntaxOrigin::Unquote
+                                    | crate::core::SyntaxOrigin::UnquoteSplicing
+                            )
+                    ) {
+                        self.compile_quote(function, &Value::symbol("quote"))?;
+                        self.compile_quasiquote(function, &syntax[1], depth)?;
+                        function
+                            .code
+                            .push(UnifiedInstruction::Builtin(BuiltinId::List, 2));
+                        return Ok(());
+                    }
                     return self.compile_quote(function, value);
                 }
                 if name == "unquote" && syntax.len() == 2 {

@@ -313,6 +313,51 @@ fn external_call_and_state_change_never_commit() {
 }
 
 #[test]
+fn blockchain_uninstall_restores_exact_genesis_transition_and_terminates() {
+    let started = Instant::now();
+    let record = create_probe_record();
+    let genesis_root = PERSISTOR.root_get(record).expect("read genesis root");
+    let (genesis_transition, genesis_state, genesis_digest) =
+        PERSISTOR.branch_get(genesis_root).unwrap();
+    let genesis_source = PERSISTOR.leaf_get(genesis_transition).unwrap();
+    let source = fs::read_to_string("lisp/blockchain.scm").expect("read Blockchain fixture");
+    let install = format!("({source} \"test-password\")");
+    assert_eq!(
+        with_runtime(|| evaluate_record_unified(record, &install)),
+        "\"Installed blockchain interface\""
+    );
+    assert_eq!(
+        evaluate_record_unified(record, "(uninstall \"test-password\")"),
+        "\"Uninstalled blockchain interface\""
+    );
+    let restored_root = PERSISTOR
+        .root_get(record)
+        .expect("read restored genesis root");
+    let (restored_transition, restored_state, restored_digest) =
+        PERSISTOR.branch_get(restored_root).unwrap();
+    let restored_source = PERSISTOR.leaf_get(restored_transition).unwrap();
+    assert_eq!(
+        genesis_source,
+        b"(lambda (*sync-state* query) (cons (eval query) *sync-state*))"
+    );
+    assert_eq!(restored_source, genesis_source);
+    assert_eq!(genesis_state, NULL);
+    assert_eq!(restored_state, NULL);
+    assert_eq!(genesis_digest, NULL);
+    assert_eq!(
+        hex::encode(restored_digest),
+        "30a3939c97bc6bfe6a2721f067a17a20cc48b14873c7d1f42d34de616dd8b3f2"
+    );
+    assert_eq!(
+        hex::encode(restored_root),
+        "c444a0e3d97e131737e9d0fe5dfa4488e1f85fa75537c15ee4cb78332545c435"
+    );
+    assert_eq!(evaluate_record_unified(record, "(+ 2 2)"), "4");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    PERSISTOR.root_delete(record).expect("delete probe record");
+}
+
+#[test]
 fn rdf_nested_quasiquote_preserves_transition_bytes_and_wildcard_state() {
     let record = create_probe_record();
     let code = fs::read_to_string("lisp/rdf.scm").expect("read RDF fixture");

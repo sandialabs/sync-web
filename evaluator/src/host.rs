@@ -768,6 +768,16 @@ mod tests {
     }
 
     #[test]
+    fn unified_quasiquote_embeds_codec_expression_inside_explicit_quote() {
+        let mut host = RustHost::new();
+        host.register_codecs();
+        assert_eq!(
+            host.evaluate_unified_output("(eval '(let ((verifiable '(begin (define helper 1))) (genesis-function (byte-vector->expression (expression->byte-vector '(lambda (state query) (cons (eval query) state)))))) (object->string `(lambda () ,verifiable (define (uninstall) (expression->byte-vector (quote ,genesis-function))) (uninstall)))))"),
+            Ok("\"(lambda () (begin (define helper 1)) (define (uninstall) (expression->byte-vector (quote (lambda (state query) (cons (eval query) state))))) (uninstall))\"".into())
+        );
+    }
+
+    #[test]
     fn native_codecs_round_trip_scheme_and_hex() {
         let mut host = RustHost::new();
         host.register_codecs();
