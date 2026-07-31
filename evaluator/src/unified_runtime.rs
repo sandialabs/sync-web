@@ -1821,6 +1821,10 @@ extern "C" fn unified_vector_qsort_compare(
             values[position] = context.cells[slot];
         }
     }
+    if let Err(error) = vm.commit_subvector_storage(context.target) {
+        context.error = Some(error);
+        return 0;
+    }
     let left = unsafe { *(left as *const usize) };
     let right = unsafe { *(right as *const usize) };
     let result =
@@ -5085,6 +5089,9 @@ impl UnifiedVm {
             return Ok(());
         };
         let target = sort.target;
+        if self.subvectors.contains_key(&target) {
+            self.sync_subvector_views(target)?;
+        }
         let refreshed = match self.heap.object(target)? {
             GcObject::Vector(values) => Some(values.clone()),
             GcObject::MultiVector { values, dims, .. } if dims.len() == 1 => Some(values.clone()),
@@ -5159,7 +5166,7 @@ impl UnifiedVm {
             }
             _ => {}
         }
-        Ok(())
+        self.commit_subvector_storage(target)
     }
 
     fn finish_sort(&mut self) -> Result<(), VmError> {
@@ -5214,6 +5221,7 @@ impl UnifiedVm {
             }
             _ => return Err(VmError::WrongType),
         }
+        self.commit_subvector_storage(sort.target)?;
         self.values.push(sort.target);
         Ok(())
     }
@@ -7460,6 +7468,36 @@ impl UnifiedVm {
             *self.heap.object_mut(view)? = replacement;
         }
         Ok(())
+    }
+
+    fn commit_subvector_storage(&mut self, target: GcValue) -> Result<(), VmError> {
+        if let Some((base, offset)) = self.subvectors.get(&target).copied() {
+            let source = self.heap.object(target)?.clone();
+            match (source, self.heap.object_mut(base)?) {
+                (GcObject::Vector(source), GcObject::Vector(base)) => {
+                    for (destination, value) in base.get_mut(offset..).ok_or(VmError::OutOfRange)?.iter_mut().zip(source) {
+                        *destination = value;
+                    }
+                }
+                (GcObject::IntVector(source), GcObject::IntVector(base)) => {
+                    for (destination, value) in base.get_mut(offset..).ok_or(VmError::OutOfRange)?.iter_mut().zip(source) {
+                        *destination = value;
+                    }
+                }
+                (GcObject::FloatVector(source), GcObject::FloatVector(base)) => {
+                    for (destination, value) in base.get_mut(offset..).ok_or(VmError::OutOfRange)?.iter_mut().zip(source) {
+                        *destination = value;
+                    }
+                }
+                (GcObject::ByteVector(source), GcObject::ByteVector(base)) => {
+                    for (destination, value) in base.get_mut(offset..).ok_or(VmError::OutOfRange)?.iter_mut().zip(source) {
+                        *destination = value;
+                    }
+                }
+                _ => return Err(VmError::WrongType),
+            }
+        }
+        self.sync_subvector_views(target)
     }
 
     fn direct_applicable_ref(
@@ -11469,6 +11507,9 @@ impl UnifiedVm {
     fn copy_value(&mut self, value: GcValue) -> Result<GcValue, VmError> {
         if value.heap_parts().is_none() {
             return Ok(value);
+        }
+        if self.subvectors.contains_key(&value) {
+            self.sync_subvector_views(value)?;
         }
         let object = self.heap.object(value)?.clone();
         match object {
@@ -16109,6 +16150,9 @@ impl UnifiedVm {
                         actual: arguments.len(),
                     });
                 }
+                if self.subvectors.contains_key(&arguments[0]) {
+                    self.sync_subvector_views(arguments[0])?;
+                }
                 if arguments[0] == GcValue::NIL {
                     GcValue::NIL
                 } else {
@@ -19009,6 +19053,9 @@ impl UnifiedVm {
                         expected: "a normal procedure",
                     });
                 }
+                if self.subvectors.contains_key(&arguments[0]) {
+                    self.sync_subvector_views(arguments[0])?;
+                }
                 if matches!(self.heap.object(arguments[1]), Ok(GcObject::Closure { .. })) {
                     let target = arguments[0];
                     let mut values = match self.heap.object(target)? {
@@ -19058,11 +19105,13 @@ impl UnifiedVm {
                         && !self.sort_may_return_values(arguments[1])
                     {
                         self.qsort_vector(target, arguments[1])?;
+                        self.commit_subvector_storage(target)?;
                         self.values.push(target);
                         return Ok(());
                     }
                     if !self.sort_may_return_values(arguments[1]) {
                         self.qsort_sequence(target, arguments[1], &mut values)?;
+                        self.commit_subvector_storage(target)?;
                         self.values.push(target);
                         return Ok(());
                     }
@@ -19243,6 +19292,7 @@ impl UnifiedVm {
                     }
                     _ => return Err(VmError::WrongType),
                 }
+                self.commit_subvector_storage(target)?;
                 target
             }
             BuiltinId::MakeVector => {
@@ -19588,6 +19638,9 @@ impl UnifiedVm {
                         actual: arguments.len(),
                     });
                 }
+                if self.subvectors.contains_key(&arguments[0]) {
+                    self.sync_subvector_views(arguments[0])?;
+                }
                 match self.heap.object(arguments[0]) {
                     Ok(
                         GcObject::Vector(_)
@@ -19604,6 +19657,7 @@ impl UnifiedVm {
                             GcObject::Text(text) => *text = text.chars().rev().collect(),
                             _ => unreachable!(),
                         }
+                        self.commit_subvector_storage(arguments[0])?;
                         arguments[0]
                     }
                     Ok(GcObject::Pair { .. }) => {
@@ -20235,6 +20289,9 @@ impl UnifiedVm {
                         actual: arguments.len(),
                     });
                 }
+                if self.subvectors.contains_key(&arguments[0]) {
+                    self.sync_subvector_views(arguments[0])?;
+                }
                 let index = arguments[1]
                     .as_fixnum()
                     .ok_or_else(|| VmError::TypeArgument {
@@ -20258,6 +20315,7 @@ impl UnifiedVm {
                     return Err(VmError::WrongType);
                 };
                 *values.get_mut(index).ok_or(VmError::WrongType)? = value;
+                self.commit_subvector_storage(arguments[0])?;
                 arguments[2]
             }
             BuiltinId::VectorPredicate
@@ -20680,6 +20738,9 @@ impl UnifiedVm {
                     } else {
                         None
                     };
+                if self.subvectors.contains_key(&arguments[0]) {
+                    self.sync_subvector_views(arguments[0])?;
+                }
                 match self.heap.object_mut(arguments[0])? {
                     GcObject::Vector(values) => {
                         *values
@@ -20749,7 +20810,7 @@ impl UnifiedVm {
                         _ => {}
                     }
                 }
-                self.sync_subvector_views(arguments[0])?;
+                self.commit_subvector_storage(arguments[0])?;
                 arguments[2]
             }
             BuiltinId::HashTable | BuiltinId::WeakHashTable => {

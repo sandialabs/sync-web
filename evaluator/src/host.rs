@@ -870,6 +870,18 @@ mod tests {
             host.evaluate_unified_output("(let ((n 0)) (list (catch #t (lambda () (subvector #u(1 2) (begin (set! n (+ n 1)) 3))) (lambda args 'error)) n))"),
             Ok("(error 1)".into())
         );
+        assert_eq!(
+            host.evaluate_unified_output("(list (let* ((v #u(1 2 3 4)) (s (subvector v 1 3))) (reverse! v) (list v s)) (let* ((v #u(1 2 3 4)) (s (subvector v 1 3))) (reverse! s) (list v s)) (let* ((v #u(3 1 2 4)) (s (subvector v 0 3))) (sort! v <) (list v s)) (let* ((v #u(3 1 2 4)) (s (subvector v 0 3))) (sort! s <) (list v s)))"),
+            Ok("((#u(4 3 2 1) #u(3 2)) (#u(1 3 2 4) #u(3 2)) (#u(1 2 3 4) #u(1 2 3)) (#u(1 2 3 4) #u(1 2 3)))".into())
+        );
+        assert_eq!(
+            host.evaluate_unified_output("(list (let* ((n 0) (v #u(3 1 2 4)) (s (subvector v 0 3))) (list (catch #t (lambda () (sort! s (lambda (a b) (set! n (+ n 1)) (if (= n 1) (error 'stop \"stop\") (< a b))))) (lambda args 'error)) v s n)) (let* ((n 0) (v #u(3 1 2 4)) (s (subvector v 0 3))) (sort! s (lambda (a b) (set! n (+ n 1)) (< a b))) (list v s (> n 0))))"),
+            Ok("((error #u(3 1 2 4) #u(3 1 2) 1) (#u(1 2 3 4) #u(1 2 3) #t))".into())
+        );
+        assert_eq!(
+            host.evaluate_unified_output("(list (let* ((v #(3 1 2 4)) (s (subvector v 0 3))) (reverse! s) (sort! v <) (set! (s 0) 8) (fill! s 7 1 2) (copy #(6) s 0) (list v s)) (let* ((v #i(3 1 2 4)) (s (subvector v 0 3))) (reverse! s) (sort! v <) (set! (s 0) 8) (fill! s 7 1 2) (copy #i(6) s 0) (list v s)) (let* ((v #r(3 1 2 4)) (s (subvector v 0 3))) (reverse! s) (sort! v <) (float-vector-set! s 0 8) (fill! s 7 1 2) (copy #r(6) s 0) (list v s)) (let* ((v #u(3 1 2 4)) (s (subvector v 0 3))) (reverse! s) (sort! v <) (set! (s 0) 8) (fill! s 7 1 2) (copy #u(6) s 0) (list v s)))"),
+            Ok("((#(6 7 3 4) #(6 7 3)) (#i(6 7 3 4) #i(6 7 3)) (#r(6.0 7.0 3.0 4.0) #r(6.0 7.0 3.0)) (#u(6 7 3 4) #u(6 7 3)))".into())
+        );
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '`(a ,x)))").unwrap().to_string(),"\"286c6973742d76616c756573202761207829\"");
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '`(a . ,x)))").unwrap().to_string(),"\"283c6c6973742a3e20286c6973742d76616c75657320276129207829\"");
         assert_eq!(host.evaluate("(byte-vector->hex-string (expression->byte-vector '(quasiquote (a (unquote x)))))").unwrap().to_string(),"\"28717561736971756f74652028612028756e71756f74652078292929\"");
