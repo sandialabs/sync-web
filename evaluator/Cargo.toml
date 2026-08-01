@@ -9,6 +9,7 @@ cranelift-frontend = "0.133"
 cranelift-jit = "0.133"
 cranelift-module = "0.133"
 cranelift-native = "0.133"
+sha2 = "0.10"
 [profile.release]
 lto = "thin"
 codegen-units = 1

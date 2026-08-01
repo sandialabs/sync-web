@@ -15,6 +15,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
 use crate::host::{BorrowedValue, HostArgument, HostCallContext, HostError, HostObject, HostOutput, PrimitiveSpec};
 use crate::Value;
 
@@ -29,6 +31,7 @@ const INDEX_MASK: u64 = u32::MAX as u64;
 const EPOCH_BITS: u32 = 64 - TAG_BITS - INDEX_BITS;
 const EPOCH_MASK: u32 = (1 << EPOCH_BITS) - 1;
 const PAGE_CELLS: usize = 1024;
+const UNIFIED_SEMANTIC_ABI: u64 = 1;
 
 /// Shared identity-aware traversal used by both frozen source graphs and request-local
 /// GC graphs. Nodes without identity can contain graph nodes but cannot close a cycle.
@@ -1597,6 +1600,257 @@ pub(crate) struct ImmutableModule {
     pub(crate) semantic_abi: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PreparedCompilerProfile {
+    dynamic_top: bool,
+    fast_execution: bool,
+    condition_boundary_version: u32,
+    lossy_genesis_decode_version: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PreparedPrimitiveDescriptor {
+    name: Arc<str>,
+    minimum: u32,
+    maximum: Option<u32>,
+    policy_class: Arc<str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PreparedProgramKey {
+    key_format: u32,
+    semantic_abi: u64,
+    compiler_profile: PreparedCompilerProfile,
+    initialization_digest: [u8; 32],
+    genesis_bytes_digest: [u8; 32],
+    primitive_policy_digest: [u8; 32],
+    authority_profile_digest: [u8; 32],
+}
+
+impl PreparedProgramKey {
+    fn new(
+        initialization: &[&[u8]],
+        genesis_bytes: &[u8],
+        compiler_profile: PreparedCompilerProfile,
+        primitive_policy: &[PreparedPrimitiveDescriptor],
+        authority_profile: &[u8],
+    ) -> Self {
+        let initialization_digest = canonical_digest(b"arrival-initialization-v1", initialization);
+        let genesis_bytes_digest = canonical_digest(b"arrival-genesis-bytes-v1", &[genesis_bytes]);
+        let mut primitive_fields = Vec::with_capacity(primitive_policy.len() * 5);
+        for (index, primitive) in primitive_policy.iter().enumerate() {
+            primitive_fields.push((index as u64).to_le_bytes().to_vec());
+            primitive_fields.push(primitive.name.as_bytes().to_vec());
+            primitive_fields.push(primitive.minimum.to_le_bytes().to_vec());
+            primitive_fields.push(match primitive.maximum {
+                Some(value) => {
+                    let mut field = vec![1];
+                    field.extend_from_slice(&value.to_le_bytes());
+                    field
+                }
+                None => vec![0],
+            });
+            primitive_fields.push(primitive.policy_class.as_bytes().to_vec());
+        }
+        let primitive_refs = primitive_fields.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let primitive_policy_digest = canonical_digest(b"arrival-primitive-policy-v1", &primitive_refs);
+        let authority_profile_digest = canonical_digest(b"arrival-authority-profile-v1", &[authority_profile]);
+        Self {
+            key_format: 1,
+            semantic_abi: UNIFIED_SEMANTIC_ABI,
+            compiler_profile,
+            initialization_digest,
+            genesis_bytes_digest,
+            primitive_policy_digest,
+            authority_profile_digest,
+        }
+    }
+}
+
+fn canonical_digest(domain: &[u8], fields: &[&[u8]]) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update((domain.len() as u64).to_le_bytes());
+    digest.update(domain);
+    digest.update((fields.len() as u64).to_le_bytes());
+    for field in fields {
+        digest.update((field.len() as u64).to_le_bytes());
+        digest.update(field);
+    }
+    digest.finalize().into()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PreparedEntryRole {
+    InitializeRoot,
+    MaterializeGenesis,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreparedEntry {
+    module: ModuleId,
+    function: FunctionId,
+    role: PreparedEntryRole,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedProgram {
+    key: PreparedProgramKey,
+    modules: Arc<[Arc<ImmutableModule>]>,
+    entries: Arc<[PreparedEntry]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreparedProgramError {
+    Empty,
+    ModuleCount,
+    Compile,
+    ModuleId,
+    SemanticAbi,
+    EntryOrder,
+    EntryIdentity,
+    EntryBounds,
+    DynamicLiteral,
+    Compatibility,
+    VmNotFresh,
+}
+
+impl PreparedProgram {
+    fn prepare(
+        initialization: &[&[u8]],
+        genesis_bytes: &[u8],
+        compiler_profile: PreparedCompilerProfile,
+        primitive_policy: &[PreparedPrimitiveDescriptor],
+        authority_profile: &[u8],
+    ) -> Result<Self, PreparedProgramError> {
+        let key = PreparedProgramKey::new(
+            initialization,
+            genesis_bytes,
+            compiler_profile,
+            primitive_policy,
+            authority_profile,
+        );
+        let mut initialization_expressions = Vec::new();
+        for source in initialization {
+            let source = std::str::from_utf8(source).map_err(|_| PreparedProgramError::Compile)?;
+            initialization_expressions.extend(
+                crate::parse_all(source).map_err(|_| PreparedProgramError::Compile)?,
+            );
+        }
+        let genesis_source = String::from_utf8_lossy(genesis_bytes);
+        let genesis_expressions =
+            crate::parse_all(&genesis_source).map_err(|_| PreparedProgramError::Compile)?;
+        let initialization_module = UnifiedCompiler::compile_values_with_mode(
+            ModuleId(0),
+            initialization_expressions,
+            compiler_profile.dynamic_top,
+            None,
+            &[],
+            compiler_profile.fast_execution,
+        )
+        .map_err(|_| PreparedProgramError::Compile)?;
+        let genesis_module = UnifiedCompiler::compile_values_with_mode(
+            ModuleId(1),
+            genesis_expressions,
+            compiler_profile.dynamic_top,
+            None,
+            &[],
+            compiler_profile.fast_execution,
+        )
+        .map_err(|_| PreparedProgramError::Compile)?;
+        Self::new(
+            key,
+            vec![initialization_module, genesis_module],
+            vec![
+                PreparedEntry {
+                    module: ModuleId(0),
+                    function: FunctionId(0),
+                    role: PreparedEntryRole::InitializeRoot,
+                },
+                PreparedEntry {
+                    module: ModuleId(1),
+                    function: FunctionId(0),
+                    role: PreparedEntryRole::MaterializeGenesis,
+                },
+            ],
+        )
+    }
+
+    fn new(
+        key: PreparedProgramKey,
+        modules: Vec<Arc<ImmutableModule>>,
+        entries: Vec<PreparedEntry>,
+    ) -> Result<Self, PreparedProgramError> {
+        if modules.is_empty() {
+            return Err(PreparedProgramError::Empty);
+        }
+        if modules.len() != 2 {
+            return Err(PreparedProgramError::ModuleCount);
+        }
+        for (index, module) in modules.iter().enumerate() {
+            if module.id != ModuleId(index as u32) {
+                return Err(PreparedProgramError::ModuleId);
+            }
+            if module.semantic_abi != key.semantic_abi || module.semantic_abi != UNIFIED_SEMANTIC_ABI {
+                return Err(PreparedProgramError::SemanticAbi);
+            }
+            if module.code.iter().any(|instruction| matches!(
+                instruction,
+                UnifiedInstruction::DynamicLiteral(_) | UnifiedInstruction::DynamicQuotedLiteral(_)
+            )) {
+                return Err(PreparedProgramError::DynamicLiteral);
+            }
+        }
+        if !matches!(entries.as_slice(), [
+            PreparedEntry { role: PreparedEntryRole::InitializeRoot, .. },
+            PreparedEntry { role: PreparedEntryRole::MaterializeGenesis, .. },
+        ]) {
+            return Err(PreparedProgramError::EntryOrder);
+        }
+        if entries[0].module != ModuleId(0)
+            || entries[0].function != FunctionId(0)
+            || entries[1].module != ModuleId(1)
+            || entries[1].function != FunctionId(0)
+        {
+            return Err(PreparedProgramError::EntryIdentity);
+        }
+        for entry in &entries {
+            let Some(module) = modules.get(entry.module.0 as usize) else {
+                return Err(PreparedProgramError::EntryBounds);
+            };
+            if entry.function.0 as usize >= module.functions.len() {
+                return Err(PreparedProgramError::EntryBounds);
+            }
+        }
+        Ok(Self {
+            key,
+            modules: modules.into(),
+            entries: entries.into(),
+        })
+    }
+
+    fn install_into(
+        &self,
+        vm: &mut UnifiedVm,
+        current_key: &PreparedProgramKey,
+    ) -> Result<(), PreparedProgramError> {
+        if &self.key != current_key {
+            return Err(PreparedProgramError::Compatibility);
+        }
+        if !vm.modules.is_empty() {
+            return Err(PreparedProgramError::VmNotFresh);
+        }
+        for module in self.modules.iter() {
+            vm.install_module(Arc::clone(module));
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn contains_source_fragment(&self, needle: &str) -> bool {
+        self.modules.iter().any(|module| format!("{module:?}").contains(needle))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SchemeCondition {
     tag: GcValue,
@@ -2029,6 +2283,179 @@ pub(crate) struct UnifiedVm {
     star_defaults: HashMap<(GcValue, u16), GcValue>,
     provided: HashSet<String>,
     macroexpand_quote_result: bool,
+    #[cfg(test)]
+    request_lifecycle: RequestLifecycleCounts,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RequestLifecycleCounts {
+    begins: u64,
+    roots: u64,
+    finishes: u64,
+    aborts: u64,
+}
+
+struct ActiveRequest<'a> {
+    vm: &'a mut UnifiedVm,
+    active: bool,
+    linkage_base: usize,
+}
+
+impl<'a> ActiveRequest<'a> {
+    fn begin(vm: &'a mut UnifiedVm, arguments: &[GcValue]) -> Result<Self, VmError> {
+        vm.reset_request_state();
+        vm.heap.begin_request_generation()?;
+        #[cfg(test)]
+        {
+            vm.request_lifecycle.begins += 1;
+        }
+        let mut request = Self {
+            vm,
+            active: true,
+            linkage_base: 0,
+        };
+        if arguments.iter().any(|value| value.is_heap()) {
+            return Err(VmError::CrossRequestValue);
+        }
+        let outer = request.vm.heap.lexical_frame_with_roots(
+            None,
+            Vec::new(),
+            Arc::from([]),
+            arguments,
+        )?;
+        let pi = request.vm.heap.allocate_with_roots(
+            GcObject::Float(std::f64::consts::PI),
+            &[outer],
+        )?;
+        request.vm.heap.define(outer, "pi", pi)?;
+        request.vm.root_environment = Some(outer);
+        request.vm.install_host_bindings(outer)?;
+        request.linkage_base = request.vm.temp_roots.len();
+        #[cfg(test)]
+        {
+            request.vm.request_lifecycle.roots += 1;
+        }
+        Ok(request)
+    }
+
+    fn execute_entry(
+        &mut self,
+        module: ModuleId,
+        function: FunctionId,
+        arguments: &[GcValue],
+    ) -> Result<GcValue, VmError> {
+        if !self.entry_boundary_is_clear() {
+            return Err(VmError::InvalidInstruction);
+        }
+        let outer = self.vm.root_environment.ok_or(VmError::InvalidInstruction)?;
+        let mut roots = Vec::with_capacity(arguments.len() + 1);
+        roots.push(outer);
+        roots.extend_from_slice(arguments);
+        let closure = self.vm.heap.closure_with_roots(module, function.0, outer, &roots)?;
+        self.vm.push_call(module, function, closure, outer, arguments.to_vec(), false)?;
+        self.vm.execute_until_entry_return()
+    }
+
+    fn link(&mut self, value: GcValue) -> usize {
+        let index = self.vm.temp_roots.len() - self.linkage_base;
+        self.vm.temp_roots.push(value);
+        index
+    }
+
+    fn linked(&self, index: usize) -> Result<GcValue, VmError> {
+        self.vm
+            .temp_roots
+            .get(self.linkage_base + index)
+            .copied()
+            .ok_or(VmError::InvalidInstruction)
+    }
+
+    fn execute_linked(
+        &mut self,
+        index: usize,
+        arguments: &[GcValue],
+    ) -> Result<GcValue, VmError> {
+        if !self.entry_boundary_is_clear() {
+            return Err(VmError::InvalidInstruction);
+        }
+        let closure = self.linked(index)?;
+        let (module, function, environment) = match self.vm.heap.object(closure)? {
+            GcObject::Closure { module, entry, environment, .. } => {
+                (*module, FunctionId(*entry), *environment)
+            }
+            _ => return Err(VmError::WrongType),
+        };
+        self.vm.push_call(module, function, closure, environment, arguments.to_vec(), false)?;
+        self.vm.execute_until_entry_return()
+    }
+
+    fn entry_boundary_is_clear(&self) -> bool {
+        self.vm.frames.is_empty()
+            && self.vm.values.is_empty()
+            && self.vm.handlers.is_empty()
+            && self.vm.pending_macros.is_empty()
+            && self.vm.pending_invokes.is_empty()
+            && self.vm.pending_maps.is_empty()
+            && self.vm.pending_hash_sets.is_empty()
+            && self.vm.pending_searches.is_empty()
+            && self.vm.pending_sorts.is_empty()
+            && self.vm.pending_outputs.is_empty()
+            && self.vm.pending_function_ports.is_empty()
+            && self.vm.pending_port_scopes.is_empty()
+            && self.vm.pending_input_scopes.is_empty()
+            && self.vm.pending_evals.is_empty()
+    }
+
+    fn normalize_error(&mut self, error: VmError) -> VmError {
+        match &error {
+            VmError::Scheme(condition) => VmError::Rendered(self.vm.render_condition(condition)),
+            VmError::TypeArgument { .. }
+            | VmError::PairArgument { .. }
+            | VmError::RangeArgument { .. }
+            | VmError::LambdaArity { .. }
+            | VmError::DuplicateKeyword(..)
+            | VmError::UnknownKeyword { .. }
+            | VmError::NoSetter { .. }
+            | VmError::NoSetterValue { .. }
+            | VmError::SymbolSetUnbound { .. }
+            | VmError::SetMissing { .. }
+            | VmError::SetReduction { .. }
+            | VmError::ApplyReduction { .. } => match self.vm.error_condition(&error) {
+                Ok(condition) => VmError::Rendered(self.vm.render_condition(&condition)),
+                Err(_) => error,
+            },
+            _ => error,
+        }
+    }
+
+    fn finish(mut self, value: GcValue) -> Result<RootLease, VmError> {
+        let root = self.vm.heap.root(value)?;
+        let finished = self.vm.heap.finish_request_generation();
+        self.active = false;
+        #[cfg(test)]
+        {
+            self.vm.request_lifecycle.finishes += 1;
+        }
+        finished?;
+        Ok(root)
+    }
+}
+
+impl Drop for ActiveRequest<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.vm.temp_roots.truncate(self.linkage_base);
+        let _ = self.vm.heap.finish_request_generation();
+        self.active = false;
+        #[cfg(test)]
+        {
+            self.vm.request_lifecycle.finishes += 1;
+            self.vm.request_lifecycle.aborts += 1;
+        }
+    }
 }
 
 impl UnifiedVm {
@@ -2103,6 +2530,8 @@ impl UnifiedVm {
             star_defaults: HashMap::new(),
             provided: HashSet::new(),
             macroexpand_quote_result: false,
+            #[cfg(test)]
+            request_lifecycle: RequestLifecycleCounts::default(),
         }
     }
 
@@ -2205,67 +2634,18 @@ impl UnifiedVm {
         function: FunctionId,
         arguments: &[GcValue],
     ) -> Result<RootLease, VmError> {
-        self.reset_request_state();
-        self.heap.begin_request_generation()?;
-        if arguments.iter().any(|value| value.is_heap()) {
-            let _ = self.heap.finish_request_generation();
-            return Err(VmError::CrossRequestValue);
-        }
-        let result = self.run_inner(module, function, arguments);
-        match result {
-            Ok(value) => {
-                let root = self.heap.root(value)?;
-                self.heap.finish_request_generation()?;
-                Ok(root)
-            }
+        let mut request = ActiveRequest::begin(self, arguments)?;
+        match request.execute_entry(module, function, arguments) {
+            Ok(value) => request.finish(value),
             Err(error) => {
-                let error = match &error {
-                    VmError::Scheme(condition) => {
-                        VmError::Rendered(self.render_condition(condition))
-                    }
-                    VmError::TypeArgument { .. }
-                    | VmError::PairArgument { .. }
-                    | VmError::RangeArgument { .. }
-                    | VmError::LambdaArity { .. }
-                    | VmError::DuplicateKeyword(..)
-                    | VmError::UnknownKeyword { .. }
-                    | VmError::NoSetter { .. }
-                    | VmError::NoSetterValue { .. }
-                    | VmError::SymbolSetUnbound { .. }
-                    | VmError::SetMissing { .. }
-                    | VmError::SetReduction { .. }
-                    | VmError::ApplyReduction { .. } => match self.error_condition(&error) {
-                        Ok(condition) => VmError::Rendered(self.render_condition(&condition)),
-                        Err(_) => error,
-                    },
-                    _ => error,
-                };
-                let _ = self.heap.finish_request_generation();
+                let error = request.normalize_error(error);
+                drop(request);
                 Err(error)
             }
         }
     }
 
-    fn run_inner(
-        &mut self,
-        module: ModuleId,
-        function: FunctionId,
-        arguments: &[GcValue],
-    ) -> Result<GcValue, VmError> {
-        let _definition = self.function(module, function)?;
-        let outer =
-            self.heap
-                .lexical_frame_with_roots(None, Vec::new(), Arc::from([]), arguments)?;
-        let pi = self
-            .heap
-            .allocate_with_roots(GcObject::Float(std::f64::consts::PI), &[outer])?;
-        self.heap.define(outer, "pi", pi)?;
-        let closure = self
-            .heap
-            .closure_with_roots(module, function.0, outer, &[outer, pi])?;
-        self.root_environment = Some(outer);
-        self.install_host_bindings(outer)?;
-        self.push_call(module, function, closure, outer, arguments.to_vec(), false)?;
+    fn execute_until_entry_return(&mut self) -> Result<GcValue, VmError> {
         loop {
             if self.steps >= self.step_limit {
                 return Err(VmError::StepLimit);
@@ -22215,7 +22595,7 @@ impl UnifiedCompiler {
             functions: functions.into(),
             constants: self.constants.into(),
             tail_self_binary: self.tail_self_binary.into(),
-            semantic_abi: 1,
+            semantic_abi: UNIFIED_SEMANTIC_ABI,
         }))
     }
 
@@ -27291,7 +27671,524 @@ mod tests {
     use crate::{Env, Params, Procedure, Value};
     use std::cell::RefCell;
     use std::mem::size_of;
+    use std::thread;
     use std::time::Instant;
+
+    fn prepared_profile() -> PreparedCompilerProfile {
+        PreparedCompilerProfile {
+            dynamic_top: true,
+            fast_execution: true,
+            condition_boundary_version: 1,
+            lossy_genesis_decode_version: 1,
+        }
+    }
+
+    fn prepared_policy() -> Vec<PreparedPrimitiveDescriptor> {
+        vec![PreparedPrimitiveDescriptor {
+            name: Arc::from("tick"),
+            minimum: 0,
+            maximum: Some(0),
+            policy_class: Arc::from("deterministic-test"),
+        }]
+    }
+
+    fn prepared_key(initialization: &[&str], genesis: &[u8]) -> PreparedProgramKey {
+        let chunks = initialization.iter().map(|source| source.as_bytes()).collect::<Vec<_>>();
+        PreparedProgramKey::new(
+            &chunks,
+            genesis,
+            prepared_profile(),
+            &prepared_policy(),
+            b"authority-profile-test-v1",
+        )
+    }
+
+    fn compile_dynamic_module(id: u32, source: &str) -> Arc<ImmutableModule> {
+        UnifiedCompiler::compile_values(ModuleId(id), crate::parse_all(source).unwrap(), true)
+            .unwrap()
+    }
+
+    fn prepared_program(initialization: &str, genesis: &str) -> PreparedProgram {
+        PreparedProgram::prepare(
+            &[initialization.as_bytes()],
+            genesis.as_bytes(),
+            prepared_profile(),
+            &prepared_policy(),
+            b"authority-profile-test-v1",
+        )
+        .unwrap()
+    }
+
+    fn execute_prepared(
+        program: &PreparedProgram,
+        query: &str,
+        state: i64,
+    ) -> Result<(String, RequestLifecycleCounts), VmError> {
+        let mut vm = UnifiedVm::new(200_000, 2_000_000);
+        program.install_into(&mut vm, &program.key).unwrap();
+        let query_id = program.modules.len() as u32;
+        vm.install_module(compile_dynamic_module(query_id, query));
+        let mut request = ActiveRequest::begin(&mut vm, &[])?;
+        let initialize = program.entries[0];
+        let genesis = program.entries[1];
+        request.execute_entry(initialize.module, initialize.function, &[])?;
+        let genesis = request.execute_entry(genesis.module, genesis.function, &[])?;
+        let linkage = request.link(genesis);
+        let query = request.execute_entry(ModuleId(query_id), FunctionId(0), &[])?;
+        let state = GcValue::fixnum(state).ok_or(VmError::OutOfRange)?;
+        let value = request.execute_linked(linkage, &[state, query])?;
+        let lease = request.finish(value)?;
+        let output = vm.format_value(lease.value())?;
+        Ok((output, vm.request_lifecycle))
+    }
+
+    #[test]
+    fn prepared_program_is_send_sync_and_key_is_canonical_and_sensitive() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ImmutableModule>();
+        assert_send_sync::<PreparedProgramKey>();
+        assert_send_sync::<PreparedProgram>();
+
+        let base = prepared_key(&["first", "second"], b"genesis");
+        assert_eq!(base, prepared_key(&["first", "second"], b"genesis"));
+        assert_ne!(base, prepared_key(&["second", "first"], b"genesis"));
+        assert_ne!(base, prepared_key(&["first", "second!"], b"genesis"));
+        assert_ne!(base, prepared_key(&["first", "second"], b"genesis!"));
+
+        let mut profile = prepared_profile();
+        profile.fast_execution = false;
+        let chunks = [b"first".as_slice(), b"second".as_slice()];
+        let changed_profile = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            profile,
+            &prepared_policy(),
+            b"authority-profile-test-v1",
+        );
+        assert_ne!(base, changed_profile);
+
+        let mut policy = prepared_policy();
+        policy[0].minimum = 1;
+        let changed_arity = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &policy,
+            b"authority-profile-test-v1",
+        );
+        assert_ne!(base, changed_arity);
+        policy[0].minimum = 0;
+        policy[0].maximum = Some(u32::MAX);
+        let finite_maximum = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &policy,
+            b"authority-profile-test-v1",
+        );
+        policy[0].maximum = None;
+        let variadic = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &policy,
+            b"authority-profile-test-v1",
+        );
+        assert_ne!(finite_maximum, variadic);
+        policy[0].maximum = Some(0);
+        policy[0].policy_class = Arc::from("other");
+        let changed_policy = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &policy,
+            b"authority-profile-test-v1",
+        );
+        assert_ne!(base, changed_policy);
+        let mut ordered = prepared_policy();
+        ordered.push(PreparedPrimitiveDescriptor {
+            name: Arc::from("other"),
+            minimum: 1,
+            maximum: None,
+            policy_class: Arc::from("deterministic-test"),
+        });
+        let forward = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &ordered,
+            b"authority-profile-test-v1",
+        );
+        ordered.reverse();
+        let reverse = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &ordered,
+            b"authority-profile-test-v1",
+        );
+        assert_ne!(forward, reverse);
+        let changed_authority = PreparedProgramKey::new(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &prepared_policy(),
+            b"authority-profile-test-v2",
+        );
+        assert_ne!(base, changed_authority);
+        let mut changed_abi = base.clone();
+        changed_abi.semantic_abi += 1;
+        assert_ne!(base, changed_abi);
+    }
+
+    #[test]
+    fn prepared_program_rejects_invalid_modules_before_entry() {
+        let initialization = "(define stable 1)";
+        let genesis = "(lambda (state query) (+ stable state query))";
+        let valid = prepared_program(initialization, genesis);
+        assert!(!valid.contains_source_fragment("QUERY-CREDENTIAL-SENTINEL"));
+        assert_eq!(
+            PreparedProgram::prepare(
+                &[&[0xff]],
+                genesis.as_bytes(),
+                prepared_profile(),
+                &prepared_policy(),
+                b"authority-profile-test-v1",
+            )
+            .unwrap_err(),
+            PreparedProgramError::Compile
+        );
+        let mut extra = (*valid.modules[1]).clone();
+        extra.id = ModuleId(2);
+        assert_eq!(
+            PreparedProgram::new(
+                valid.key.clone(),
+                vec![
+                    Arc::clone(&valid.modules[0]),
+                    Arc::clone(&valid.modules[1]),
+                    Arc::new(extra),
+                ],
+                valid.entries.to_vec(),
+            )
+            .unwrap_err(),
+            PreparedProgramError::ModuleCount
+        );
+
+        let mut vm = UnifiedVm::new(1_000, 1_000);
+        let mut wrong_key = valid.key.clone();
+        wrong_key.authority_profile_digest[0] ^= 1;
+        assert_eq!(
+            valid.install_into(&mut vm, &wrong_key),
+            Err(PreparedProgramError::Compatibility)
+        );
+        assert!(vm.modules.is_empty());
+        assert_eq!(vm.request_lifecycle, RequestLifecycleCounts::default());
+        valid.install_into(&mut vm, &valid.key).unwrap();
+        assert_eq!(
+            valid.install_into(&mut vm, &valid.key),
+            Err(PreparedProgramError::VmNotFresh)
+        );
+        assert_eq!(vm.request_lifecycle, RequestLifecycleCounts::default());
+
+        let mut wrong_id = (*valid.modules[0]).clone();
+        wrong_id.id = ModuleId(7);
+        assert_eq!(
+            PreparedProgram::new(
+                valid.key.clone(),
+                vec![Arc::new(wrong_id), Arc::clone(&valid.modules[1])],
+                valid.entries.to_vec(),
+            )
+            .unwrap_err(),
+            PreparedProgramError::ModuleId
+        );
+        let mut wrong_abi = (*valid.modules[0]).clone();
+        wrong_abi.semantic_abi += 1;
+        assert_eq!(
+            PreparedProgram::new(
+                valid.key.clone(),
+                vec![Arc::new(wrong_abi), Arc::clone(&valid.modules[1])],
+                valid.entries.to_vec(),
+            )
+            .unwrap_err(),
+            PreparedProgramError::SemanticAbi
+        );
+        let mut dynamic = (*valid.modules[0]).clone();
+        dynamic.code = Arc::from([UnifiedInstruction::DynamicLiteral(0), UnifiedInstruction::Return]);
+        assert_eq!(
+            PreparedProgram::new(
+                valid.key.clone(),
+                vec![Arc::new(dynamic), Arc::clone(&valid.modules[1])],
+                valid.entries.to_vec(),
+            )
+            .unwrap_err(),
+            PreparedProgramError::DynamicLiteral
+        );
+        let mut reversed = valid.entries.to_vec();
+        reversed.reverse();
+        assert_eq!(
+            PreparedProgram::new(valid.key.clone(), valid.modules.to_vec(), reversed).unwrap_err(),
+            PreparedProgramError::EntryOrder
+        );
+        let mut swapped_identity = valid.entries.to_vec();
+        swapped_identity[0].module = ModuleId(1);
+        swapped_identity[1].module = ModuleId(0);
+        assert_eq!(
+            PreparedProgram::new(valid.key.clone(), valid.modules.to_vec(), swapped_identity)
+                .unwrap_err(),
+            PreparedProgramError::EntryIdentity
+        );
+        let mut out_of_bounds = valid.entries.to_vec();
+        out_of_bounds[1].module = ModuleId(u32::MAX);
+        assert_eq!(
+            PreparedProgram::new(valid.key.clone(), valid.modules.to_vec(), out_of_bounds)
+                .unwrap_err(),
+            PreparedProgramError::EntryIdentity
+        );
+        let mut missing_function = (*valid.modules[1]).clone();
+        missing_function.functions = Arc::from([]);
+        assert_eq!(
+            PreparedProgram::new(
+                valid.key.clone(),
+                vec![Arc::clone(&valid.modules[0]), Arc::new(missing_function)],
+                valid.entries.to_vec(),
+            )
+            .unwrap_err(),
+            PreparedProgramError::EntryBounds
+        );
+    }
+
+    #[test]
+    fn active_request_executes_all_entries_in_one_root_and_one_generation() {
+        let program = prepared_program(
+            "(begin (define shared 10) (set! shared (+ shared 1)))",
+            "(lambda (state query) (list shared state query))",
+        );
+        let (output, counts) = execute_prepared(&program, "(+ shared 2)", 3).unwrap();
+        assert_eq!(output, "(11 3 13)");
+        assert_eq!(counts.begins, 1);
+        assert_eq!(counts.roots, 1);
+        assert_eq!(counts.finishes, 1);
+        assert_eq!(counts.aborts, 0);
+    }
+
+    #[test]
+    fn active_request_roots_linkage_and_aborts_once_without_replay() {
+        let calls = Rc::new(Cell::new(0));
+        let callback_calls = calls.clone();
+        let primitive = PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            callback_calls.set(callback_calls.get() + 1);
+            Ok(HostOutput::Int(7))
+        });
+        let mut vm = UnifiedVm::with_host(
+            10_000,
+            10_000,
+            vec![primitive],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        let initialization = compile_dynamic_module(0, "(define observed (tick))");
+        let genesis = compile_dynamic_module(1, "(lambda (state query) (error 'prepared-error \"boom\"))");
+        vm.install_module(initialization);
+        vm.install_module(genesis);
+        {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
+            let closure = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
+            let linkage = request.link(closure);
+            let roots = request.vm.all_active_roots_with(&[]);
+            request.vm.heap.collect_full_with_roots(&roots).unwrap();
+            assert!(matches!(request.vm.heap.object(request.linked(linkage).unwrap()), Ok(GcObject::Closure { .. })));
+            let error = request.execute_linked(linkage, &[GcValue::NIL, GcValue::NIL]).unwrap_err();
+            assert!(matches!(request.normalize_error(error), VmError::Rendered(ref text) if text.contains("prepared-error")));
+        }
+        assert_eq!(calls.get(), 1);
+        assert_eq!(vm.request_lifecycle.begins, 1);
+        assert_eq!(vm.request_lifecycle.roots, 1);
+        assert_eq!(vm.request_lifecycle.finishes, 1);
+        assert_eq!(vm.request_lifecycle.aborts, 1);
+    }
+
+    #[test]
+    fn prepared_sessions_isolate_secrets_stale_values_and_concurrent_execution() {
+        let program = Arc::new(prepared_program(
+            "(define stable 4)",
+            "(lambda (state query) (+ stable state query))",
+        ));
+        let mut joins = Vec::new();
+        for index in 0..4 {
+            let program = Arc::clone(&program);
+            joins.push(thread::spawn(move || execute_prepared(&program, "(+ stable 1)", index).unwrap().0));
+        }
+        let outputs = joins.into_iter().map(|join| join.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(outputs, vec!["9", "10", "11", "12"]);
+
+        let mut vm = UnifiedVm::new(10_000, 10_000);
+        program.install_into(&mut vm, &program.key).unwrap();
+        let escaped = {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
+            let closure = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
+            request.finish(closure).unwrap()
+        };
+        assert!(matches!(
+            ActiveRequest::begin(&mut vm, &[escaped.value()]),
+            Err(VmError::CrossRequestValue)
+        ));
+        let recovered = {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
+            let closure = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
+            let linkage = request.link(closure);
+            let value = request.execute_linked(
+                linkage,
+                &[GcValue::fixnum(1).unwrap(), GcValue::fixnum(2).unwrap()],
+            ).unwrap();
+            request.finish(value).unwrap()
+        };
+        assert_eq!(vm.format_value(recovered.value()).unwrap(), "7");
+        assert_eq!(vm.request_lifecycle.begins, 3);
+        assert_eq!(vm.request_lifecycle.roots, 2);
+        assert_eq!(vm.request_lifecycle.finishes, 3);
+        assert_eq!(vm.request_lifecycle.aborts, 1);
+    }
+
+    #[test]
+    fn active_request_fresh_sessions_contain_error_meter_cancel_and_panic() {
+        fn run_probe(secret: &str, mode: &str, cancelled: bool) -> (Result<String, VmError>, usize) {
+            let calls = Rc::new(Cell::new(0usize));
+            let callback_calls = calls.clone();
+            let output = secret.to_string();
+            let behavior = mode.to_string();
+            let primitive = PrimitiveSpec::fixed("probe", 0, move |_, context| {
+                callback_calls.set(callback_calls.get() + 1);
+                context.check_cancelled()?;
+                match behavior.as_str() {
+                    "panic" => panic!("contained prepared panic"),
+                    "error" => Err(HostError::new("prepared-host-error", "failed")),
+                    _ => Ok(HostOutput::String(output.clone())),
+                }
+            });
+            let mut vm = UnifiedVm::with_host(
+                20_000,
+                20_000,
+                vec![primitive],
+                Rc::new(Cell::new(cancelled)),
+                Rc::new(Cell::new(false)),
+            );
+            vm.install_module(compile_dynamic_module(0, "(define stable 1)"));
+            vm.install_module(compile_dynamic_module(1, "(lambda (state query) (probe))"));
+            let result = (|| {
+                let mut request = ActiveRequest::begin(&mut vm, &[])?;
+                request.execute_entry(ModuleId(0), FunctionId(0), &[])?;
+                let genesis = request.execute_entry(ModuleId(1), FunctionId(0), &[])?;
+                let linkage = request.link(genesis);
+                let value = match request.execute_linked(linkage, &[GcValue::NIL, GcValue::NIL]) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let error = request.normalize_error(error);
+                        drop(request);
+                        return Err(error);
+                    }
+                };
+                let lease = request.finish(value)?;
+                vm.format_value(lease.value())
+            })();
+            (result, calls.get())
+        }
+
+        let (first, first_calls) = run_probe("SESSION-SECRET-A", "success", false);
+        assert_eq!(first.unwrap(), "\"SESSION-SECRET-A\"");
+        assert_eq!(first_calls, 1);
+        let (error, error_calls) = run_probe("SESSION-SECRET-ERROR", "error", false);
+        assert!(matches!(error, Err(VmError::Rendered(ref text)) if text.contains("prepared-host-error")));
+        assert_eq!(error_calls, 1);
+        let (cancelled, cancelled_calls) = run_probe("SESSION-SECRET-CANCEL", "success", true);
+        assert!(matches!(cancelled, Err(VmError::Rendered(ref text)) if text.contains("interrupted")));
+        assert_eq!(cancelled_calls, 1);
+        let (panicked, panic_calls) = run_probe("SESSION-SECRET-PANIC", "panic", false);
+        assert!(matches!(panicked, Err(VmError::Rendered(ref text)) if text.contains("host-error")));
+        assert_eq!(panic_calls, 1);
+        let (second, second_calls) = run_probe("SESSION-SECRET-B", "success", false);
+        assert_eq!(second.unwrap(), "\"SESSION-SECRET-B\"");
+        assert_eq!(second_calls, 1);
+
+        let calls = Rc::new(Cell::new(0usize));
+        let callback_calls = calls.clone();
+        let primitive = PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            callback_calls.set(callback_calls.get() + 1);
+            Ok(HostOutput::Int(1))
+        });
+        let mut vm = UnifiedVm::with_host(
+            20_000,
+            40,
+            vec![primitive],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        vm.install_module(compile_dynamic_module(0, "(define observed (tick))"));
+        vm.install_module(compile_dynamic_module(
+            1,
+            "(lambda (state query) (let loop ((n 1000)) (if (= n 0) observed (loop (- n 1)))))",
+        ));
+        {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
+            let genesis = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
+            let linkage = request.link(genesis);
+            assert_eq!(
+                request.execute_linked(linkage, &[GcValue::NIL, GcValue::NIL]),
+                Err(VmError::StepLimit)
+            );
+        }
+        assert_eq!(calls.get(), 1);
+        assert_eq!(vm.request_lifecycle.aborts, 1);
+    }
+
+    #[test]
+    fn prepared_split_matches_monolithic_dynamic_semantics() {
+        let cases = [
+            (
+                "(begin (define shared 5) (define-macro (twice x) `(+ ,x ,x)))",
+                "(lambda (state query) (list (twice shared) state query))",
+                "(eval '(+ shared 1))",
+                2,
+            ),
+            (
+                "(begin (define shared 3) (define holder (vector 1 2)))",
+                "(lambda (state query) (begin (set! (holder 1) query) (list shared state holder)))",
+                "`(value ,(+ shared 4))",
+                8,
+            ),
+            (
+                "(define shared (lambda (x) (+ x 1)))",
+                "(lambda (state query) (list (procedure? shared) (pair? (procedure-source shared)) (shared query)))",
+                "(+ state-placeholder 0)",
+                9,
+            ),
+            (
+                "(define shared (lambda (x) (+ x 1)))",
+                "(lambda (state query) (let ((source (procedure-source shared))) (set! (source 2) '(* x 3)) (shared query)))",
+                "5",
+                0,
+            ),
+            (
+                "(define shared 3)",
+                "(lambda (state query) (catch 'prepared-tag (lambda () (error 'prepared-tag \"boom\" shared query)) (lambda args args)))",
+                "(+ shared 4)",
+                0,
+            ),
+        ];
+        for (initialization, genesis, query, state) in cases {
+            let query = query.replace("state-placeholder", &state.to_string());
+            let program = prepared_program(initialization, genesis);
+            let split = execute_prepared(&program, &query, state).unwrap().0;
+            let monolithic = run_source_output(&format!(
+                "(begin {initialization} (define prepared-genesis {genesis}) (prepared-genesis {state} {query}))"
+            ))
+            .unwrap();
+            assert_eq!(split, monolithic, "query={query}");
+        }
+    }
 
     #[test]
     fn request_reset_preserves_only_interpreter_owned_state() {
@@ -27486,7 +28383,7 @@ mod tests {
             }]),
             constants: Arc::from([FrozenConstant::Fixnum(42)]),
             tail_self_binary: Arc::from([]),
-            semantic_abi: 1,
+            semantic_abi: UNIFIED_SEMANTIC_ABI,
         };
         assert_eq!(module.code.len(), 2);
     }
@@ -29228,7 +30125,7 @@ mod tests {
                 UnifiedInstruction::TailCall(2),
             ]),
             tail_self_binary: Arc::from([]),
-            semantic_abi: 1,
+            semantic_abi: UNIFIED_SEMANTIC_ABI,
         })
     }
 
@@ -29280,7 +30177,7 @@ mod tests {
                 UnifiedInstruction::Return,
             ]),
             tail_self_binary: Arc::from([]),
-            semantic_abi: 1,
+            semantic_abi: UNIFIED_SEMANTIC_ABI,
         });
         let mut vm = UnifiedVm::new(64, 100);
         vm.install_module(module);
