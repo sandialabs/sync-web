@@ -451,6 +451,16 @@ impl GcHeap {
         }
     }
 
+    fn is_pristine(&self) -> bool {
+        self.pages.is_empty()
+            && self.free.is_empty()
+            && self.registry.borrow().roots.is_empty()
+            && self.live == 0
+            && self.collections == 0
+            && self.current_generation == 0
+            && self.next_generation == 1
+    }
+
     pub(crate) fn stats(&self) -> HeapStats {
         HeapStats {
             live: self.live,
@@ -1963,11 +1973,9 @@ impl PreparedProgram {
         if !self.key.matches_runtime(&runtime) {
             return Err(PreparedProgramError::Compatibility);
         }
-        let heap = vm.heap.stats();
         if !vm.modules.is_empty()
-            || heap.live != 0
-            || heap.roots != 0
-            || heap.current_generation != 0
+            || vm.ever_started
+            || !vm.heap.is_pristine()
             || vm.root_environment.is_some()
             || !vm.temp_roots.is_empty()
             || !vm.host_objects.is_empty()
@@ -2421,6 +2429,7 @@ pub(crate) struct UnifiedVm {
     star_defaults: HashMap<(GcValue, u16), GcValue>,
     provided: HashSet<String>,
     macroexpand_quote_result: bool,
+    ever_started: bool,
     #[cfg(test)]
     request_lifecycle: RequestLifecycleCounts,
 }
@@ -2445,6 +2454,7 @@ impl<'a> ActiveRequest<'a> {
         if arguments.iter().any(|value| value.is_heap()) {
             return Err(VmError::CrossRequestValue);
         }
+        vm.ever_started = true;
         vm.reset_request_state();
         vm.heap.begin_request_generation()?;
         #[cfg(test)]
@@ -2694,6 +2704,7 @@ impl UnifiedVm {
             star_defaults: HashMap::new(),
             provided: HashSet::new(),
             macroexpand_quote_result: false,
+            ever_started: false,
             #[cfg(test)]
             request_lifecycle: RequestLifecycleCounts::default(),
         }
@@ -28250,6 +28261,63 @@ mod tests {
             Err(PreparedProgramError::Compatibility)
         );
         assert!(empty_mismatch.modules.is_empty());
+
+        let pristine_calls = Rc::new(Cell::new(0usize));
+        let used_calls = pristine_calls.clone();
+        let used_primitive = PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            used_calls.set(used_calls.get() + 1);
+            Ok(HostOutput::Int(1))
+        });
+        let mut used_vm = UnifiedVm::with_host_inventory(
+            1_000,
+            1_000,
+            vec![used_primitive],
+            vec!["sync-eval"],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        let lease = {
+            let request = ActiveRequest::begin(&mut used_vm, &[]).unwrap();
+            request.finish(GcValue::fixnum(1).unwrap()).unwrap()
+        };
+        drop(lease);
+        used_vm.reset_request_state();
+        let used_counts = used_vm.request_lifecycle;
+        assert_eq!(
+            matching_program.install_into(&mut used_vm),
+            Err(PreparedProgramError::VmNotFresh)
+        );
+        assert!(used_vm.modules.is_empty());
+        assert_eq!(used_vm.request_lifecycle, used_counts);
+        assert_eq!(pristine_calls.get(), 0);
+
+        let collected_calls = pristine_calls.clone();
+        let collected_primitive = PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            collected_calls.set(collected_calls.get() + 1);
+            Ok(HostOutput::Int(1))
+        });
+        let mut collected_vm = UnifiedVm::with_host_inventory(
+            1_000,
+            1_000,
+            vec![collected_primitive],
+            vec!["sync-eval"],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        collected_vm
+            .heap
+            .allocate(GcObject::Text("transient".into()))
+            .unwrap();
+        assert_eq!(collected_vm.heap.collect_full().unwrap(), 1);
+        collected_vm.reset_request_state();
+        let collected_counts = collected_vm.request_lifecycle;
+        assert_eq!(
+            matching_program.install_into(&mut collected_vm),
+            Err(PreparedProgramError::VmNotFresh)
+        );
+        assert!(collected_vm.modules.is_empty());
+        assert_eq!(collected_vm.request_lifecycle, collected_counts);
+        assert_eq!(pristine_calls.get(), 0);
 
         valid.install_into(&mut vm).unwrap();
         assert_eq!(
