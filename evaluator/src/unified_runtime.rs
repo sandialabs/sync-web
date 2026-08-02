@@ -32,6 +32,26 @@ const EPOCH_BITS: u32 = 64 - TAG_BITS - INDEX_BITS;
 const EPOCH_MASK: u32 = (1 << EPOCH_BITS) - 1;
 const PAGE_CELLS: usize = 1024;
 const UNIFIED_SEMANTIC_ABI: u64 = 1;
+const PREPARED_COMPILER_PROFILE: PreparedCompilerProfile = PreparedCompilerProfile {
+    dynamic_top: true,
+    fast_execution: true,
+    condition_boundary_version: 1,
+    lossy_genesis_decode_version: 1,
+};
+const DENIED_AUTHORITY_NAMES: &[&str] = &[
+    "load",
+    "autoload",
+    "open-input-file",
+    "open-output-file",
+    "system",
+    "random",
+    "gc",
+    "stacktrace",
+    "call/cc",
+    "dynamic-wind",
+];
+const DIRECT_PRIMITIVE_POLICY_CLASS: &str = "host-callback-v1";
+const INDIRECT_PRIMITIVE_POLICY_CLASS: &str = "initialization-indirect-v1";
 
 /// Shared identity-aware traversal used by both frozen source graphs and request-local
 /// GC graphs. Nodes without identity can contain graph nodes but cannot close a cycle.
@@ -407,6 +427,10 @@ pub(crate) struct GcHeap {
     collections: u64,
     current_generation: u32,
     next_generation: u32,
+    #[cfg(test)]
+    force_finish_error: bool,
+    #[cfg(test)]
+    finish_attempts: u64,
 }
 
 impl GcHeap {
@@ -420,6 +444,10 @@ impl GcHeap {
             collections: 0,
             current_generation: 0,
             next_generation: 1,
+            #[cfg(test)]
+            force_finish_error: false,
+            #[cfg(test)]
+            finish_attempts: 0,
         }
     }
 
@@ -441,6 +469,16 @@ impl GcHeap {
             .flatten()
             .filter(|slot| slot.object.is_some() && slot.root_meta_car.is_some())
             .count()
+    }
+
+    fn belongs_to_current_generation(&self, value: GcValue) -> bool {
+        if !value.is_heap() {
+            return true;
+        }
+        self.current_generation != 0
+            && self
+                .slot(value)
+                .is_ok_and(|slot| slot.request_generation == self.current_generation)
     }
 
     pub(crate) fn root(&mut self, value: GcValue) -> Result<RootLease, HeapError> {
@@ -478,6 +516,13 @@ impl GcHeap {
     /// Marks from all explicit roots, reclaims unreachable request objects, and promotes
     /// escaped survivors into the long-lived generation.
     pub(crate) fn finish_request_generation(&mut self) -> Result<usize, HeapError> {
+        #[cfg(test)]
+        {
+            self.finish_attempts += 1;
+            if self.force_finish_error {
+                return Err(HeapError::StaleHandle);
+            }
+        }
         let generation = self.current_generation;
         if generation == 0 {
             return Ok(0);
@@ -1617,6 +1662,20 @@ pub(crate) struct PreparedPrimitiveDescriptor {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PreparedIndirectDescriptor {
+    name: Arc<str>,
+    policy_class: Arc<str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PreparedRuntimeProfile {
+    compiler_profile: PreparedCompilerProfile,
+    primitive_policy: Vec<PreparedPrimitiveDescriptor>,
+    indirect_policy: Vec<PreparedIndirectDescriptor>,
+    authority_profile: Arc<[u8]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PreparedProgramKey {
     key_format: u32,
     semantic_abi: u64,
@@ -1624,6 +1683,7 @@ pub(crate) struct PreparedProgramKey {
     initialization_digest: [u8; 32],
     genesis_bytes_digest: [u8; 32],
     primitive_policy_digest: [u8; 32],
+    indirect_policy_digest: [u8; 32],
     authority_profile_digest: [u8; 32],
 }
 
@@ -1633,6 +1693,24 @@ impl PreparedProgramKey {
         genesis_bytes: &[u8],
         compiler_profile: PreparedCompilerProfile,
         primitive_policy: &[PreparedPrimitiveDescriptor],
+        authority_profile: &[u8],
+    ) -> Self {
+        Self::new_with_indirect(
+            initialization,
+            genesis_bytes,
+            compiler_profile,
+            primitive_policy,
+            &[],
+            authority_profile,
+        )
+    }
+
+    fn new_with_indirect(
+        initialization: &[&[u8]],
+        genesis_bytes: &[u8],
+        compiler_profile: PreparedCompilerProfile,
+        primitive_policy: &[PreparedPrimitiveDescriptor],
+        indirect_policy: &[PreparedIndirectDescriptor],
         authority_profile: &[u8],
     ) -> Self {
         let initialization_digest = canonical_digest(b"arrival-initialization-v1", initialization);
@@ -1654,6 +1732,15 @@ impl PreparedProgramKey {
         }
         let primitive_refs = primitive_fields.iter().map(Vec::as_slice).collect::<Vec<_>>();
         let primitive_policy_digest = canonical_digest(b"arrival-primitive-policy-v1", &primitive_refs);
+        let mut indirect_fields = Vec::with_capacity(indirect_policy.len() * 3);
+        for (index, primitive) in indirect_policy.iter().enumerate() {
+            indirect_fields.push((index as u64).to_le_bytes().to_vec());
+            indirect_fields.push(primitive.name.as_bytes().to_vec());
+            indirect_fields.push(primitive.policy_class.as_bytes().to_vec());
+        }
+        let indirect_refs = indirect_fields.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let indirect_policy_digest =
+            canonical_digest(b"arrival-indirect-policy-v1", &indirect_refs);
         let authority_profile_digest = canonical_digest(b"arrival-authority-profile-v1", &[authority_profile]);
         Self {
             key_format: 1,
@@ -1662,8 +1749,26 @@ impl PreparedProgramKey {
             initialization_digest,
             genesis_bytes_digest,
             primitive_policy_digest,
+            indirect_policy_digest,
             authority_profile_digest,
         }
+    }
+
+    fn matches_runtime(&self, runtime: &PreparedRuntimeProfile) -> bool {
+        let actual = Self::new_with_indirect(
+            &[],
+            &[],
+            runtime.compiler_profile,
+            &runtime.primitive_policy,
+            &runtime.indirect_policy,
+            &runtime.authority_profile,
+        );
+        self.key_format == actual.key_format
+            && self.semantic_abi == actual.semantic_abi
+            && self.compiler_profile == actual.compiler_profile
+            && self.primitive_policy_digest == actual.primitive_policy_digest
+            && self.indirect_policy_digest == actual.indirect_policy_digest
+            && self.authority_profile_digest == actual.authority_profile_digest
     }
 }
 
@@ -1677,6 +1782,25 @@ fn canonical_digest(domain: &[u8], fields: &[&[u8]]) -> [u8; 32] {
         digest.update(field);
     }
     digest.finalize().into()
+}
+
+fn prepared_payload_digest(
+    key: &PreparedProgramKey,
+    modules: &[Arc<ImmutableModule>],
+    entries: &[PreparedEntry],
+) -> [u8; 32] {
+    let module_text = modules
+        .iter()
+        .map(|module| format!("{module:?}"))
+        .collect::<Vec<_>>();
+    let entry_text = format!("{entries:?}");
+    let mut fields = vec![
+        key.initialization_digest.as_slice(),
+        key.genesis_bytes_digest.as_slice(),
+        entry_text.as_bytes(),
+    ];
+    fields.extend(module_text.iter().map(|module| module.as_bytes()));
+    canonical_digest(b"arrival-prepared-payload-v1", &fields)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1697,6 +1821,7 @@ pub(crate) struct PreparedProgram {
     key: PreparedProgramKey,
     modules: Arc<[Arc<ImmutableModule>]>,
     entries: Arc<[PreparedEntry]>,
+    payload_digest: [u8; 32],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1710,6 +1835,7 @@ enum PreparedProgramError {
     EntryIdentity,
     EntryBounds,
     DynamicLiteral,
+    Payload,
     Compatibility,
     VmNotFresh,
 }
@@ -1718,16 +1844,15 @@ impl PreparedProgram {
     fn prepare(
         initialization: &[&[u8]],
         genesis_bytes: &[u8],
-        compiler_profile: PreparedCompilerProfile,
-        primitive_policy: &[PreparedPrimitiveDescriptor],
-        authority_profile: &[u8],
+        runtime: &PreparedRuntimeProfile,
     ) -> Result<Self, PreparedProgramError> {
-        let key = PreparedProgramKey::new(
+        let key = PreparedProgramKey::new_with_indirect(
             initialization,
             genesis_bytes,
-            compiler_profile,
-            primitive_policy,
-            authority_profile,
+            runtime.compiler_profile,
+            &runtime.primitive_policy,
+            &runtime.indirect_policy,
+            &runtime.authority_profile,
         );
         let mut initialization_expressions = Vec::new();
         for source in initialization {
@@ -1742,19 +1867,19 @@ impl PreparedProgram {
         let initialization_module = UnifiedCompiler::compile_values_with_mode(
             ModuleId(0),
             initialization_expressions,
-            compiler_profile.dynamic_top,
+            runtime.compiler_profile.dynamic_top,
             None,
             &[],
-            compiler_profile.fast_execution,
+            runtime.compiler_profile.fast_execution,
         )
         .map_err(|_| PreparedProgramError::Compile)?;
         let genesis_module = UnifiedCompiler::compile_values_with_mode(
             ModuleId(1),
             genesis_expressions,
-            compiler_profile.dynamic_top,
+            runtime.compiler_profile.dynamic_top,
             None,
             &[],
-            compiler_profile.fast_execution,
+            runtime.compiler_profile.fast_execution,
         )
         .map_err(|_| PreparedProgramError::Compile)?;
         Self::new(
@@ -1821,22 +1946,32 @@ impl PreparedProgram {
                 return Err(PreparedProgramError::EntryBounds);
             }
         }
+        let payload_digest = prepared_payload_digest(&key, &modules, &entries);
         Ok(Self {
             key,
             modules: modules.into(),
             entries: entries.into(),
+            payload_digest,
         })
     }
 
-    fn install_into(
-        &self,
-        vm: &mut UnifiedVm,
-        current_key: &PreparedProgramKey,
-    ) -> Result<(), PreparedProgramError> {
-        if &self.key != current_key {
+    fn install_into(&self, vm: &mut UnifiedVm) -> Result<(), PreparedProgramError> {
+        if self.payload_digest != prepared_payload_digest(&self.key, &self.modules, &self.entries) {
+            return Err(PreparedProgramError::Payload);
+        }
+        let runtime = vm.prepared_runtime_profile()?;
+        if !self.key.matches_runtime(&runtime) {
             return Err(PreparedProgramError::Compatibility);
         }
-        if !vm.modules.is_empty() {
+        let heap = vm.heap.stats();
+        if !vm.modules.is_empty()
+            || heap.live != 0
+            || heap.roots != 0
+            || heap.current_generation != 0
+            || vm.root_environment.is_some()
+            || !vm.temp_roots.is_empty()
+            || !vm.host_objects.is_empty()
+        {
             return Err(PreparedProgramError::VmNotFresh);
         }
         for module in self.modules.iter() {
@@ -2217,6 +2352,9 @@ pub(crate) struct UnifiedVm {
     pub(crate) heap: GcHeap,
     modules: Vec<Option<Arc<ImmutableModule>>>,
     host_primitives: Vec<PrimitiveSpec>,
+    indirect_primitives: Vec<&'static str>,
+    prepared_compiler_profile: PreparedCompilerProfile,
+    prepared_authority_profile: Arc<[u8]>,
     host_objects: HashMap<u64, Rc<dyn HostObject>>,
     next_host_handle: u64,
     host_cancelled: Rc<Cell<bool>>,
@@ -2304,6 +2442,9 @@ struct ActiveRequest<'a> {
 
 impl<'a> ActiveRequest<'a> {
     fn begin(vm: &'a mut UnifiedVm, arguments: &[GcValue]) -> Result<Self, VmError> {
+        if arguments.iter().any(|value| value.is_heap()) {
+            return Err(VmError::CrossRequestValue);
+        }
         vm.reset_request_state();
         vm.heap.begin_request_generation()?;
         #[cfg(test)]
@@ -2315,9 +2456,6 @@ impl<'a> ActiveRequest<'a> {
             active: true,
             linkage_base: 0,
         };
-        if arguments.iter().any(|value| value.is_heap()) {
-            return Err(VmError::CrossRequestValue);
-        }
         let outer = request.vm.heap.lexical_frame_with_roots(
             None,
             Vec::new(),
@@ -2348,6 +2486,7 @@ impl<'a> ActiveRequest<'a> {
         if !self.entry_boundary_is_clear() {
             return Err(VmError::InvalidInstruction);
         }
+        self.validate_current_values(arguments)?;
         let outer = self.vm.root_environment.ok_or(VmError::InvalidInstruction)?;
         let mut roots = Vec::with_capacity(arguments.len() + 1);
         roots.push(outer);
@@ -2357,18 +2496,22 @@ impl<'a> ActiveRequest<'a> {
         self.vm.execute_until_entry_return()
     }
 
-    fn link(&mut self, value: GcValue) -> usize {
+    fn link(&mut self, value: GcValue) -> Result<usize, VmError> {
+        self.validate_current_values(&[value])?;
         let index = self.vm.temp_roots.len() - self.linkage_base;
         self.vm.temp_roots.push(value);
-        index
+        Ok(index)
     }
 
     fn linked(&self, index: usize) -> Result<GcValue, VmError> {
-        self.vm
+        let value = self
+            .vm
             .temp_roots
             .get(self.linkage_base + index)
             .copied()
-            .ok_or(VmError::InvalidInstruction)
+            .ok_or(VmError::InvalidInstruction)?;
+        self.validate_current_values(&[value])?;
+        Ok(value)
     }
 
     fn execute_linked(
@@ -2379,6 +2522,7 @@ impl<'a> ActiveRequest<'a> {
         if !self.entry_boundary_is_clear() {
             return Err(VmError::InvalidInstruction);
         }
+        self.validate_current_values(arguments)?;
         let closure = self.linked(index)?;
         let (module, function, environment) = match self.vm.heap.object(closure)? {
             GcObject::Closure { module, entry, environment, .. } => {
@@ -2388,6 +2532,17 @@ impl<'a> ActiveRequest<'a> {
         };
         self.vm.push_call(module, function, closure, environment, arguments.to_vec(), false)?;
         self.vm.execute_until_entry_return()
+    }
+
+    fn validate_current_values(&self, values: &[GcValue]) -> Result<(), VmError> {
+        if values
+            .iter()
+            .any(|value| !self.vm.heap.belongs_to_current_generation(*value))
+        {
+            Err(VmError::CrossRequestValue)
+        } else {
+            Ok(())
+        }
     }
 
     fn entry_boundary_is_clear(&self) -> bool {
@@ -2430,12 +2585,18 @@ impl<'a> ActiveRequest<'a> {
     }
 
     fn finish(mut self, value: GcValue) -> Result<RootLease, VmError> {
+        self.validate_current_values(&[value])?;
         let root = self.vm.heap.root(value)?;
+        self.vm.temp_roots.truncate(self.linkage_base);
         let finished = self.vm.heap.finish_request_generation();
+        // A failed finalization is irrecoverable for this VM. Do not let Drop replay it.
         self.active = false;
         #[cfg(test)]
         {
             self.vm.request_lifecycle.finishes += 1;
+            if finished.is_err() {
+                self.vm.request_lifecycle.aborts += 1;
+            }
         }
         finished?;
         Ok(root)
@@ -2464,6 +2625,9 @@ impl UnifiedVm {
             heap: GcHeap::new(heap_quota),
             modules: Vec::new(),
             host_primitives: Vec::new(),
+            indirect_primitives: Vec::new(),
+            prepared_compiler_profile: PREPARED_COMPILER_PROFILE,
+            prepared_authority_profile: prepared_authority_profile(),
             host_objects: HashMap::new(),
             next_host_handle: 0,
             host_cancelled: Rc::new(Cell::new(false)),
@@ -2542,11 +2706,64 @@ impl UnifiedVm {
         cancelled: Rc<Cell<bool>>,
         in_callback: Rc<Cell<bool>>,
     ) -> Self {
+        Self::with_host_inventory(
+            heap_quota,
+            step_limit,
+            primitives,
+            Vec::new(),
+            cancelled,
+            in_callback,
+        )
+    }
+
+    fn with_host_inventory(
+        heap_quota: usize,
+        step_limit: u64,
+        primitives: Vec<PrimitiveSpec>,
+        indirect_primitives: Vec<&'static str>,
+        cancelled: Rc<Cell<bool>>,
+        in_callback: Rc<Cell<bool>>,
+    ) -> Self {
         let mut vm = Self::new(heap_quota, step_limit);
         vm.host_primitives = primitives;
+        vm.indirect_primitives = indirect_primitives;
         vm.host_cancelled = cancelled;
         vm.host_in_callback = in_callback;
         vm
+    }
+
+    fn prepared_runtime_profile(&self) -> Result<PreparedRuntimeProfile, PreparedProgramError> {
+        let primitive_policy = self
+            .host_primitives
+            .iter()
+            .map(|primitive| {
+                Ok(PreparedPrimitiveDescriptor {
+                    name: Arc::from(primitive.name),
+                    minimum: u32::try_from(primitive.min)
+                        .map_err(|_| PreparedProgramError::Compatibility)?,
+                    maximum: primitive
+                        .max
+                        .map(u32::try_from)
+                        .transpose()
+                        .map_err(|_| PreparedProgramError::Compatibility)?,
+                    policy_class: Arc::from(DIRECT_PRIMITIVE_POLICY_CLASS),
+                })
+            })
+            .collect::<Result<Vec<_>, PreparedProgramError>>()?;
+        let indirect_policy = self
+            .indirect_primitives
+            .iter()
+            .map(|name| PreparedIndirectDescriptor {
+                name: Arc::from(*name),
+                policy_class: Arc::from(INDIRECT_PRIMITIVE_POLICY_CLASS),
+            })
+            .collect();
+        Ok(PreparedRuntimeProfile {
+            compiler_profile: self.prepared_compiler_profile,
+            primitive_policy,
+            indirect_policy,
+            authority_profile: Arc::clone(&self.prepared_authority_profile),
+        })
     }
 
     pub(crate) fn install_module(&mut self, module: Arc<ImmutableModule>) {
@@ -22160,6 +22377,7 @@ pub(crate) fn run_host_source_output(
     source: &str,
     initialization: &[String],
     primitives: Vec<PrimitiveSpec>,
+    indirect_primitives: Vec<&'static str>,
     cancelled: Rc<Cell<bool>>,
     in_callback: Rc<Cell<bool>>,
 ) -> Result<String, String> {
@@ -22173,10 +22391,11 @@ pub(crate) fn run_host_source_output(
             CompileError::Read(output) | CompileError::Rendered(output) => output,
             other => format!("{other:?}"),
         })?;
-    let mut vm = UnifiedVm::with_host(
+    let mut vm = UnifiedVm::with_host_inventory(
         16_000_000,
         2_000_000_000,
         primitives,
+        indirect_primitives,
         cancelled,
         in_callback,
     );
@@ -26799,20 +27018,36 @@ fn multi_index(dims: &[usize], indices: &[usize]) -> Option<usize> {
     Some(index)
 }
 
+fn prepared_authority_profile() -> Arc<[u8]> {
+    fn push_field(output: &mut Vec<u8>, field: &[u8]) {
+        output.extend_from_slice(&(field.len() as u64).to_le_bytes());
+        output.extend_from_slice(field);
+    }
+    let mut output = Vec::new();
+    push_field(&mut output, b"unified-authority-profile-v1");
+    push_field(&mut output, b"pure=1;system-extras=0;c-loader=0");
+    push_field(
+        &mut output,
+        &crate::builtin_metadata::REGISTRY_VERSION.to_le_bytes(),
+    );
+    push_field(
+        &mut output,
+        crate::builtin_metadata::SOURCE_SHA256.as_bytes(),
+    );
+    for group in [APPROVED_ROOT_BUILTINS, APPROVED_ROOT_SYNTAX, DENIED_AUTHORITY_NAMES] {
+        push_field(&mut output, &(group.len() as u64).to_le_bytes());
+        for name in group {
+            push_field(&mut output, name.as_bytes());
+        }
+    }
+    for name in ["*stdin*", "*stdout*", "*stderr*", "else", "=>", "pi", "sync-eval"] {
+        push_field(&mut output, name.as_bytes());
+    }
+    output.into()
+}
+
 fn denied_authority_name(name: &str) -> bool {
-    matches!(
-        name,
-        "load"
-            | "autoload"
-            | "open-input-file"
-            | "open-output-file"
-            | "system"
-            | "random"
-            | "gc"
-            | "stacktrace"
-            | "call/cc"
-            | "dynamic-wind"
-    )
+    DENIED_AUTHORITY_NAMES.contains(&name)
 }
 
 fn gcd_i128(mut a: i128, mut b: i128) -> i128 {
@@ -27675,12 +27910,7 @@ mod tests {
     use std::time::Instant;
 
     fn prepared_profile() -> PreparedCompilerProfile {
-        PreparedCompilerProfile {
-            dynamic_top: true,
-            fast_execution: true,
-            condition_boundary_version: 1,
-            lossy_genesis_decode_version: 1,
-        }
+        PREPARED_COMPILER_PROFILE
     }
 
     fn prepared_policy() -> Vec<PreparedPrimitiveDescriptor> {
@@ -27688,18 +27918,19 @@ mod tests {
             name: Arc::from("tick"),
             minimum: 0,
             maximum: Some(0),
-            policy_class: Arc::from("deterministic-test"),
+            policy_class: Arc::from(DIRECT_PRIMITIVE_POLICY_CLASS),
         }]
     }
 
     fn prepared_key(initialization: &[&str], genesis: &[u8]) -> PreparedProgramKey {
         let chunks = initialization.iter().map(|source| source.as_bytes()).collect::<Vec<_>>();
+        let authority = prepared_authority_profile();
         PreparedProgramKey::new(
             &chunks,
             genesis,
             prepared_profile(),
             &prepared_policy(),
-            b"authority-profile-test-v1",
+            &authority,
         )
     }
 
@@ -27709,12 +27940,12 @@ mod tests {
     }
 
     fn prepared_program(initialization: &str, genesis: &str) -> PreparedProgram {
+        let vm = UnifiedVm::new(1, 1);
+        let runtime = vm.prepared_runtime_profile().unwrap();
         PreparedProgram::prepare(
             &[initialization.as_bytes()],
             genesis.as_bytes(),
-            prepared_profile(),
-            &prepared_policy(),
-            b"authority-profile-test-v1",
+            &runtime,
         )
         .unwrap()
     }
@@ -27725,7 +27956,7 @@ mod tests {
         state: i64,
     ) -> Result<(String, RequestLifecycleCounts), VmError> {
         let mut vm = UnifiedVm::new(200_000, 2_000_000);
-        program.install_into(&mut vm, &program.key).unwrap();
+        program.install_into(&mut vm).unwrap();
         let query_id = program.modules.len() as u32;
         vm.install_module(compile_dynamic_module(query_id, query));
         let mut request = ActiveRequest::begin(&mut vm, &[])?;
@@ -27733,12 +27964,15 @@ mod tests {
         let genesis = program.entries[1];
         request.execute_entry(initialize.module, initialize.function, &[])?;
         let genesis = request.execute_entry(genesis.module, genesis.function, &[])?;
-        let linkage = request.link(genesis);
+        let linkage = request.link(genesis)?;
         let query = request.execute_entry(ModuleId(query_id), FunctionId(0), &[])?;
         let state = GcValue::fixnum(state).ok_or(VmError::OutOfRange)?;
         let value = request.execute_linked(linkage, &[state, query])?;
         let lease = request.finish(value)?;
+        assert!(vm.temp_roots.is_empty());
         let output = vm.format_value(lease.value())?;
+        drop(lease);
+        assert_eq!(vm.heap.stats().roots, 0);
         Ok((output, vm.request_lifecycle))
     }
 
@@ -27828,6 +28062,36 @@ mod tests {
             b"authority-profile-test-v1",
         );
         assert_ne!(forward, reverse);
+        let indirect = vec![
+            PreparedIndirectDescriptor {
+                name: Arc::from("sync-eval"),
+                policy_class: Arc::from(INDIRECT_PRIMITIVE_POLICY_CLASS),
+            },
+            PreparedIndirectDescriptor {
+                name: Arc::from("sync-state"),
+                policy_class: Arc::from(INDIRECT_PRIMITIVE_POLICY_CLASS),
+            },
+        ];
+        let authority = prepared_authority_profile();
+        let indirect_forward = PreparedProgramKey::new_with_indirect(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &prepared_policy(),
+            &indirect,
+            &authority,
+        );
+        let mut indirect_reverse = indirect.clone();
+        indirect_reverse.reverse();
+        let indirect_reverse = PreparedProgramKey::new_with_indirect(
+            &chunks,
+            b"genesis",
+            prepared_profile(),
+            &prepared_policy(),
+            &indirect_reverse,
+            &authority,
+        );
+        assert_ne!(indirect_forward, indirect_reverse);
         let changed_authority = PreparedProgramKey::new(
             &chunks,
             b"genesis",
@@ -27847,15 +28111,10 @@ mod tests {
         let genesis = "(lambda (state query) (+ stable state query))";
         let valid = prepared_program(initialization, genesis);
         assert!(!valid.contains_source_fragment("QUERY-CREDENTIAL-SENTINEL"));
+        let empty_vm = UnifiedVm::new(1, 1);
+        let runtime = empty_vm.prepared_runtime_profile().unwrap();
         assert_eq!(
-            PreparedProgram::prepare(
-                &[&[0xff]],
-                genesis.as_bytes(),
-                prepared_profile(),
-                &prepared_policy(),
-                b"authority-profile-test-v1",
-            )
-            .unwrap_err(),
+            PreparedProgram::prepare(&[&[0xff]], genesis.as_bytes(), &runtime).unwrap_err(),
             PreparedProgramError::Compile
         );
         let mut extra = (*valid.modules[1]).clone();
@@ -27875,17 +28134,126 @@ mod tests {
         );
 
         let mut vm = UnifiedVm::new(1_000, 1_000);
-        let mut wrong_key = valid.key.clone();
-        wrong_key.authority_profile_digest[0] ^= 1;
+        let mut wrong_program = valid.clone();
+        wrong_program.key.authority_profile_digest[0] ^= 1;
         assert_eq!(
-            valid.install_into(&mut vm, &wrong_key),
+            wrong_program.install_into(&mut vm),
             Err(PreparedProgramError::Compatibility)
         );
         assert!(vm.modules.is_empty());
         assert_eq!(vm.request_lifecycle, RequestLifecycleCounts::default());
-        valid.install_into(&mut vm, &valid.key).unwrap();
+
+        let mut source_confusion = valid.clone();
+        source_confusion.key.initialization_digest[0] ^= 1;
         assert_eq!(
-            valid.install_into(&mut vm, &valid.key),
+            source_confusion.install_into(&mut vm),
+            Err(PreparedProgramError::Payload)
+        );
+        source_confusion = valid.clone();
+        source_confusion.key.genesis_bytes_digest[0] ^= 1;
+        assert_eq!(
+            source_confusion.install_into(&mut vm),
+            Err(PreparedProgramError::Payload)
+        );
+        let mut module_confusion = valid.clone();
+        let mut changed_module = (*module_confusion.modules[0]).clone();
+        changed_module.code = Arc::from([UnifiedInstruction::Return]);
+        let mut modules = module_confusion.modules.to_vec();
+        modules[0] = Arc::new(changed_module);
+        module_confusion.modules = modules.into();
+        assert_eq!(
+            module_confusion.install_into(&mut vm),
+            Err(PreparedProgramError::Payload)
+        );
+        assert!(vm.modules.is_empty());
+        assert_eq!(vm.request_lifecycle, RequestLifecycleCounts::default());
+
+        let calls = Rc::new(Cell::new(0));
+        let callback_calls = calls.clone();
+        let primitive = PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            callback_calls.set(callback_calls.get() + 1);
+            Ok(HostOutput::Int(1))
+        });
+        let mut primitive_mismatch = UnifiedVm::with_host(
+            1_000,
+            1_000,
+            vec![primitive],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        assert_eq!(
+            valid.install_into(&mut primitive_mismatch),
+            Err(PreparedProgramError::Compatibility)
+        );
+        assert!(primitive_mismatch.modules.is_empty());
+        assert_eq!(primitive_mismatch.heap.stats().roots, 0);
+        assert_eq!(
+            primitive_mismatch.request_lifecycle,
+            RequestLifecycleCounts::default()
+        );
+        assert_eq!(calls.get(), 0);
+
+        let mut indirect_mismatch = UnifiedVm::new(1_000, 1_000);
+        indirect_mismatch.indirect_primitives.push("sync-eval");
+        assert_eq!(
+            valid.install_into(&mut indirect_mismatch),
+            Err(PreparedProgramError::Compatibility)
+        );
+        assert!(indirect_mismatch.modules.is_empty());
+
+        let mut authority_mismatch = UnifiedVm::new(1_000, 1_000);
+        authority_mismatch.prepared_authority_profile = Arc::from(b"authority-profile-B".as_slice());
+        assert_eq!(
+            valid.install_into(&mut authority_mismatch),
+            Err(PreparedProgramError::Compatibility)
+        );
+        assert!(authority_mismatch.modules.is_empty());
+
+        let mut compiler_mismatch = UnifiedVm::new(1_000, 1_000);
+        compiler_mismatch.prepared_compiler_profile.condition_boundary_version += 1;
+        assert_eq!(
+            valid.install_into(&mut compiler_mismatch),
+            Err(PreparedProgramError::Compatibility)
+        );
+        assert!(compiler_mismatch.modules.is_empty());
+
+        let matching_primitive = PrimitiveSpec::fixed("tick", 0, |_, _| Ok(HostOutput::Int(1)));
+        let prepared_vm = UnifiedVm::with_host_inventory(
+            1_000,
+            1_000,
+            vec![matching_primitive.clone()],
+            vec!["sync-eval"],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        let matching_runtime = prepared_vm.prepared_runtime_profile().unwrap();
+        let matching_program = PreparedProgram::prepare(
+            &[initialization.as_bytes()],
+            genesis.as_bytes(),
+            &matching_runtime,
+        )
+        .unwrap();
+        let mut matching_vm = UnifiedVm::with_host_inventory(
+            1_000,
+            1_000,
+            vec![matching_primitive],
+            vec!["sync-eval"],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        matching_program.install_into(&mut matching_vm).unwrap();
+        assert_eq!(matching_vm.modules.len(), 2);
+        assert_eq!(matching_vm.request_lifecycle, RequestLifecycleCounts::default());
+        let mut empty_mismatch = UnifiedVm::new(1_000, 1_000);
+        assert_eq!(
+            matching_program.install_into(&mut empty_mismatch),
+            Err(PreparedProgramError::Compatibility)
+        );
+        assert!(empty_mismatch.modules.is_empty());
+
+        valid.install_into(&mut vm).unwrap();
+        assert_eq!(
+            valid.install_into(&mut vm),
             Err(PreparedProgramError::VmNotFresh)
         );
         assert_eq!(vm.request_lifecycle, RequestLifecycleCounts::default());
@@ -27994,7 +28362,7 @@ mod tests {
             let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
             request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
             let closure = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
-            let linkage = request.link(closure);
+            let linkage = request.link(closure).unwrap();
             let roots = request.vm.all_active_roots_with(&[]);
             request.vm.heap.collect_full_with_roots(&roots).unwrap();
             assert!(matches!(request.vm.heap.object(request.linked(linkage).unwrap()), Ok(GcObject::Closure { .. })));
@@ -28004,6 +28372,28 @@ mod tests {
         assert_eq!(calls.get(), 1);
         assert_eq!(vm.request_lifecycle.begins, 1);
         assert_eq!(vm.request_lifecycle.roots, 1);
+        assert_eq!(vm.request_lifecycle.finishes, 1);
+        assert_eq!(vm.request_lifecycle.aborts, 1);
+        assert!(vm.temp_roots.is_empty());
+        assert_eq!(vm.heap.stats().roots, 0);
+    }
+
+    #[test]
+    fn active_request_finish_failure_is_single_shot_and_clears_linkage() {
+        let mut vm = UnifiedVm::new(10_000, 10_000);
+        vm.install_module(compile_dynamic_module(0, "(lambda (x) x)"));
+        let result = {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            let closure = request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
+            request.link(closure).unwrap();
+            request.vm.heap.force_finish_error = true;
+            request.finish(GcValue::fixnum(1).unwrap())
+        };
+        assert!(matches!(result, Err(VmError::Heap(HeapError::StaleHandle))));
+        assert_eq!(vm.heap.finish_attempts, 1);
+        assert_ne!(vm.heap.stats().current_generation, 0);
+        assert_eq!(vm.heap.stats().roots, 0);
+        assert!(vm.temp_roots.is_empty());
         assert_eq!(vm.request_lifecycle.finishes, 1);
         assert_eq!(vm.request_lifecycle.aborts, 1);
     }
@@ -28023,7 +28413,7 @@ mod tests {
         assert_eq!(outputs, vec!["9", "10", "11", "12"]);
 
         let mut vm = UnifiedVm::new(10_000, 10_000);
-        program.install_into(&mut vm, &program.key).unwrap();
+        program.install_into(&mut vm).unwrap();
         let escaped = {
             let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
             request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
@@ -28038,7 +28428,7 @@ mod tests {
             let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
             request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
             let closure = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
-            let linkage = request.link(closure);
+            let linkage = request.link(closure).unwrap();
             let value = request.execute_linked(
                 linkage,
                 &[GcValue::fixnum(1).unwrap(), GcValue::fixnum(2).unwrap()],
@@ -28046,10 +28436,119 @@ mod tests {
             request.finish(value).unwrap()
         };
         assert_eq!(vm.format_value(recovered.value()).unwrap(), "7");
-        assert_eq!(vm.request_lifecycle.begins, 3);
+        assert_eq!(vm.request_lifecycle.begins, 2);
         assert_eq!(vm.request_lifecycle.roots, 2);
-        assert_eq!(vm.request_lifecycle.finishes, 3);
+        assert_eq!(vm.request_lifecycle.finishes, 2);
+        assert_eq!(vm.request_lifecycle.aborts, 0);
+        assert!(vm.temp_roots.is_empty());
+    }
+
+    #[test]
+    fn active_request_rejects_prior_generation_values_on_every_private_path() {
+        #[derive(Clone)]
+        struct StaleHost;
+        impl HostObject for StaleHost {
+            fn type_name(&self) -> &str { "stale-host" }
+            fn identity(&self) -> u64 { 17 }
+            fn display(&self) -> String { "#<stale-host>".into() }
+            fn as_any(&self) -> &dyn std::any::Any { self }
+        }
+
+        let tick_calls = Rc::new(Cell::new(0usize));
+        let callback_calls = tick_calls.clone();
+        let make_host = PrimitiveSpec::fixed("make-host", 0, |_, _| {
+            Ok(HostOutput::Host(Rc::new(StaleHost)))
+        });
+        let tick = PrimitiveSpec::fixed("tick", 0, move |_, _| {
+            callback_calls.set(callback_calls.get() + 1);
+            Ok(HostOutput::Int(1))
+        });
+        let mut vm = UnifiedVm::with_host(
+            50_000,
+            100_000,
+            vec![make_host, tick],
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        );
+        vm.install_module(compile_dynamic_module(
+            0,
+            "(let ((pair (cons 1 2)) (closure (lambda (x) x)) (environment (inlet 'x 1))) (catch 'retained-error (lambda () (error 'retained-error \"payload\")) (lambda args (list pair closure environment args (make-host)))))",
+        ));
+        vm.install_module(compile_dynamic_module(1, "(lambda (x) (begin (tick) x))"));
+        vm.install_module(compile_dynamic_module(
+            2,
+            "(list (cons 3 4) (inlet 'y 2) (make-host))",
+        ));
+
+        let retained = {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            let values = request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
+            request.finish(values).unwrap()
+        };
+        assert!(vm.temp_roots.is_empty());
+        let stale_values = vm.list_elements(retained.value()).unwrap();
+        assert_eq!(stale_values.len(), 5);
+        assert!(stale_values
+            .iter()
+            .all(|value| value.is_heap() && !vm.heap.belongs_to_current_generation(*value)));
+
+        {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            let callable = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
+            let linkage = request.link(callable).unwrap();
+            request.vm.temp_roots[request.linkage_base + linkage] = stale_values[1];
+            assert_eq!(
+                request.execute_linked(linkage, &[GcValue::fixnum(1).unwrap()]),
+                Err(VmError::CrossRequestValue)
+            );
+            assert_eq!(tick_calls.get(), 0);
+            request.vm.temp_roots[request.linkage_base + linkage] = callable;
+            let current = request.execute_entry(ModuleId(2), FunctionId(0), &[]).unwrap();
+            let current_values = request.vm.list_elements(current).unwrap();
+            assert!(current_values
+                .iter()
+                .all(|value| request.vm.heap.belongs_to_current_generation(*value)));
+            for value in current_values {
+                request.link(value).unwrap();
+            }
+            let roots = request.vm.all_active_roots_with(&[]);
+            request.vm.heap.collect_full_with_roots(&roots).unwrap();
+            for stale in &stale_values {
+                assert_eq!(request.link(*stale), Err(VmError::CrossRequestValue));
+                assert_eq!(
+                    request.execute_entry(ModuleId(1), FunctionId(0), &[*stale]),
+                    Err(VmError::CrossRequestValue)
+                );
+                assert_eq!(
+                    request.execute_linked(linkage, &[*stale]),
+                    Err(VmError::CrossRequestValue)
+                );
+            }
+            assert_eq!(tick_calls.get(), 0);
+            assert_eq!(
+                request.finish(stale_values[0]).unwrap_err(),
+                VmError::CrossRequestValue
+            );
+        }
+        assert!(vm.temp_roots.is_empty());
+        assert_eq!(tick_calls.get(), 0);
         assert_eq!(vm.request_lifecycle.aborts, 1);
+
+        let result = {
+            let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            let callable = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
+            let linkage = request.link(callable).unwrap();
+            let value = request
+                .execute_linked(linkage, &[GcValue::fixnum(5).unwrap()])
+                .unwrap();
+            request.finish(value).unwrap()
+        };
+        assert_eq!(result.value().as_fixnum(), Some(5));
+        assert_eq!(tick_calls.get(), 1);
+        assert!(vm.temp_roots.is_empty());
+        drop(result);
+        drop(retained);
+        assert_eq!(vm.heap.stats().roots, 0);
     }
 
     #[test]
@@ -28081,7 +28580,7 @@ mod tests {
                 let mut request = ActiveRequest::begin(&mut vm, &[])?;
                 request.execute_entry(ModuleId(0), FunctionId(0), &[])?;
                 let genesis = request.execute_entry(ModuleId(1), FunctionId(0), &[])?;
-                let linkage = request.link(genesis);
+                let linkage = request.link(genesis)?;
                 let value = match request.execute_linked(linkage, &[GcValue::NIL, GcValue::NIL]) {
                     Ok(value) => value,
                     Err(error) => {
@@ -28093,6 +28592,12 @@ mod tests {
                 let lease = request.finish(value)?;
                 vm.format_value(lease.value())
             })();
+            assert!(vm.temp_roots.is_empty());
+            assert_eq!(vm.request_lifecycle.begins, 1);
+            assert_eq!(vm.request_lifecycle.roots, 1);
+            assert_eq!(vm.request_lifecycle.finishes, 1);
+            assert_eq!(vm.request_lifecycle.aborts, if result.is_err() { 1 } else { 0 });
+            assert_eq!(vm.heap.stats().roots, 0);
             (result, calls.get())
         }
 
@@ -28134,7 +28639,7 @@ mod tests {
             let mut request = ActiveRequest::begin(&mut vm, &[]).unwrap();
             request.execute_entry(ModuleId(0), FunctionId(0), &[]).unwrap();
             let genesis = request.execute_entry(ModuleId(1), FunctionId(0), &[]).unwrap();
-            let linkage = request.link(genesis);
+            let linkage = request.link(genesis).unwrap();
             assert_eq!(
                 request.execute_linked(linkage, &[GcValue::NIL, GcValue::NIL]),
                 Err(VmError::StepLimit)
@@ -28142,6 +28647,7 @@ mod tests {
         }
         assert_eq!(calls.get(), 1);
         assert_eq!(vm.request_lifecycle.aborts, 1);
+        assert!(vm.temp_roots.is_empty());
     }
 
     #[test]

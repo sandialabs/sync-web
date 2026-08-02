@@ -449,6 +449,7 @@ impl RustHost {
             source,
             &self.initialization,
             self.primitives.clone(),
+            self.indirect_primitives.clone(),
             self.cancelled.clone(),
             self.in_callback.clone(),
         )
