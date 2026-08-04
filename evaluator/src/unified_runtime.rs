@@ -100,6 +100,43 @@ fn graph_reaches_identity_by<Node: Clone, Identity: Copy + Eq + Hash>(
     false
 }
 
+#[derive(Default)]
+struct ExportReachabilityScratch {
+    marks: Vec<u32>,
+    traversal_serial: u32,
+}
+
+impl ExportReachabilityScratch {
+    fn begin_traversal(&mut self) -> u32 {
+        self.traversal_serial = self.traversal_serial.wrapping_add(1);
+        if self.traversal_serial == 0 {
+            self.marks.fill(0);
+            self.traversal_serial = 1;
+        }
+        self.traversal_serial
+    }
+
+    fn mark_unvisited(&mut self, index: u32, traversal_serial: u32) -> bool {
+        let index = index as usize;
+        if self.marks.len() <= index {
+            self.marks.resize(index + 1, 0);
+        }
+        if self.marks[index] == traversal_serial {
+            return false;
+        }
+        self.marks[index] = traversal_serial;
+        true
+    }
+
+    #[cfg(test)]
+    fn logical_mark_bytes(&self) -> (usize, usize) {
+        (
+            self.marks.len() * std::mem::size_of::<u32>(),
+            self.marks.capacity() * std::mem::size_of::<u32>(),
+        )
+    }
+}
+
 /// One copyable Scheme reference. Heap references contain an index and stale-handle epoch.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -2429,6 +2466,7 @@ pub(crate) struct UnifiedVm {
     star_defaults: HashMap<(GcValue, u16), GcValue>,
     provided: HashSet<String>,
     macroexpand_quote_result: bool,
+    export_reachability_scratch: RefCell<Option<ExportReachabilityScratch>>,
     ever_started: bool,
     #[cfg(test)]
     request_lifecycle: RequestLifecycleCounts,
@@ -2457,6 +2495,8 @@ impl<'a> ActiveRequest<'a> {
         vm.ever_started = true;
         vm.reset_request_state();
         vm.heap.begin_request_generation()?;
+        vm.export_reachability_scratch
+            .replace(Some(ExportReachabilityScratch::default()));
         #[cfg(test)]
         {
             vm.request_lifecycle.begins += 1;
@@ -2599,6 +2639,7 @@ impl<'a> ActiveRequest<'a> {
         let root = self.vm.heap.root(value)?;
         self.vm.temp_roots.truncate(self.linkage_base);
         let finished = self.vm.heap.finish_request_generation();
+        self.vm.export_reachability_scratch.replace(None);
         // A failed finalization is irrecoverable for this VM. Do not let Drop replay it.
         self.active = false;
         #[cfg(test)]
@@ -2620,6 +2661,7 @@ impl Drop for ActiveRequest<'_> {
         }
         self.vm.temp_roots.truncate(self.linkage_base);
         let _ = self.vm.heap.finish_request_generation();
+        self.vm.export_reachability_scratch.replace(None);
         self.active = false;
         #[cfg(test)]
         {
@@ -2704,6 +2746,7 @@ impl UnifiedVm {
             star_defaults: HashMap::new(),
             provided: HashSet::new(),
             macroexpand_quote_result: false,
+            export_reachability_scratch: RefCell::new(None),
             ever_started: false,
             #[cfg(test)]
             request_lifecycle: RequestLifecycleCounts::default(),
@@ -2854,6 +2897,7 @@ impl UnifiedVm {
         self.star_defaults.clear();
         self.provided.clear();
         self.macroexpand_quote_result = false;
+        self.export_reachability_scratch.replace(None);
     }
 
     pub(crate) fn run(
@@ -10104,6 +10148,34 @@ impl UnifiedVm {
         ))
     }
 
+    fn export_value_is_self_referential(
+        &self,
+        value: GcValue,
+        scratch: &mut ExportReachabilityScratch,
+    ) -> Result<bool, VmError> {
+        let traversal_serial = scratch.begin_traversal();
+        let mut pending = self.gc_graph_children(value);
+        while let Some(node) = pending.pop() {
+            // The generic traversal checks the target before consulting its visited set.
+            if node == value {
+                return Ok(true);
+            }
+            let Some((index, handle_epoch)) = node.heap_parts() else {
+                continue;
+            };
+            let Some(slot) = self.heap.slot_index(index) else {
+                continue;
+            };
+            if slot.epoch != handle_epoch || slot.object.is_none() {
+                continue;
+            }
+            if scratch.mark_unvisited(index, traversal_serial) {
+                pending.extend(self.gc_graph_children(node));
+            }
+        }
+        Ok(false)
+    }
+
     fn deferred_cyclic_syntax_value(rendered: String) -> Value {
         let tag = Value::list(vec![Value::RootMeta(Rc::new("quote".into())), Value::symbol("syntax-error")]);
         Value::list(vec![
@@ -10185,7 +10257,20 @@ impl UnifiedVm {
         memo: &mut HashMap<GcValue, Value>,
         literals: &mut Vec<(Rc<String>, GcValue)>,
     ) -> Result<Value, VmError> {
-        self.export_runtime_syntax_inner(value, memo, literals, 0, false)
+        let mut request_scratch = self.export_reachability_scratch.borrow_mut();
+        if let Some(scratch) = request_scratch.as_mut() {
+            self.export_runtime_syntax_inner(value, memo, literals, 0, false, scratch)
+        } else {
+            drop(request_scratch);
+            self.export_runtime_syntax_inner(
+                value,
+                memo,
+                literals,
+                0,
+                false,
+                &mut ExportReachabilityScratch::default(),
+            )
+        }
     }
 
     fn export_runtime_syntax_inner(
@@ -10195,11 +10280,12 @@ impl UnifiedVm {
         literals: &mut Vec<(Rc<String>, GcValue)>,
         quasiquote_depth: usize,
         direct_outer_quasiquote: bool,
+        scratch: &mut ExportReachabilityScratch,
     ) -> Result<Value, VmError> {
         if value.as_fixnum().is_some() || value.as_character().is_some()
             || matches!(value, GcValue::FALSE | GcValue::TRUE | GcValue::NIL | GcValue::UNSPECIFIED | GcValue::UNDEFINED | GcValue::EOF)
         {
-            return self.export_syntax(value, memo);
+            return self.export_syntax_inner(value, memo, scratch);
         }
         let quoted_payload = match self.heap.object(value) {
             Ok(GcObject::Syntax(kind, payload)) if kind.as_ref() == "quote" => Some(*payload),
@@ -10222,7 +10308,7 @@ impl UnifiedVm {
                 return Ok(Value::RootMeta(marker));
             }
         }
-        if self.gc_value_is_self_referential(value)? {
+        if self.export_value_is_self_referential(value, scratch)? {
             return Ok(Self::deferred_cyclic_syntax_value(self.pair_object_string(value)?));
         }
         if let Some(existing) = memo.get(&value) { return Ok(existing.clone()); }
@@ -10230,8 +10316,8 @@ impl UnifiedVm {
             GcObject::Pair { car, cdr } => {
                 let output = Value::cons(Value::Unspecified, Value::Unspecified);
                 memo.insert(value, output.clone());
-                let car = self.export_runtime_syntax_inner(*car, memo, literals, quasiquote_depth, direct_outer_quasiquote)?;
-                let cdr = self.export_runtime_syntax_inner(*cdr, memo, literals, quasiquote_depth, direct_outer_quasiquote)?;
+                let car = self.export_runtime_syntax_inner(*car, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)?;
+                let cdr = self.export_runtime_syntax_inner(*cdr, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)?;
                 output.set_car(car).map_err(|_| VmError::WrongType)?;
                 output.set_cdr(cdr).map_err(|_| VmError::WrongType)?;
                 Ok(output)
@@ -10239,7 +10325,7 @@ impl UnifiedVm {
             GcObject::Vector(values) => {
                 let output = Value::Vector(Rc::new(crate::core::VectorData::new(vec![Value::Unspecified; values.len()])));
                 memo.insert(value, output.clone());
-                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote)).collect::<Result<Vec<_>, _>>()?;
+                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)).collect::<Result<Vec<_>, _>>()?;
                 let Value::Vector(vector) = &output else { unreachable!() };
                 for (index, value) in converted.into_iter().enumerate() { vector.set(index, value); }
                 Ok(output)
@@ -10263,7 +10349,7 @@ impl UnifiedVm {
                     "unquote" | "unquote-splicing" => false,
                     _ => direct_outer_quasiquote,
                 };
-                let payload = self.export_runtime_syntax_inner(*payload, memo, literals, payload_depth, payload_direct)?;
+                let payload = self.export_runtime_syntax_inner(*payload, memo, literals, payload_depth, payload_direct, scratch)?;
                 let output = Value::list(vec![Value::RootMeta(Rc::new(kind.to_string())), payload]);
                 if let Value::Pair(pair) = &output {
                     let origin = match kind.as_ref() {
@@ -10279,12 +10365,12 @@ impl UnifiedVm {
                 Ok(output)
             }
             GcObject::Commented(payload) => {
-                let output = Value::Commented(Box::new(self.export_runtime_syntax_inner(*payload, memo, literals, quasiquote_depth, direct_outer_quasiquote)?));
+                let output = Value::Commented(Box::new(self.export_runtime_syntax_inner(*payload, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)?));
                 memo.insert(value, output.clone());
                 Ok(output)
             }
             GcObject::MultiVector { dims, values, kind } => {
-                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote)).collect::<Result<Vec<_>, _>>()?;
+                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)).collect::<Result<Vec<_>, _>>()?;
                 let output = Value::MultiVector(Rc::new(crate::core::MultiVectorData {
                     dims: Rc::new(dims.clone()),
                     data: Rc::new(std::cell::RefCell::new(converted)),
@@ -10298,7 +10384,7 @@ impl UnifiedVm {
                 literals.push((marker.clone(), value));
                 Ok(Value::RootMeta(marker))
             }
-            _ => self.export_syntax(value, memo),
+            _ => self.export_syntax_inner(value, memo, scratch),
         }
     }
 
@@ -10306,6 +10392,25 @@ impl UnifiedVm {
         &self,
         value: GcValue,
         memo: &mut HashMap<GcValue, Value>,
+    ) -> Result<Value, VmError> {
+        let mut request_scratch = self.export_reachability_scratch.borrow_mut();
+        if let Some(scratch) = request_scratch.as_mut() {
+            self.export_syntax_inner(value, memo, scratch)
+        } else {
+            drop(request_scratch);
+            self.export_syntax_inner(
+                value,
+                memo,
+                &mut ExportReachabilityScratch::default(),
+            )
+        }
+    }
+
+    fn export_syntax_inner(
+        &self,
+        value: GcValue,
+        memo: &mut HashMap<GcValue, Value>,
+        scratch: &mut ExportReachabilityScratch,
     ) -> Result<Value, VmError> {
         if let Some(integer) = value.as_fixnum() {
             return Ok(Value::Int(integer));
@@ -10331,7 +10436,7 @@ impl UnifiedVm {
         if value == GcValue::EOF {
             return Ok(Value::Eof);
         }
-        if self.gc_value_is_self_referential(value)? {
+        if self.export_value_is_self_referential(value, scratch)? {
             return Ok(Self::deferred_cyclic_syntax_value(self.pair_object_string(value)?));
         }
         if let Some(existing) = memo.get(&value) {
@@ -10340,8 +10445,8 @@ impl UnifiedVm {
         if let GcObject::Pair { car, cdr } = self.heap.object(value)? {
             let output = Value::cons(Value::Unspecified, Value::Unspecified);
             memo.insert(value, output.clone());
-            let car = self.export_syntax(*car, memo)?;
-            let cdr = self.export_syntax(*cdr, memo)?;
+            let car = self.export_syntax_inner(*car, memo, scratch)?;
+            let cdr = self.export_syntax_inner(*cdr, memo, scratch)?;
             output.set_car(car).map_err(|_| VmError::WrongType)?;
             output.set_cdr(cdr).map_err(|_| VmError::WrongType)?;
             return Ok(output);
@@ -10349,7 +10454,7 @@ impl UnifiedVm {
         if let GcObject::Vector(values) = self.heap.object(value)? {
             let output = Value::Vector(Rc::new(crate::core::VectorData::new(vec![Value::Unspecified; values.len()])));
             memo.insert(value, output.clone());
-            let converted = values.iter().map(|value| self.export_syntax(*value, memo)).collect::<Result<Vec<_>, _>>()?;
+            let converted = values.iter().map(|value| self.export_syntax_inner(*value, memo, scratch)).collect::<Result<Vec<_>, _>>()?;
             let Value::Vector(vector) = &output else { unreachable!() };
             for (index, value) in converted.into_iter().enumerate() { vector.set(index, value); }
             return Ok(output);
@@ -10369,7 +10474,7 @@ impl UnifiedVm {
             GcObject::BignumLiteral(repr) => Value::bignum_literal(Rc::new(repr.to_string())),
             GcObject::RawDisplay(text) => Value::RawDisplay(Rc::new(text.clone())),
             GcObject::Commented(value) => {
-                Value::Commented(Box::new(self.export_syntax(*value, memo)?))
+                Value::Commented(Box::new(self.export_syntax_inner(*value, memo, scratch)?))
             }
             GcObject::Symbol(name) => Value::symbol(name),
             GcObject::Keyword(name) => Value::keyword(name),
@@ -10384,7 +10489,7 @@ impl UnifiedVm {
                 Value::RootMeta(Rc::new(name.to_string()))
             }
             GcObject::Syntax(kind, value) => {
-                let value = self.export_syntax(*value, memo)?;
+                let value = self.export_syntax_inner(*value, memo, scratch)?;
                 let result = Value::list(vec![Value::RootMeta(Rc::new(kind.to_string())), value]);
                 if let Value::Pair(pair) = &result {
                     let origin = match kind.as_ref() {
@@ -10404,7 +10509,7 @@ impl UnifiedVm {
                     data: Rc::new(std::cell::RefCell::new(
                         values
                             .iter()
-                            .map(|value| self.export_syntax(*value, memo))
+                            .map(|value| self.export_syntax_inner(*value, memo, scratch))
                             .collect::<Result<Vec<_>, _>>()?,
                     )),
                     kind: kind.map(|kind| Rc::new(kind.to_string())),
@@ -27987,6 +28092,168 @@ mod tests {
         Ok((output, vm.request_lifecycle))
     }
 
+    fn assert_export_reachability_edge(
+        vm: &mut UnifiedVm,
+        build: impl FnOnce(GcValue) -> GcObject,
+    ) {
+        let child = vm.heap.allocate(GcObject::Pair {
+            car: GcValue::NIL,
+            cdr: GcValue::NIL,
+        }).unwrap();
+        let root = vm.heap.allocate(build(child)).unwrap();
+        vm.heap.set_pair_cdr(child, root).unwrap();
+        let expected = vm.gc_value_is_self_referential(root).unwrap();
+        let actual = vm.export_value_is_self_referential(
+            root,
+            &mut ExportReachabilityScratch::default(),
+        ).unwrap();
+        assert!(expected);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn export_dense_reachability_preserves_gc_graph_projection_and_order() {
+        let mut vm = UnifiedVm::new(10_000, 10_000);
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Pair { car: child, cdr: GcValue::NIL });
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Pair { car: GcValue::NIL, cdr: child });
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Vector(vec![GcValue::NIL, child]));
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Vector(vec![child, GcValue::NIL]));
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Values(Box::new(vec![GcValue::NIL, child])));
+        assert_export_reachability_edge(&mut vm, |child| GcObject::MultiVector { dims: vec![1], values: vec![child], kind: None });
+        assert_export_reachability_edge(&mut vm, |child| GcObject::MultiVectorView { base: child, offset: 0, dims: vec![1], kind: None });
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Syntax(Arc::from("quote"), child));
+        assert_export_reachability_edge(&mut vm, GcObject::Commented);
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Environment(Box::new(EnvironmentData {
+            parent: None,
+            bindings: HashMap::from([(Arc::from("x"), child)]),
+            order: vec![Arc::from("x")],
+            history: vec![(Arc::from("x"), child)],
+        })));
+        assert_export_reachability_edge(&mut vm, |child| GcObject::LexicalFrame(Box::new(LexicalFrameData {
+            parent: None,
+            slots: vec![child],
+            names: Arc::from([Some(Arc::from("x"))]),
+            dynamic: HashMap::from([(Arc::from("x"), child)]),
+            binding_setters: HashMap::new(),
+        })));
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Dilambda { getter: GcValue::FALSE, setter: child });
+        assert_export_reachability_edge(&mut vm, |child| GcObject::Macro(child, false));
+        assert_export_reachability_edge(&mut vm, |child| GcObject::InputFunctionPort { callback: child });
+        assert_export_reachability_edge(&mut vm, |child| GcObject::OutputFunctionPort { callback: child });
+
+        let acyclic = vm.heap.allocate(GcObject::Vector(vec![GcValue::NIL, GcValue::FALSE])).unwrap();
+        assert!(!vm.gc_value_is_self_referential(acyclic).unwrap());
+        assert!(!vm.export_value_is_self_referential(
+            acyclic,
+            &mut ExportReachabilityScratch::default(),
+        ).unwrap());
+    }
+
+    #[test]
+    fn export_dense_reachability_validates_epoch_and_clears_on_serial_wrap() {
+        assert_eq!(std::mem::size_of::<u32>(), 4);
+        let mut vm = UnifiedVm::new(1_000, 1_000);
+        let stale = vm.heap.allocate(GcObject::Pair { car: GcValue::NIL, cdr: GcValue::NIL }).unwrap();
+        assert_eq!(vm.heap.collect_full().unwrap(), 1);
+        let current = vm.heap.allocate(GcObject::Pair { car: GcValue::NIL, cdr: GcValue::NIL }).unwrap();
+        let (stale_index, stale_epoch) = stale.heap_parts().unwrap();
+        let (current_index, current_epoch) = current.heap_parts().unwrap();
+        assert_eq!(stale_index, current_index);
+        assert_ne!(stale_epoch, current_epoch);
+
+        let mut scratch = ExportReachabilityScratch::default();
+        for after_wrap in [false, true] {
+            if after_wrap {
+                scratch.traversal_serial = u32::MAX;
+                scratch.marks.fill(u32::MAX);
+            }
+            for children in [vec![stale, current], vec![current, stale]] {
+                let root = vm.heap.allocate(GcObject::Values(Box::new(children))).unwrap();
+                vm.heap.set_pair_cdr(current, root).unwrap();
+                let expected = vm.gc_value_is_self_referential(root).unwrap();
+                let actual = vm.export_value_is_self_referential(root, &mut scratch).unwrap();
+                assert!(expected);
+                assert_eq!(actual, expected);
+                vm.heap.set_pair_cdr(current, GcValue::NIL).unwrap();
+            }
+        }
+
+        scratch.traversal_serial = u32::MAX;
+        scratch.marks.fill(u32::MAX);
+        assert_eq!(scratch.begin_traversal(), 1);
+        assert!(scratch.marks.iter().all(|mark| *mark == 0));
+        assert!(scratch.mark_unvisited(current_index, 1));
+        assert!(!scratch.mark_unvisited(current_index, 1));
+        assert_eq!(scratch.begin_traversal(), 2);
+        assert!(scratch.mark_unvisited(current_index, 2));
+        let (logical_len_bytes, logical_capacity_bytes) = scratch.logical_mark_bytes();
+        assert_eq!(logical_len_bytes, scratch.marks.len() * 4);
+        assert_eq!(logical_capacity_bytes, scratch.marks.capacity() * 4);
+        assert_eq!(logical_capacity_bytes * 2, scratch.marks.capacity() * 8);
+        assert!(scratch.marks.len() <= vm.heap.stats().capacity);
+        assert!(scratch.marks.capacity() <= vm.heap.stats().capacity.next_power_of_two());
+    }
+
+    #[test]
+    fn request_export_scratch_reuses_capacity_and_never_crosses_requests() {
+        let mut vm = UnifiedVm::new(10_000, 100_000);
+        for finish in [true, false] {
+            let request = ActiveRequest::begin(&mut vm, &[]).unwrap();
+            {
+                let scratch = request.vm.export_reachability_scratch.borrow();
+                let scratch = scratch.as_ref().expect("active request scratch");
+                assert_eq!(scratch.traversal_serial, 0);
+                assert!(scratch.marks.is_empty());
+            }
+            let child = request.vm.heap.allocate(GcObject::Vector(vec![
+                GcValue::fixnum(1).unwrap(),
+                GcValue::fixnum(2).unwrap(),
+            ])).unwrap();
+            let root = request.vm.heap.allocate(GcObject::Pair {
+                car: child,
+                cdr: GcValue::NIL,
+            }).unwrap();
+            let first = request.vm.export_syntax(root, &mut HashMap::new()).unwrap();
+            assert!(matches!(first, Value::Pair(_)));
+            let (first_pointer, first_capacity, first_serial) = {
+                let scratch = request.vm.export_reachability_scratch.borrow();
+                let scratch = scratch.as_ref().unwrap();
+                (scratch.marks.as_ptr(), scratch.marks.capacity(), scratch.traversal_serial)
+            };
+            assert!(first_capacity > 0);
+            assert!(first_serial >= 2);
+
+            let second = request.vm.export_syntax(root, &mut HashMap::new()).unwrap();
+            assert!(matches!(second, Value::Pair(_)));
+            let mut literals = Vec::new();
+            let runtime = request.vm.export_runtime_syntax(
+                root,
+                &mut HashMap::new(),
+                &mut literals,
+            ).unwrap();
+            assert!(matches!(runtime, Value::Pair(_)));
+            {
+                let scratch = request.vm.export_reachability_scratch.borrow();
+                let scratch = scratch.as_ref().unwrap();
+                assert_eq!(scratch.marks.as_ptr(), first_pointer);
+                assert_eq!(scratch.marks.capacity(), first_capacity);
+                assert!(scratch.traversal_serial > first_serial);
+                let (logical_len_bytes, logical_capacity_bytes) = scratch.logical_mark_bytes();
+                assert_eq!(logical_len_bytes, scratch.marks.len() * 4);
+                assert_eq!(logical_capacity_bytes, scratch.marks.capacity() * 4);
+                assert!(scratch.marks.len() <= request.vm.heap.stats().capacity);
+                assert!(scratch.marks.capacity() <= request.vm.heap.stats().capacity.next_power_of_two());
+            }
+
+            if finish {
+                request.finish(GcValue::NIL).unwrap();
+            } else {
+                drop(request);
+            }
+            assert!(vm.export_reachability_scratch.borrow().is_none());
+        }
+    }
+
     #[test]
     fn prepared_program_is_send_sync_and_key_is_canonical_and_sensitive() {
         fn assert_send_sync<T: Send + Sync>() {}
@@ -28666,6 +28933,7 @@ mod tests {
             assert_eq!(vm.request_lifecycle.finishes, 1);
             assert_eq!(vm.request_lifecycle.aborts, if result.is_err() { 1 } else { 0 });
             assert_eq!(vm.heap.stats().roots, 0);
+            assert!(vm.export_reachability_scratch.borrow().is_none());
             (result, calls.get())
         }
 
@@ -28716,6 +28984,7 @@ mod tests {
         assert_eq!(calls.get(), 1);
         assert_eq!(vm.request_lifecycle.aborts, 1);
         assert!(vm.temp_roots.is_empty());
+        assert!(vm.export_reachability_scratch.borrow().is_none());
     }
 
     #[test]
@@ -28801,6 +29070,7 @@ mod tests {
         assert!(vm.gensyms.is_empty());
         assert!(vm.open_environments.is_empty());
         assert!(vm.pending_invokes.is_empty());
+        assert!(vm.export_reachability_scratch.borrow().is_none());
         assert_eq!(vm.heap.stats().roots, 1);
     }
 
