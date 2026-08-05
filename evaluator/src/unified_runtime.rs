@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{BuildHasherDefault, Hash};
 use std::ops::{Deref, DerefMut};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::{Rc, Weak};
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 
 use crate::host::{BorrowedValue, HostArgument, HostCallContext, HostError, HostObject, HostOutput, PrimitiveSpec};
-use crate::Value;
+use crate::{FnvHasher, Value};
 
 const TAG_BITS: u32 = 3;
 const TAG_MASK: u64 = (1 << TAG_BITS) - 1;
@@ -61,8 +61,8 @@ fn graph_has_cycle_by<Node: Clone, Identity: Copy + Eq + Hash>(
     children: impl Fn(&Node) -> Vec<Node>,
 ) -> bool {
     enum Visit<Node, Identity> { Enter(Node), Exit(Identity) }
-    let mut active = HashSet::new();
-    let mut done = HashSet::new();
+    let mut active = HashSet::<_, BuildHasherDefault<FnvHasher>>::default();
+    let mut done = HashSet::<_, BuildHasherDefault<FnvHasher>>::default();
     let mut stack = vec![Visit::Enter(root)];
     while let Some(visit) = stack.pop() {
         match visit {
@@ -90,7 +90,7 @@ fn graph_reaches_identity_by<Node: Clone, Identity: Copy + Eq + Hash>(
     children: impl Fn(&Node) -> Vec<Node>,
 ) -> bool {
     let mut pending = roots.into_iter().collect::<Vec<_>>();
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::<_, BuildHasherDefault<FnvHasher>>::default();
     while let Some(node) = pending.pop() {
         if identity(&node) == Some(target) { return true; }
         if identity(&node).is_none_or(|id| visited.insert(id)) {
@@ -22781,7 +22781,7 @@ fn value_graph_children(value: &Value) -> Vec<Value> {
     }
 }
 
-fn value_reaches_identity(value: &Value, target: usize, _visited: &mut HashSet<usize>) -> bool {
+fn value_reaches_identity(value: &Value, target: usize) -> bool {
     graph_reaches_identity_by(
         [value.clone()],
         target,
@@ -22798,7 +22798,7 @@ fn value_is_self_referential(value: &Value) -> bool {
     let Some(identity) = value_graph_identity(value) else { return false };
     value_graph_children(value)
         .iter()
-        .any(|child| value_reaches_identity(child, identity, &mut HashSet::new()))
+        .any(|child| value_reaches_identity(child, identity))
 }
 
 fn callable_source_text(head: &str, fields: &[Value]) -> String {
