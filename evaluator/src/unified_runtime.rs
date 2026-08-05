@@ -10122,21 +10122,37 @@ impl UnifiedVm {
         Ok(output)
     }
 
-    fn gc_graph_children(&self, value: GcValue) -> Vec<GcValue> {
+    fn extend_gc_graph_children(&self, value: GcValue, output: &mut Vec<GcValue>) {
         match self.heap.object(value) {
-            Ok(GcObject::Pair { car, cdr }) => vec![*car, *cdr],
-            Ok(GcObject::Vector(values)) => values.clone(),
-            Ok(GcObject::Values(values)) => values.to_vec(),
-            Ok(GcObject::MultiVector { values, .. }) => values.clone(),
-            Ok(GcObject::MultiVectorView { base, .. }) => vec![*base],
-            Ok(GcObject::Syntax(_, value) | GcObject::Commented(value)) => vec![*value],
-            Ok(GcObject::Environment(data)) => data.bindings.values().copied().chain(data.history.iter().map(|(_, value)| *value)).collect(),
-            Ok(GcObject::LexicalFrame(data)) => data.slots.iter().copied().chain(data.dynamic.values().copied()).collect(),
-            Ok(GcObject::Dilambda { getter, setter }) => vec![*getter, *setter],
-            Ok(GcObject::Macro(closure, _)) => vec![*closure],
-            Ok(GcObject::InputFunctionPort { callback } | GcObject::OutputFunctionPort { callback }) => vec![*callback],
-            _ => Vec::new(),
+            Ok(GcObject::Pair { car, cdr }) => output.extend([*car, *cdr]),
+            Ok(GcObject::Vector(values)) => output.extend(values.iter().copied()),
+            Ok(GcObject::Values(values)) => output.extend(values.iter().copied()),
+            Ok(GcObject::MultiVector { values, .. }) => output.extend(values.iter().copied()),
+            Ok(GcObject::MultiVectorView { base, .. }) => output.push(*base),
+            Ok(GcObject::Syntax(_, value) | GcObject::Commented(value)) => output.push(*value),
+            Ok(GcObject::Environment(data)) => output.extend(
+                data.bindings
+                    .values()
+                    .copied()
+                    .chain(data.history.iter().map(|(_, value)| *value)),
+            ),
+            Ok(GcObject::LexicalFrame(data)) => output.extend(
+                data.slots
+                    .iter()
+                    .copied()
+                    .chain(data.dynamic.values().copied()),
+            ),
+            Ok(GcObject::Dilambda { getter, setter }) => output.extend([*getter, *setter]),
+            Ok(GcObject::Macro(closure, _)) => output.push(*closure),
+            Ok(GcObject::InputFunctionPort { callback } | GcObject::OutputFunctionPort { callback }) => output.push(*callback),
+            _ => {}
         }
+    }
+
+    fn gc_graph_children(&self, value: GcValue) -> Vec<GcValue> {
+        let mut children = Vec::new();
+        self.extend_gc_graph_children(value, &mut children);
+        children
     }
 
     fn gc_value_is_self_referential(&self, value: GcValue) -> Result<bool, VmError> {
@@ -10154,7 +10170,8 @@ impl UnifiedVm {
         scratch: &mut ExportReachabilityScratch,
     ) -> Result<bool, VmError> {
         let traversal_serial = scratch.begin_traversal();
-        let mut pending = self.gc_graph_children(value);
+        let mut pending = Vec::new();
+        self.extend_gc_graph_children(value, &mut pending);
         while let Some(node) = pending.pop() {
             // The generic traversal checks the target before consulting its visited set.
             if node == value {
@@ -10170,7 +10187,7 @@ impl UnifiedVm {
                 continue;
             }
             if scratch.mark_unvisited(index, traversal_serial) {
-                pending.extend(self.gc_graph_children(node));
+                self.extend_gc_graph_children(node, &mut pending);
             }
         }
         Ok(false)
