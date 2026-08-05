@@ -412,7 +412,22 @@ fn fmt_value(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) -
         Value::Int(n)=>write!(f,"{}",n), Value::RationalValue(r)=>write!(f,"{}/{}",r.num,r.den), Value::Float(x)=>fmt_float_num(f,*x), Value::ComplexValue(c)=>{fmt_float_num(f,c.real)?;if c.imag>=0.0{write!(f,"+")?;}fmt_float_num(f,c.imag)?;write!(f,"i")}, Value::NumberLiteral(s,_)=>if s.opaque_bignum{write!(f,"#<bignum: {}>",s.repr)}else{write!(f,"{}",s.repr)},
         Value::Char(' ')=>write!(f,"#\\space"), Value::Char('\n')=>write!(f,"#\\newline"), Value::Char('\0')=>write!(f,"#\\null"), Value::Char(c)=>write!(f,"#\\{}",c), Value::NamedChar(s)=>write!(f,"#\\{}",s),
         Value::String(s)=> { write!(f,"\"")?; for c in s.borrow().chars(){ match c { '\n'=>write!(f,"\n")?, '\t'=>write!(f,"\\t")?, '\u{8}'=>write!(f,"\\b")?, '"'=>write!(f,"\\\"")?, '\\'=>write!(f,"\\\\")?, c if (c as u32) < 32 || (c as u32)==255 => write!(f,"\\x{:02x};", c as u32)?, c=>write!(f,"{}",c)? } } write!(f,"\"") },
-        Value::Symbol(s)=>write!(f,"{}",s), Value::Keyword(s)=>{ if s.starts_with(':') || s.ends_with(':') { write!(f,"{}",s) } else { write!(f,":{}",s) } }, Value::Pair(_)=>{let mut labels=Vec::new();collect_cycle_labels(v,&mut labels,&mut Vec::new(),&mut HashSet::new());if !labels.is_empty(){write!(f,"{}",s7_object_string(v))}else if let Some(q)=quote_symbol_shorthand(v){write!(f,"{}",q)}else{fmt_list(f,v,seen)}},
+        Value::Symbol(s)=>write!(f,"{}",s), Value::Keyword(s)=>{ if s.starts_with(':') || s.ends_with(':') { write!(f,"{}",s) } else { write!(f,":{}",s) } }, Value::Pair(_)=>{
+            // A successful scan covers the entire pair-rooted graph. Keep a non-pointer
+            // sentinel in the active set while formatting that graph so nested pairs do
+            // not repeatedly rescan their complete subgraphs.
+            const PAIR_GRAPH_PRECHECKED:usize=0;
+            let prechecked=seen.contains(&PAIR_GRAPH_PRECHECKED);
+            if !prechecked {
+                let mut labels=Vec::new();
+                collect_cycle_labels(v,&mut labels,&mut Vec::new(),&mut HashSet::new());
+                if !labels.is_empty(){return write!(f,"{}",s7_object_string(v));}
+                seen.insert(PAIR_GRAPH_PRECHECKED);
+            }
+            let result=if let Some(q)=quote_symbol_shorthand(v){write!(f,"{}",q)}else{fmt_list(f,v,seen)};
+            if !prechecked {seen.remove(&PAIR_GRAPH_PRECHECKED);}
+            result
+        },
         Value::Vector(xs)=> { let id=Rc::as_ptr(xs) as usize; if seen.contains(&id){return write!(f,"#<cycle>");} seen.insert(id); write!(f,"#(")?; for (i,x) in xs.values().iter().enumerate(){ if i>0{write!(f," ")?;} if let Some(q)=quote_symbol_shorthand(x){write!(f,"{}",q)?;}else if matches!(x,Value::ValuesData(_)){write!(f,",")?; fmt_value(f,x,seen)?;}else{fmt_value(f,x,seen)?;} } let r=write!(f,")"); seen.remove(&id); r },
         Value::ByteVector(xs)=> { write!(f,"#u(")?; for (i,x) in xs.borrow().iter().enumerate(){ if i>0{write!(f," ")?;} write!(f,"{}",x)?;} write!(f,")") },
         Value::FloatVector(xs)=> { write!(f,"#r(")?; for (i,x) in xs.borrow().iter().enumerate(){ if i>0{write!(f," ")?;} fmt_float_num(f,*x)?; } write!(f,")") },
