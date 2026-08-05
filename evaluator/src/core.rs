@@ -50,6 +50,7 @@ pub(crate) type ObjRef = PairRef;
 pub(crate) fn reset_pair_arena(){with_current_pair_arena(PairArena::reset);}
 
 type EnvMap = HashMap<String, Value, BuildHasherDefault<FnvHasher>>;
+type DirectSeen = HashSet<usize, BuildHasherDefault<FnvHasher>>;
 
 #[derive(Default)]
 pub(crate) struct FnvHasher(u64);
@@ -301,7 +302,7 @@ impl Value {
 
 fn quote_symbol_shorthand(v:&Value)->Option<String>{if let Value::Pair(pair)=v{let origin=pair.syntax_origin();let head=pair.borrow().car.clone();let syntax=match head{Value::RootMeta(name)=>Some(name),_=>None};let arg=v.cdr().ok()?.car().ok()?;if origin==SyntaxOrigin::Quote||matches!(syntax.as_deref().map(|s|s.as_str()),Some("quote")){return Some(format!("'{}",arg));}if origin==SyntaxOrigin::Quasiquote||matches!(syntax.as_deref().map(|s|s.as_str()),Some("quasiquote")){return Some(if pair.is_quoted_result(){crate::printer::qq_code(&arg)}else{format!("`{}",arg)});}if origin==SyntaxOrigin::Unquote||matches!(syntax.as_deref().map(|s|s.as_str()),Some("unquote")){return Some(format!(",{}",arg));}if origin==SyntaxOrigin::UnquoteSplicing||matches!(syntax.as_deref().map(|s|s.as_str()),Some("unquote-splicing")){return Some(format!(",@{}",arg));}}None}
 fn push_quote_symbol_shorthand(out:&mut String,value:&Value)->bool{let Value::Pair(pair)=value else{return false};let origin=pair.syntax_origin();let quoted_result=pair.is_quoted_result();let pair=pair.borrow();let syntax=match &pair.car{Value::RootMeta(name)=>Some(name.as_str()),_=>None};let Value::Pair(arguments)=&pair.cdr else{return false};let arguments=arguments.borrow();if origin==SyntaxOrigin::Quote||syntax==Some("quote"){out.push('\'');out.push_str(&arguments.car.to_string());return true}if origin==SyntaxOrigin::Quasiquote||syntax==Some("quasiquote"){if quoted_result{out.push_str(&crate::printer::qq_code(&arguments.car));}else{out.push('`');out.push_str(&arguments.car.to_string());}return true}if origin==SyntaxOrigin::Unquote||syntax==Some("unquote"){out.push(',');out.push_str(&arguments.car.to_string());return true}if origin==SyntaxOrigin::UnquoteSplicing||syntax==Some("unquote-splicing"){out.push_str(",@");out.push_str(&arguments.car.to_string());return true}false}
-fn fmt_list(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) -> fmt::Result {
+fn fmt_list(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut DirectSeen) -> fmt::Result {
     write!(f, "(")?;
     let mut first=true; let mut cur=v.clone(); let mut inserted=Vec::new();
     loop {
@@ -323,7 +324,7 @@ fn fmt_list(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) ->
     r
 }
 
-fn fmt_env(f: &mut fmt::Formatter<'_>, e: &EnvRef, seen: &mut HashSet<usize>) -> fmt::Result {
+fn fmt_env(f: &mut fmt::Formatter<'_>, e: &EnvRef, seen: &mut DirectSeen) -> fmt::Result {
     let id=Rc::as_ptr(e) as usize; if seen.contains(&id){return write!(f,"#<cycle>");} seen.insert(id);
     write!(f, "(inlet")?;
     let order=e.order.borrow();
@@ -357,8 +358,8 @@ fn fmt_param_list(params:&Params)->Value{
     }
 }
 
-fn fmt_multivector(f:&mut fmt::Formatter<'_>, dims:&[usize], data:&[Value], kind:Option<&str>, seen:&mut HashSet<usize>)->fmt::Result{
-    fn rec(f:&mut fmt::Formatter<'_>, dims:&[usize], data:&[Value], off:usize, seen:&mut HashSet<usize>)->fmt::Result{
+fn fmt_multivector(f:&mut fmt::Formatter<'_>, dims:&[usize], data:&[Value], kind:Option<&str>, seen:&mut DirectSeen)->fmt::Result{
+    fn rec(f:&mut fmt::Formatter<'_>, dims:&[usize], data:&[Value], off:usize, seen:&mut DirectSeen)->fmt::Result{
         write!(f,"(")?;
         let stride:usize=dims[1..].iter().product();
         for i in 0..dims[0]{ if i>0{write!(f," ")?;} if dims.len()==1{fmt_value(f,&data[off+i],seen)?;}else{rec(f,&dims[1..],data,off+i*stride,seen)?;} }
@@ -380,7 +381,6 @@ pub(crate) fn push_float_s7(out:&mut String,x:f64){
 }
 
 fn write_value_direct_mode(out:&mut String,v:&Value,acyclic:bool){
-    type DirectSeen=HashSet<usize,BuildHasherDefault<FnvHasher>>;
     fn rec(out:&mut String,v:&Value,seen:&mut DirectSeen,acyclic:bool){
         match v{
             Value::Bool(true)=>out.push_str("#t"),Value::Bool(false)=>out.push_str("#f"),Value::Nil=>out.push_str("()"),Value::Unspecified=>out.push_str("#<unspecified>"),Value::Undefined=>out.push_str("#<undefined>"),Value::Eof=>out.push_str("#<eof>"),
@@ -406,7 +406,7 @@ fn write_value_direct_mode(out:&mut String,v:&Value,acyclic:bool){
 pub(crate) fn write_value_direct(out:&mut String,v:&Value){let acyclic=small_acyclic_value(v);write_value_direct_mode(out,v,acyclic)}
 pub(crate) fn write_acyclic_value_direct(out:&mut String,v:&Value){write_value_direct_mode(out,v,true)}
 
-fn fmt_value(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) -> fmt::Result {
+fn fmt_value(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut DirectSeen) -> fmt::Result {
     match v {
         Value::Bool(true)=>write!(f,"#t"), Value::Bool(false)=>write!(f,"#f"), Value::Nil=>write!(f,"()"), Value::Unspecified=>write!(f,"#<unspecified>"), Value::Undefined=>write!(f,"#<undefined>"), Value::Eof=>write!(f,"#<eof>"),
         Value::Int(n)=>write!(f,"{}",n), Value::RationalValue(r)=>write!(f,"{}/{}",r.num,r.den), Value::Float(x)=>fmt_float_num(f,*x), Value::ComplexValue(c)=>{fmt_float_num(f,c.real)?;if c.imag>=0.0{write!(f,"+")?;}fmt_float_num(f,c.imag)?;write!(f,"i")}, Value::NumberLiteral(s,_)=>if s.opaque_bignum{write!(f,"#<bignum: {}>",s.repr)}else{write!(f,"{}",s.repr)},
@@ -420,7 +420,7 @@ fn fmt_value(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) -
             let prechecked=seen.contains(&PAIR_GRAPH_PRECHECKED);
             if !prechecked {
                 let mut labels=Vec::new();
-                collect_cycle_labels(v,&mut labels,&mut Vec::new(),&mut HashSet::new());
+                collect_cycle_labels(v,&mut labels,&mut Vec::new(),&mut DirectSeen::default());
                 if !labels.is_empty(){return write!(f,"{}",s7_object_string(v));}
                 seen.insert(PAIR_GRAPH_PRECHECKED);
             }
@@ -449,5 +449,5 @@ fn fmt_value(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) -
         Value::Macro(p,_)=>match &*p.procedure{Procedure::Lambda{params,..}=>{let mut xs=params.required.iter().map(|n|Value::symbol(n)).collect::<Vec<_>>(); if let Some(r)=&params.rest{xs.push(Value::symbol(".")); xs.push(Value::symbol(r));} write!(f,"#<{} {}>",match (p.kind,params.star){(MacroKind::Macro,true)=>"macro*",(MacroKind::Macro,false)=>"macro",(MacroKind::BMacro,true)=>"bacro*",(MacroKind::BMacro,false)=>"bacro"},Value::list(xs))},_=>write!(f,"#<macro>")}, Value::Port(p)=>match &*p.borrow(){Port::Input{repr,..}=>write!(f,"#<input-string-port{}>", if *repr==PortRepr::ClosedInput{" :closed"}else{""}),Port::Output{repr,..}=>{if *repr==PortRepr::Stderr{write!(f,"*stderr*")}else{write!(f,"#<output-string-port{}>", if *repr==PortRepr::ClosedOutput{":closed"}else{""})}}}, Value::Hook(_,_)=>write!(f,"#<hook>"), Value::Iterator(_)=>write!(f,"#<iterator>"), Value::CPointer(n)=>write!(f,"#<c-pointer {}>",n), Value::Dilambda(_)=>write!(f,"#<dilambda>"), Value::ValuesData(xs)=>{write!(f,"(values")?; for x in xs{write!(f," ")?; fmt_value(f,x,seen)?;} write!(f,")")}, Value::Commented(v)=>{write!(f,"#; ")?; fmt_value(f,v,seen)}, Value::SetterRef(_)=>write!(f,"#<setter>"), Value::RootMeta(name)=>{if is_syntax_name(name){write!(f,"#_{}",name)}else{write!(f,"#<procedure {}>", name)}}, Value::RawDisplay(s)=>write!(f,"{}",s),Value::Host(value)=>match std::panic::catch_unwind(std::panic::AssertUnwindSafe(||value.object.display())){Ok(display)=>write!(f,"{}",display),Err(_)=>write!(f,"#<host-value-error>")},
     }
 }
-impl fmt::Display for Value { fn fmt(&self, f:&mut fmt::Formatter<'_>)->fmt::Result { fmt_value(f,self,&mut HashSet::new()) } }
+impl fmt::Display for Value { fn fmt(&self, f:&mut fmt::Formatter<'_>)->fmt::Result { fmt_value(f,self,&mut DirectSeen::default()) } }
 impl fmt::Debug for Value { fn fmt(&self, f:&mut fmt::Formatter<'_>)->fmt::Result { fmt::Display::fmt(self,f) } }
