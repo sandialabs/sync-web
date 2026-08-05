@@ -100,6 +100,15 @@ fn graph_reaches_identity_by<Node: Clone, Identity: Copy + Eq + Hash>(
     false
 }
 
+const EXPORT_ACTIVE_MARK: u32 = 1 << 31;
+const EXPORT_SERIAL_MASK: u32 = EXPORT_ACTIVE_MARK - 1;
+
+enum ExportCycleMark {
+    Active,
+    Done,
+    Fresh,
+}
+
 #[derive(Default)]
 struct ExportReachabilityScratch {
     marks: Vec<u32>,
@@ -108,10 +117,11 @@ struct ExportReachabilityScratch {
 
 impl ExportReachabilityScratch {
     fn begin_traversal(&mut self) -> u32 {
-        self.traversal_serial = self.traversal_serial.wrapping_add(1);
-        if self.traversal_serial == 0 {
+        if self.traversal_serial >= EXPORT_SERIAL_MASK {
             self.marks.fill(0);
             self.traversal_serial = 1;
+        } else {
+            self.traversal_serial += 1;
         }
         self.traversal_serial
     }
@@ -126,6 +136,25 @@ impl ExportReachabilityScratch {
         }
         self.marks[index] = traversal_serial;
         true
+    }
+
+    fn enter_cycle_node(&mut self, index: u32, traversal_serial: u32) -> ExportCycleMark {
+        let index = index as usize;
+        if self.marks.len() <= index {
+            self.marks.resize(index + 1, 0);
+        }
+        if self.marks[index] == (traversal_serial | EXPORT_ACTIVE_MARK) {
+            ExportCycleMark::Active
+        } else if self.marks[index] == traversal_serial {
+            ExportCycleMark::Done
+        } else {
+            self.marks[index] = traversal_serial | EXPORT_ACTIVE_MARK;
+            ExportCycleMark::Fresh
+        }
+    }
+
+    fn exit_cycle_node(&mut self, index: u32, traversal_serial: u32) {
+        self.marks[index as usize] = traversal_serial;
     }
 
     #[cfg(test)]
@@ -10164,6 +10193,46 @@ impl UnifiedVm {
         ))
     }
 
+    fn export_graph_has_cycle(
+        &self,
+        value: GcValue,
+        scratch: &mut ExportReachabilityScratch,
+    ) -> bool {
+        enum Visit {
+            Enter(GcValue),
+            Exit(u32),
+        }
+        let traversal_serial = scratch.begin_traversal();
+        let mut pending = vec![Visit::Enter(value)];
+        let mut children = Vec::new();
+        while let Some(visit) = pending.pop() {
+            match visit {
+                Visit::Exit(index) => scratch.exit_cycle_node(index, traversal_serial),
+                Visit::Enter(node) => {
+                    let Some((index, handle_epoch)) = node.heap_parts() else {
+                        continue;
+                    };
+                    let Some(slot) = self.heap.slot_index(index) else {
+                        continue;
+                    };
+                    if slot.epoch != handle_epoch || slot.object.is_none() {
+                        continue;
+                    }
+                    match scratch.enter_cycle_node(index, traversal_serial) {
+                        ExportCycleMark::Active => return true,
+                        ExportCycleMark::Done => continue,
+                        ExportCycleMark::Fresh => {}
+                    }
+                    pending.push(Visit::Exit(index));
+                    children.clear();
+                    self.extend_gc_graph_children(node, &mut children);
+                    pending.extend(children.drain(..).rev().map(Visit::Enter));
+                }
+            }
+        }
+        false
+    }
+
     fn export_value_is_self_referential(
         &self,
         value: GcValue,
@@ -10276,16 +10345,20 @@ impl UnifiedVm {
     ) -> Result<Value, VmError> {
         let mut request_scratch = self.export_reachability_scratch.borrow_mut();
         if let Some(scratch) = request_scratch.as_mut() {
-            self.export_runtime_syntax_inner(value, memo, literals, 0, false, scratch)
+            let graph_acyclic = !self.export_graph_has_cycle(value, scratch);
+            self.export_runtime_syntax_inner(value, memo, literals, 0, false, scratch, graph_acyclic)
         } else {
             drop(request_scratch);
+            let mut scratch = ExportReachabilityScratch::default();
+            let graph_acyclic = !self.export_graph_has_cycle(value, &mut scratch);
             self.export_runtime_syntax_inner(
                 value,
                 memo,
                 literals,
                 0,
                 false,
-                &mut ExportReachabilityScratch::default(),
+                &mut scratch,
+                graph_acyclic,
             )
         }
     }
@@ -10298,11 +10371,12 @@ impl UnifiedVm {
         quasiquote_depth: usize,
         direct_outer_quasiquote: bool,
         scratch: &mut ExportReachabilityScratch,
+        graph_acyclic: bool,
     ) -> Result<Value, VmError> {
         if value.as_fixnum().is_some() || value.as_character().is_some()
             || matches!(value, GcValue::FALSE | GcValue::TRUE | GcValue::NIL | GcValue::UNSPECIFIED | GcValue::UNDEFINED | GcValue::EOF)
         {
-            return self.export_syntax_inner(value, memo, scratch);
+            return self.export_syntax_inner(value, memo, scratch, graph_acyclic);
         }
         let quoted_payload = match self.heap.object(value) {
             Ok(GcObject::Syntax(kind, payload)) if kind.as_ref() == "quote" => Some(*payload),
@@ -10325,7 +10399,7 @@ impl UnifiedVm {
                 return Ok(Value::RootMeta(marker));
             }
         }
-        if self.export_value_is_self_referential(value, scratch)? {
+        if !graph_acyclic && self.export_value_is_self_referential(value, scratch)? {
             return Ok(Self::deferred_cyclic_syntax_value(self.pair_object_string(value)?));
         }
         if let Some(existing) = memo.get(&value) { return Ok(existing.clone()); }
@@ -10333,8 +10407,8 @@ impl UnifiedVm {
             GcObject::Pair { car, cdr } => {
                 let output = Value::cons(Value::Unspecified, Value::Unspecified);
                 memo.insert(value, output.clone());
-                let car = self.export_runtime_syntax_inner(*car, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)?;
-                let cdr = self.export_runtime_syntax_inner(*cdr, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)?;
+                let car = self.export_runtime_syntax_inner(*car, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch, graph_acyclic)?;
+                let cdr = self.export_runtime_syntax_inner(*cdr, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch, graph_acyclic)?;
                 output.set_car(car).map_err(|_| VmError::WrongType)?;
                 output.set_cdr(cdr).map_err(|_| VmError::WrongType)?;
                 Ok(output)
@@ -10342,7 +10416,7 @@ impl UnifiedVm {
             GcObject::Vector(values) => {
                 let output = Value::Vector(Rc::new(crate::core::VectorData::new(vec![Value::Unspecified; values.len()])));
                 memo.insert(value, output.clone());
-                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)).collect::<Result<Vec<_>, _>>()?;
+                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch, graph_acyclic)).collect::<Result<Vec<_>, _>>()?;
                 let Value::Vector(vector) = &output else { unreachable!() };
                 for (index, value) in converted.into_iter().enumerate() { vector.set(index, value); }
                 Ok(output)
@@ -10366,7 +10440,7 @@ impl UnifiedVm {
                     "unquote" | "unquote-splicing" => false,
                     _ => direct_outer_quasiquote,
                 };
-                let payload = self.export_runtime_syntax_inner(*payload, memo, literals, payload_depth, payload_direct, scratch)?;
+                let payload = self.export_runtime_syntax_inner(*payload, memo, literals, payload_depth, payload_direct, scratch, graph_acyclic)?;
                 let output = Value::list(vec![Value::RootMeta(Rc::new(kind.to_string())), payload]);
                 if let Value::Pair(pair) = &output {
                     let origin = match kind.as_ref() {
@@ -10382,12 +10456,12 @@ impl UnifiedVm {
                 Ok(output)
             }
             GcObject::Commented(payload) => {
-                let output = Value::Commented(Box::new(self.export_runtime_syntax_inner(*payload, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)?));
+                let output = Value::Commented(Box::new(self.export_runtime_syntax_inner(*payload, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch, graph_acyclic)?));
                 memo.insert(value, output.clone());
                 Ok(output)
             }
             GcObject::MultiVector { dims, values, kind } => {
-                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch)).collect::<Result<Vec<_>, _>>()?;
+                let converted = values.iter().map(|value| self.export_runtime_syntax_inner(*value, memo, literals, quasiquote_depth, direct_outer_quasiquote, scratch, graph_acyclic)).collect::<Result<Vec<_>, _>>()?;
                 let output = Value::MultiVector(Rc::new(crate::core::MultiVectorData {
                     dims: Rc::new(dims.clone()),
                     data: Rc::new(std::cell::RefCell::new(converted)),
@@ -10401,7 +10475,7 @@ impl UnifiedVm {
                 literals.push((marker.clone(), value));
                 Ok(Value::RootMeta(marker))
             }
-            _ => self.export_syntax_inner(value, memo, scratch),
+            _ => self.export_syntax_inner(value, memo, scratch, graph_acyclic),
         }
     }
 
@@ -10412,14 +10486,13 @@ impl UnifiedVm {
     ) -> Result<Value, VmError> {
         let mut request_scratch = self.export_reachability_scratch.borrow_mut();
         if let Some(scratch) = request_scratch.as_mut() {
-            self.export_syntax_inner(value, memo, scratch)
+            let graph_acyclic = !self.export_graph_has_cycle(value, scratch);
+            self.export_syntax_inner(value, memo, scratch, graph_acyclic)
         } else {
             drop(request_scratch);
-            self.export_syntax_inner(
-                value,
-                memo,
-                &mut ExportReachabilityScratch::default(),
-            )
+            let mut scratch = ExportReachabilityScratch::default();
+            let graph_acyclic = !self.export_graph_has_cycle(value, &mut scratch);
+            self.export_syntax_inner(value, memo, &mut scratch, graph_acyclic)
         }
     }
 
@@ -10428,6 +10501,7 @@ impl UnifiedVm {
         value: GcValue,
         memo: &mut HashMap<GcValue, Value>,
         scratch: &mut ExportReachabilityScratch,
+        graph_acyclic: bool,
     ) -> Result<Value, VmError> {
         if let Some(integer) = value.as_fixnum() {
             return Ok(Value::Int(integer));
@@ -10453,7 +10527,7 @@ impl UnifiedVm {
         if value == GcValue::EOF {
             return Ok(Value::Eof);
         }
-        if self.export_value_is_self_referential(value, scratch)? {
+        if !graph_acyclic && self.export_value_is_self_referential(value, scratch)? {
             return Ok(Self::deferred_cyclic_syntax_value(self.pair_object_string(value)?));
         }
         if let Some(existing) = memo.get(&value) {
@@ -10462,8 +10536,8 @@ impl UnifiedVm {
         if let GcObject::Pair { car, cdr } = self.heap.object(value)? {
             let output = Value::cons(Value::Unspecified, Value::Unspecified);
             memo.insert(value, output.clone());
-            let car = self.export_syntax_inner(*car, memo, scratch)?;
-            let cdr = self.export_syntax_inner(*cdr, memo, scratch)?;
+            let car = self.export_syntax_inner(*car, memo, scratch, graph_acyclic)?;
+            let cdr = self.export_syntax_inner(*cdr, memo, scratch, graph_acyclic)?;
             output.set_car(car).map_err(|_| VmError::WrongType)?;
             output.set_cdr(cdr).map_err(|_| VmError::WrongType)?;
             return Ok(output);
@@ -10471,7 +10545,7 @@ impl UnifiedVm {
         if let GcObject::Vector(values) = self.heap.object(value)? {
             let output = Value::Vector(Rc::new(crate::core::VectorData::new(vec![Value::Unspecified; values.len()])));
             memo.insert(value, output.clone());
-            let converted = values.iter().map(|value| self.export_syntax_inner(*value, memo, scratch)).collect::<Result<Vec<_>, _>>()?;
+            let converted = values.iter().map(|value| self.export_syntax_inner(*value, memo, scratch, graph_acyclic)).collect::<Result<Vec<_>, _>>()?;
             let Value::Vector(vector) = &output else { unreachable!() };
             for (index, value) in converted.into_iter().enumerate() { vector.set(index, value); }
             return Ok(output);
@@ -10491,7 +10565,7 @@ impl UnifiedVm {
             GcObject::BignumLiteral(repr) => Value::bignum_literal(Rc::new(repr.to_string())),
             GcObject::RawDisplay(text) => Value::RawDisplay(Rc::new(text.clone())),
             GcObject::Commented(value) => {
-                Value::Commented(Box::new(self.export_syntax_inner(*value, memo, scratch)?))
+                Value::Commented(Box::new(self.export_syntax_inner(*value, memo, scratch, graph_acyclic)?))
             }
             GcObject::Symbol(name) => Value::symbol(name),
             GcObject::Keyword(name) => Value::keyword(name),
@@ -10506,7 +10580,7 @@ impl UnifiedVm {
                 Value::RootMeta(Rc::new(name.to_string()))
             }
             GcObject::Syntax(kind, value) => {
-                let value = self.export_syntax_inner(*value, memo, scratch)?;
+                let value = self.export_syntax_inner(*value, memo, scratch, graph_acyclic)?;
                 let result = Value::list(vec![Value::RootMeta(Rc::new(kind.to_string())), value]);
                 if let Value::Pair(pair) = &result {
                     let origin = match kind.as_ref() {
@@ -10526,7 +10600,7 @@ impl UnifiedVm {
                     data: Rc::new(std::cell::RefCell::new(
                         values
                             .iter()
-                            .map(|value| self.export_syntax_inner(*value, memo, scratch))
+                            .map(|value| self.export_syntax_inner(*value, memo, scratch, graph_acyclic))
                             .collect::<Result<Vec<_>, _>>()?,
                     )),
                     kind: kind.map(|kind| Rc::new(kind.to_string())),
@@ -28124,8 +28198,13 @@ mod tests {
             root,
             &mut ExportReachabilityScratch::default(),
         ).unwrap();
+        let graph_cycle = vm.export_graph_has_cycle(
+            root,
+            &mut ExportReachabilityScratch::default(),
+        );
         assert!(expected);
         assert_eq!(actual, expected);
+        assert!(graph_cycle);
     }
 
     #[test]
@@ -28164,6 +28243,10 @@ mod tests {
             acyclic,
             &mut ExportReachabilityScratch::default(),
         ).unwrap());
+        assert!(!vm.export_graph_has_cycle(
+            acyclic,
+            &mut ExportReachabilityScratch::default(),
+        ));
     }
 
     #[test]
@@ -28189,8 +28272,10 @@ mod tests {
                 vm.heap.set_pair_cdr(current, root).unwrap();
                 let expected = vm.gc_value_is_self_referential(root).unwrap();
                 let actual = vm.export_value_is_self_referential(root, &mut scratch).unwrap();
+                let graph_cycle = vm.export_graph_has_cycle(root, &mut scratch);
                 assert!(expected);
                 assert_eq!(actual, expected);
+                assert!(graph_cycle);
                 vm.heap.set_pair_cdr(current, GcValue::NIL).unwrap();
             }
         }
@@ -28238,7 +28323,7 @@ mod tests {
                 (scratch.marks.as_ptr(), scratch.marks.capacity(), scratch.traversal_serial)
             };
             assert!(first_capacity > 0);
-            assert!(first_serial >= 2);
+            assert!(first_serial >= 1);
 
             let second = request.vm.export_syntax(root, &mut HashMap::new()).unwrap();
             assert!(matches!(second, Value::Pair(_)));
