@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -8,14 +8,17 @@ use super::{collect_cycle_labels, s7_object_string, small_acyclic_value, Evaluat
 
 #[derive(Debug, Clone)]
 pub struct SchemeError {
-    pub tag: String,
-    pub args: Vec<Value>,
+    pub(crate) tag: String,
+    pub(crate) args: Vec<Value>,
+    pair_arena: Option<PairArenaLease>,
 }
 
 impl SchemeError {
     #[cold]
     #[inline(never)]
-    pub(crate) fn new(tag: impl Into<String>, args: Vec<Value>) -> Self { Self { tag: tag.into(), args } }
+    pub(crate) fn new(tag: impl Into<String>, args: Vec<Value>) -> Self { Self { tag: tag.into(), args, pair_arena: None } }
+    pub(crate) fn retain_pair_arena(&mut self,arena:PairArenaLease){self.pair_arena=Some(arena);}
+    pub fn tag(&self)->&str{&self.tag}
     pub fn to_scheme(&self) -> String {
         Value::list(vec![Value::symbol("error"), Value::list(vec![Value::symbol(&self.tag), Value::list(self.args.clone())])]).to_string()
     }
@@ -28,12 +31,20 @@ pub(crate) struct PairCell{pub(crate) data:RefCell<PairData>}
 struct PairArena{free:Vec<std::ptr::NonNull<PairCell>>,chunks:Vec<Box<[PairCell]>>}
 impl PairArena{fn reset(&mut self){self.free.clear();for chunk in self.chunks.iter_mut(){for cell in chunk.iter_mut(){*cell.data.borrow_mut()=PairData{car:Value::Nil,cdr:Value::Nil};self.free.push(std::ptr::NonNull::from(cell));}}}fn take(&mut self)->std::ptr::NonNull<PairCell>{if let Some(p)=self.free.pop(){return p}let mut chunk=(0..4096).map(|_|PairCell{data:RefCell::new(PairData{car:Value::Nil,cdr:Value::Nil})}).collect::<Vec<_>>().into_boxed_slice();for cell in chunk.iter_mut(){self.free.push(std::ptr::NonNull::from(cell));}self.chunks.push(chunk);self.free.pop().unwrap()}}
 struct PairArenaOwner(*mut PairArena);impl Drop for PairArenaOwner{fn drop(&mut self){unsafe{drop(Box::from_raw(self.0))}}}
-thread_local!{static PAIR_ARENA:PairArenaOwner=PairArenaOwner(Box::into_raw(Box::new(PairArena{free:Vec::new(),chunks:Vec::new()})));}
+pub(crate) struct PairArenaGeneration{arena:UnsafeCell<PairArena>}
+#[derive(Clone)]pub(crate) struct PairArenaLease(pub(crate) Rc<PairArenaGeneration>);
+impl fmt::Debug for PairArenaLease{fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{f.write_str("PairArenaLease")}}
+thread_local!{static PAIR_ARENA:PairArenaOwner=PairArenaOwner(Box::into_raw(Box::new(PairArena{free:Vec::new(),chunks:Vec::new()})));static CURRENT_PAIR_ARENA:Cell<*mut PairArena>=const{Cell::new(std::ptr::null_mut())};}
+pub(crate) fn new_pair_arena()->PairArenaLease{PairArenaLease(Rc::new(PairArenaGeneration{arena:UnsafeCell::new(PairArena{free:Vec::new(),chunks:Vec::new()})}))}
+struct PairArenaScope{previous:*mut PairArena}
+impl Drop for PairArenaScope{fn drop(&mut self){CURRENT_PAIR_ARENA.with(|current|current.set(self.previous));}}
+pub(crate) fn with_pair_arena<R>(arena:&PairArenaLease,callback:impl FnOnce()->R)->R{let pointer=arena.0.arena.get();let previous=CURRENT_PAIR_ARENA.with(|current|current.replace(pointer));let _scope=PairArenaScope{previous};callback()}
+fn with_current_pair_arena<R>(callback:impl FnOnce(&mut PairArena)->R)->R{CURRENT_PAIR_ARENA.with(|current|{let pointer=current.get();if pointer.is_null(){PAIR_ARENA.with(|arena|unsafe{callback(&mut *arena.0)})}else{unsafe{callback(&mut *pointer)}}})}
 #[derive(Clone,Copy)] pub struct PairRef(std::ptr::NonNull<PairCell>);
-impl PairRef{pub(crate) fn new(data:PairData)->Self{let ptr=PAIR_ARENA.with(|arena|unsafe{(&mut *arena.0).take()});unsafe{*ptr.as_ref().data.borrow_mut()=data;}Self(ptr)}pub(crate) fn as_ptr(&self)->*const PairCell{self.0.as_ptr()}pub(crate) fn ptr_eq(a:&Self,b:&Self)->bool{a.0==b.0}pub(crate) unsafe fn from_ptr(p:*const PairCell)->Self{Self(std::ptr::NonNull::new(p as *mut PairCell).unwrap())}}
+impl PairRef{pub(crate) fn new(data:PairData)->Self{let ptr=with_current_pair_arena(|arena|arena.take());unsafe{*ptr.as_ref().data.borrow_mut()=data;}Self(ptr)}pub(crate) fn as_ptr(&self)->*const PairCell{self.0.as_ptr()}pub(crate) fn ptr_eq(a:&Self,b:&Self)->bool{a.0==b.0}pub(crate) unsafe fn from_ptr(p:*const PairCell)->Self{Self(std::ptr::NonNull::new(p as *mut PairCell).unwrap())}}
 impl std::ops::Deref for PairRef{type Target=RefCell<PairData>;fn deref(&self)->&Self::Target{unsafe{&self.0.as_ref().data}}}
 pub(crate) type ObjRef = PairRef;
-pub(crate) fn reset_pair_arena(){PAIR_ARENA.with(|arena|unsafe{(&mut *arena.0).reset()});}
+pub(crate) fn reset_pair_arena(){with_current_pair_arena(PairArena::reset);}
 
 type EnvMap = HashMap<String, Value, BuildHasherDefault<FnvHasher>>;
 
@@ -108,6 +119,7 @@ pub enum Value {
     SetterRef(usize),
     RootMeta(Rc<String>),
     RawDisplay(Rc<String>),
+    Host(Rc<crate::host::HostValueData>),
 }
 
 const _: [(); 16] = [(); std::mem::size_of::<Value>()];
@@ -420,7 +432,7 @@ fn fmt_value(f: &mut fmt::Formatter<'_>, v: &Value, seen: &mut HashSet<usize>) -
         }, Value::Env(e)=>fmt_env(f,e,seen),
         Value::Procedure(p)=> match &**p { Procedure::Builtin{name,..}=>write!(f,"#<procedure {}>",name), Procedure::Lambda{params,name,..}=>{ if let Some(name)=name{write!(f,"#<procedure {}>",name)}else{let ps=if params.star{let mut xs=params.required.iter().map(|n|Value::symbol(n)).collect::<Vec<_>>(); if let Some(r)=&params.rest{xs.push(Value::symbol(".")); xs.push(Value::symbol(r));} Value::list(xs).to_string()}else{fmt_param_list(params).to_string()}; write!(f,"#<{} {}>",if params.star{"lambda*"}else{"lambda"},ps)} } },
         Value::ProcedureSource(ps)=>{let params=&ps.params; let body=&ps.body; let macro_kind=ps.macro_kind; let head=match (macro_kind,params.star){(Some(MacroKind::Macro),true)=>"macro*",(Some(MacroKind::Macro),false)=>"macro",(Some(MacroKind::BMacro),true)=>"bacro*",(Some(MacroKind::BMacro),false)=>"bacro",(None,true)=>"lambda*",(None,false)=>"lambda"}; let param_s=if macro_kind.is_some()&&params.star&&params.defaults.iter().all(|d|matches!(d,Some(Value::Bool(false)))){format!("({})",params.required.join(" "))}else{fmt_param_list(params).to_string()}; write!(f,"({} {}", head, param_s)?; for x in body.borrow().iter(){write!(f," {}",x)?;} write!(f,")")},
-        Value::Macro(p,_)=>match &*p.procedure{Procedure::Lambda{params,..}=>{let mut xs=params.required.iter().map(|n|Value::symbol(n)).collect::<Vec<_>>(); if let Some(r)=&params.rest{xs.push(Value::symbol(".")); xs.push(Value::symbol(r));} write!(f,"#<{} {}>",match (p.kind,params.star){(MacroKind::Macro,true)=>"macro*",(MacroKind::Macro,false)=>"macro",(MacroKind::BMacro,true)=>"bacro*",(MacroKind::BMacro,false)=>"bacro"},Value::list(xs))},_=>write!(f,"#<macro>")}, Value::Port(p)=>match &*p.borrow(){Port::Input{repr,..}=>write!(f,"#<input-string-port{}>", if *repr==PortRepr::ClosedInput{" :closed"}else{""}),Port::Output{repr,..}=>{if *repr==PortRepr::Stderr{write!(f,"*stderr*")}else{write!(f,"#<output-string-port{}>", if *repr==PortRepr::ClosedOutput{":closed"}else{""})}}}, Value::Hook(_,_)=>write!(f,"#<hook>"), Value::Iterator(_)=>write!(f,"#<iterator>"), Value::CPointer(n)=>write!(f,"#<c-pointer {}>",n), Value::Dilambda(_)=>write!(f,"#<dilambda>"), Value::ValuesData(xs)=>{write!(f,"(values")?; for x in xs{write!(f," ")?; fmt_value(f,x,seen)?;} write!(f,")")}, Value::Commented(v)=>{write!(f,"#; ")?; fmt_value(f,v,seen)}, Value::SetterRef(_)=>write!(f,"#<setter>"), Value::RootMeta(name)=>{if is_syntax_name(name){write!(f,"#_{}",name)}else{write!(f,"#<procedure {}>", name)}}, Value::RawDisplay(s)=>write!(f,"{}",s),
+        Value::Macro(p,_)=>match &*p.procedure{Procedure::Lambda{params,..}=>{let mut xs=params.required.iter().map(|n|Value::symbol(n)).collect::<Vec<_>>(); if let Some(r)=&params.rest{xs.push(Value::symbol(".")); xs.push(Value::symbol(r));} write!(f,"#<{} {}>",match (p.kind,params.star){(MacroKind::Macro,true)=>"macro*",(MacroKind::Macro,false)=>"macro",(MacroKind::BMacro,true)=>"bacro*",(MacroKind::BMacro,false)=>"bacro"},Value::list(xs))},_=>write!(f,"#<macro>")}, Value::Port(p)=>match &*p.borrow(){Port::Input{repr,..}=>write!(f,"#<input-string-port{}>", if *repr==PortRepr::ClosedInput{" :closed"}else{""}),Port::Output{repr,..}=>{if *repr==PortRepr::Stderr{write!(f,"*stderr*")}else{write!(f,"#<output-string-port{}>", if *repr==PortRepr::ClosedOutput{":closed"}else{""})}}}, Value::Hook(_,_)=>write!(f,"#<hook>"), Value::Iterator(_)=>write!(f,"#<iterator>"), Value::CPointer(n)=>write!(f,"#<c-pointer {}>",n), Value::Dilambda(_)=>write!(f,"#<dilambda>"), Value::ValuesData(xs)=>{write!(f,"(values")?; for x in xs{write!(f," ")?; fmt_value(f,x,seen)?;} write!(f,")")}, Value::Commented(v)=>{write!(f,"#; ")?; fmt_value(f,v,seen)}, Value::SetterRef(_)=>write!(f,"#<setter>"), Value::RootMeta(name)=>{if is_syntax_name(name){write!(f,"#_{}",name)}else{write!(f,"#<procedure {}>", name)}}, Value::RawDisplay(s)=>write!(f,"{}",s),Value::Host(value)=>match std::panic::catch_unwind(std::panic::AssertUnwindSafe(||value.object.display())){Ok(display)=>write!(f,"{}",display),Err(_)=>write!(f,"#<host-value-error>")},
     }
 }
 impl fmt::Display for Value { fn fmt(&self, f:&mut fmt::Formatter<'_>)->fmt::Result { fmt_value(f,self,&mut HashSet::new()) } }

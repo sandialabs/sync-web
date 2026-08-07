@@ -1,10 +1,19 @@
 #[cfg(test)]
 mod tests{
     use std::{mem::size_of,rc::Rc};
-    use crate::{core::{PairRef,Value},run_source_output};
+    use crate::{core::{PairRef,Value},run_source,run_source_output,run_source_output_repeated};
 
     #[test]
     fn value_stays_two_words(){assert_eq!(size_of::<Value>(),16);}
+
+    #[test]
+    fn owned_public_values_keep_their_pair_generation_alive(){let retained=run_source("'(1 2 3)").unwrap();let weak=retained.pair_arena_weak();for _ in 0..8{let _=run_source_output_repeated("(make-list 500 9)",1,2).unwrap();}assert_eq!(retained.to_string(),"(1 2 3)");assert!(weak.upgrade().is_some());let other=run_source("'(a b)").unwrap();assert_eq!(retained.to_string(),"(1 2 3)");assert_eq!(other.to_string(),"(a b)");drop(retained);assert!(weak.upgrade().is_none());}
+
+    #[test]
+    fn dropped_results_release_acyclic_and_cyclic_generations(){for source in ["(make-list 500 1)","(let ((x (cons 1 '()))) (set-cdr! x x) x)"]{for _ in 0..1000{let value=run_source(source).unwrap();let weak=value.pair_arena_weak();drop(value);assert!(weak.upgrade().is_none());}}}
+
+    #[test]
+    fn independent_live_evaluations_do_not_share_pair_storage(){let first=run_source("'(1 2 3)").unwrap();let second=run_source("'(a b c)").unwrap();assert_eq!(first.to_string(),"(1 2 3)");assert_eq!(second.to_string(),"(a b c)");assert!(!std::rc::Weak::ptr_eq(&first.pair_arena_weak(),&second.pair_arena_weak()));}
 
     #[test]
     fn pair_identity_survives_mutation(){
@@ -62,6 +71,12 @@ mod tests{
 
     #[test]
     fn borrowed_dynamic_setter_falls_back_for_non_hash_targets(){let source="(let ((x (vector 0))) (define (set-x value) (set! (x 0) value)) (set-x 7) x)";assert_eq!(run_source_output(source).unwrap(),"#(7)");}
+
+    #[test]
+    fn four_level_composed_accessors_are_callable(){assert_eq!(run_source_output("(list (cddadr '(0 (1 2 3 4))) (caaaar '((((9))))) (cdaddr '(0 1 (2 3 4))))").unwrap(),"((3 4) 9 (3 4))");}
+
+    #[test]
+    fn compiled_applicable_setter_returns_setter_result(){assert_eq!(run_source_output("(let ((f (lambda (x) x))) (set! (setter f) (lambda (x y) #t)) ((lambda (g) (set! (g 1) 9)) f))").unwrap(),"#t");assert_eq!(run_source_output("(let ((d (dilambda (lambda (x) x) (lambda (x y) #t)))) (set! (d 1) 9))").unwrap(),"#t");}
 
     #[test]
     fn compiled_setter_preserves_multiple_values_error(){

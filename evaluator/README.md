@@ -30,7 +30,7 @@ The Rust port should target sync-web-compatible s7 behavior, not necessarily ful
 
 ## Integration direction
 
-If the interpreter becomes viable, sync-web should integrate it through a Rust-native API:
+Sync-web integration uses the ownership and callback contracts documented in [`docs/pair-arena-ownership.md`](docs/pair-arena-ownership.md) and [`docs/rust-native-host-api.md`](docs/rust-native-host-api.md). The limited in-memory Records acceptance harness is documented in [`docs/mock-records-host.md`](docs/mock-records-host.md):
 
 - register primitive functions as Rust functions/closures;
 - expose sync nodes as Rust-backed Scheme host values;

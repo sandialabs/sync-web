@@ -15,25 +15,24 @@ mod core;
 mod bytecode;
 mod compiled;
 mod native_jit;
+mod host;
+pub use host::{BorrowedValue,HostCallContext,HostError,HostObject,HostOutput,PrimitiveSpec,RustHost,SYNC_WEB_HOST_PRIMITIVES};
 use bytecode::{AddTerm, BytecodeFunction, Instr, MulTerm, ValueOperand};
 use compiled::{BuiltinId, CExpr, CompiledLayout, QTemplate, VarRef};
 use core::*;
 
-pub fn run_source(source: &str) -> Result<Value> {
-    let mut ev = Evaluator::new();
-    let exprs = parse_all(source)?;
-    let mut last = Value::Unspecified;
-    for e in exprs { last = ev.eval(e, ev.global.clone())?; }
-    Ok(last)
+pub struct OwnedValue{pub(crate) value:Value,pub(crate) _pair_arena:PairArenaLease}
+impl Clone for OwnedValue{fn clone(&self)->Self{Self{value:self.value.clone(),_pair_arena:self._pair_arena.clone()}}}
+impl std::fmt::Debug for OwnedValue{fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{write!(f,"{}",self.value)}}
+impl std::fmt::Display for OwnedValue{fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{write!(f,"{}",self.value)}}
+impl OwnedValue{pub fn object_string(&self)->String{self.value.to_string()}#[cfg(test)]fn pair_arena_weak(&self)->std::rc::Weak<core::PairArenaGeneration>{Rc::downgrade(&self._pair_arena.0)}}
+
+pub fn run_source(source: &str) -> std::result::Result<OwnedValue,SchemeError> {
+    let arena=new_pair_arena();let result:Result<Value>=with_pair_arena(&arena,||{let mut ev=Evaluator::new();let exprs=parse_all(source)?;let mut last=Value::Unspecified;for e in exprs{last=ev.eval(e,ev.global.clone())?;}Ok(last)});match result{Ok(value)=>Ok(OwnedValue{value,_pair_arena:arena}),Err(mut error)=>{error.retain_pair_arena(arena);Err(error)}}
 }
 
-fn value_or_error_to_output(result: Result<Value>) -> std::result::Result<String, String> {
-    match result {
-        Ok(Value::ValuesData(vs)) => Ok(Value::list(vs).to_string()),
-        Ok(v) => Ok(v.to_string()),
-        Err(err) => Err(if err.args.is_empty() && err.tag=="wrong-number-of-args" { err.tag } else { err.to_scheme() }),
-    }
-}
+fn raw_value_or_error_to_output(result:Result<Value>)->std::result::Result<String,String>{match result{Ok(Value::ValuesData(vs))=>Ok(Value::list(vs).to_string()),Ok(value)=>Ok(value.to_string()),Err(err)=>Err(if err.args.is_empty()&&err.tag=="wrong-number-of-args"{err.tag}else{err.to_scheme()})}}
+fn value_or_error_to_output(result: std::result::Result<OwnedValue,SchemeError>) -> std::result::Result<String, String> {match result{Ok(value)=>raw_value_or_error_to_output(Ok(value.value)),Err(error)=>raw_value_or_error_to_output(Err(error))}}
 
 pub fn run_source_output(source: &str) -> std::result::Result<String, String> {
     value_or_error_to_output(run_source(source))
@@ -41,7 +40,7 @@ pub fn run_source_output(source: &str) -> std::result::Result<String, String> {
 
 #[doc(hidden)]
 pub fn run_source_output_repeated(source: &str, warmups: usize, repeats: usize) -> std::result::Result<(String, Vec<u128>), String> {
-    let exprs = parse_all(source).map_err(|err| if err.args.is_empty() && err.tag=="wrong-number-of-args" { err.tag } else { err.to_scheme() })?;
+    let arena=new_pair_arena();with_pair_arena(&arena,||{let exprs = parse_all(source).map_err(|err| if err.args.is_empty() && err.tag=="wrong-number-of-args" { err.tag } else { err.to_scheme() })?;
     let mut last_output = String::new();
     let mut timings = Vec::with_capacity(repeats);
     for iter in 0..warmups.saturating_add(repeats) {
@@ -52,12 +51,12 @@ pub fn run_source_output_repeated(source: &str, warmups: usize, repeats: usize) 
             for e in exprs.iter().cloned() { last = ev.eval(e, ev.global.clone())?; }
             Ok(last)
         })();
-        let output = match value_or_error_to_output(result) { Ok(v) | Err(v) => v };
+        let output = match raw_value_or_error_to_output(result) { Ok(v) | Err(v) => v };
         let elapsed = start.elapsed().as_nanos();
         if iter >= warmups { timings.push(elapsed); }
         last_output = output;
     }
-    reset_pair_arena();Ok((last_output, timings))
+    reset_pair_arena();Ok((last_output, timings))})
 }
 
 #[derive(Clone)]
@@ -68,14 +67,19 @@ enum CompiledFlow { Value(Value), Recur(Vec<Value>) }
 struct CompiledCtx<'a> { env: EnvRef, slots: Option<&'a [Value]>, slot_names: Option<&'a [Rc<String>]>, materialized_env: RefCell<Option<EnvRef>> }
 
 struct NamedLetHotEntry{name:String,params:Vec<String>,inits:Vec<Value>,body:Vec<Value>,generation:u64,compiled:Rc<compiled::CompiledBody>}
-pub struct Evaluator { root: EnvRef, global: EnvRef, curlet: EnvRef, proc_setters: RefCell<HashMap<usize, Value>>, named_let_cache: RefCell<Option<NamedLetHotEntry>>, gas: GasState, stdin: Value, stdout: Value, stderr: Value, pending_call_form: Option<Value>, bytecode_stack_pool: Vec<Vec<Value>>, bytecode_temp_pool: Vec<Vec<Value>>, compiled_slot_pool: Vec<Vec<Value>> }
+pub struct Evaluator { root: EnvRef, global: EnvRef, curlet: EnvRef, proc_setters: RefCell<HashMap<usize, Value>>, named_let_cache: RefCell<Option<NamedLetHotEntry>>, gas: GasState, stdin: Value, stdout: Value, stderr: Value, pending_call_form: Option<Value>, bytecode_stack_pool: Vec<Vec<Value>>, bytecode_temp_pool: Vec<Vec<Value>>, compiled_slot_pool: Vec<Vec<Value>>, host_primitives: Vec<host::HostAdapter> }
 
 fn normalize_loop_value(v:Value)->Value{match v{Value::Float(x) if x.is_finite()&&x>=i64::MAX as f64=>Value::Int(i64::MAX),Value::Float(x) if x.is_finite()&&x<=i64::MIN as f64=>Value::Int(i64::MIN),Value::NumberLiteral(x,_) if x.value.is_finite()&&x.value>=i64::MAX as f64=>Value::Int(i64::MAX),Value::NumberLiteral(x,_) if x.value.is_finite()&&x.value<=i64::MIN as f64=>Value::Int(i64::MIN),v=>v}}
 
 fn value_has_pair_cycle(v:&Value, stack:&mut HashSet<usize>, seen:&mut HashSet<usize>)->bool{match v{Value::Pair(p)=>{let id=p.as_ptr() as usize; if stack.contains(&id){return true;} if !seen.insert(id){return false;} stack.insert(id); let PairData{car,cdr}= &*p.borrow(); let r=value_has_pair_cycle(car,stack,seen)||value_has_pair_cycle(cdr,stack,seen); stack.remove(&id); r},Value::Vector(xs)=>xs.any_value(|x|value_has_pair_cycle(x,stack,seen)),_=>false}}
 
 impl Evaluator {
-    fn new() -> Self { let root=Env::new(None); let global=Env::new(Some(root.clone())); let stdin=Value::Port(Rc::new(RefCell::new(Port::Input{text:Vec::new(),pos:0,repr:PortRepr::Stdin}))); let stdout=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stdout}))); let stderr=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stderr}))); let mut ev=Self{root:root.clone(), global:global.clone(), curlet:global.clone(), proc_setters:RefCell::new(HashMap::new()), named_let_cache:RefCell::new(None), gas: GasState{active:None,last_used:0,last_status:"ok".to_string()}, stdin, stdout, stderr, pending_call_form: None, bytecode_stack_pool: Vec::new(), bytecode_temp_pool: Vec::new(), compiled_slot_pool: Vec::new()}; ev.install(); ev }
+    pub(crate) fn charge_host(&mut self,amount:u64)->Result<()>{for _ in 0..amount{self.charge(1)?}Ok(())}
+    pub(crate) fn invoke_host_primitive(&mut self,index:usize,args:&[Value])->Result<Value>{let callback=self.host_primitives.get(index).cloned().ok_or_else(||SchemeError::new("host-error",vec![Value::string("missing host primitive")]))?;callback(self,args)}
+    pub(crate) fn register_host_adapter(&mut self,callback:host::HostAdapter)->usize{let index=self.host_primitives.len();self.host_primitives.push(callback);index}
+    pub(crate) fn apply_host_source(&mut self,source:&str,args:Vec<Value>)->Result<Value>{let expression=parse_all(source)?.into_iter().next().ok_or_else(||SchemeError::new("read-error",vec![Value::string("empty host apply source")]))?;let environment=self.curlet.clone();let procedure=self.eval(expression,environment.clone())?;self.apply_value(procedure,args,environment)}
+    fn set_applicable_with_setter(&mut self,target:Value,mut indices:Vec<Value>,value:Value,env:EnvRef)->Result<Value>{if let Value::Dilambda(dilambda)=&target{indices.push(value);return self.apply_value(dilambda.1.clone(),indices,env)}if let Some(key)=proc_key(&target){let setter={self.proc_setters.borrow().get(&key).cloned()};if let Some(setter)=setter{indices.push(value);return self.apply_value(setter,indices,env)}}set_applicable(target,indices,value)}
+    fn new() -> Self { let root=Env::new(None); let global=Env::new(Some(root.clone())); let stdin=Value::Port(Rc::new(RefCell::new(Port::Input{text:Vec::new(),pos:0,repr:PortRepr::Stdin}))); let stdout=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stdout}))); let stderr=Value::Port(Rc::new(RefCell::new(Port::Output{text:String::new(),repr:PortRepr::Stderr}))); let mut ev=Self{root:root.clone(), global:global.clone(), curlet:global.clone(), proc_setters:RefCell::new(HashMap::new()), named_let_cache:RefCell::new(None), gas: GasState{active:None,last_used:0,last_status:"ok".to_string()}, stdin, stdout, stderr, pending_call_form: None, bytecode_stack_pool: Vec::new(), bytecode_temp_pool: Vec::new(), compiled_slot_pool: Vec::new(), host_primitives: Vec::new()}; ev.install(); ev }
     fn install(&mut self) {
         let builtin_map: HashMap<&'static str, (fn(&mut Evaluator,&[Value])->Result<Value>, usize, Option<usize>, &'static str)> =
             BUILTINS.iter().map(|(name,func,min,max,doc)| (*name, (*func,*min,*max,*doc))).collect();
@@ -546,9 +550,9 @@ impl Evaluator {
                 }
                 Instr::ApplicableRef=>{let index=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let target=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; if let Value::HashTable(h)=&target{stack.push(hash_lookup(h,&index).unwrap_or(Value::Bool(false)));}else{stack.push(applicable_get(&target,&index)?);}}
                 Instr::ApplicableRefDynamic{target,index}=>{let get_slot=|slot:usize|if slot<base_slots.len(){base_slots.get(slot)}else{temps.get(slot-base_slots.len())};let index=match index{ValueOperand::Slot(slot)=>get_slot(*slot),ValueOperand::Const(i)=>bc.constants.get(*i)}.ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let value=env.with_value(target.as_str(),|value|if let Value::HashTable(table)=value{Ok(hash_lookup(table,index).unwrap_or(Value::Bool(false)))}else{applicable_get(value,index)}).ok_or_else(||SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S"),Value::symbol(target.as_str())]))??;stack.push(value);}
-                Instr::SetApplicable=>{let value=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let index=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let target=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; if let Value::Env(e)=&target{if !is_marked_immutable(&target)&&!matches!(index,Value::ValuesData(_))&&!matches!(value,Value::ValuesData(_)){let Some(key)=normalized_env_key(&index) else{return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-set!"),Value::Int(2),index.clone(),Value::string(simple_value_kind(&index)),Value::string("a symbol")]))};if e.set(key.as_ref(),value.clone()){stack.push(value);continue;}}} stack.push(set_applicable(target,vec![index],value)?);}
-                Instr::SetApplicableDynamic{target,index}=>{let mut value=Some(stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?);let get_slot=|slot:usize|if slot<base_slots.len(){base_slots.get(slot)}else{temps.get(slot-base_slots.len())};let index=match index{ValueOperand::Slot(slot)=>get_slot(*slot),ValueOperand::Const(i)=>bc.constants.get(*i)}.ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let hash_result=env.with_value(target.as_str(),|target|if let Value::HashTable(table)=target{Some(hash_set_entry_mutating(table,index.clone(),value.take().unwrap(),"hash-table-set!",target))}else{None}).flatten();if let Some(result)=hash_result{stack.push(result?)}else{let target=env.get(target.as_str()).ok_or_else(||SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S"),Value::symbol(target.as_str())]))?;stack.push(set_applicable(target,vec![index.clone()],value.take().unwrap())?);}}
-                Instr::SetApplicableOperands{target,index}=>{let value=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let get_slot=|slot:usize|if slot<base_slots.len(){base_slots.get(slot)}else{temps.get(slot-base_slots.len())};let target=get_slot(*target).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let index=match index{ValueOperand::Slot(slot)=>get_slot(*slot),ValueOperand::Const(i)=>bc.constants.get(*i)}.ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;if let Value::Env(environment)=target{if !is_marked_immutable(target){if let Some(key)=normalized_env_key(index){if environment.set(key.as_ref(),value.clone()){stack.push(value);continue}}}}if let Value::HashTable(table)=target{stack.push(hash_set_entry_mutating(table,index.clone(),value,"hash-table-set!",target)?)}else{stack.push(set_applicable(target.clone(),vec![index.clone()],value)?);}}
+                Instr::SetApplicable=>{let value=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let index=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; let target=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?; if let Value::Env(e)=&target{if !is_marked_immutable(&target)&&!matches!(index,Value::ValuesData(_))&&!matches!(value,Value::ValuesData(_)){let Some(key)=normalized_env_key(&index) else{return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A ~:D argument, ~S, is ~A but should be ~A"),Value::symbol("let-set!"),Value::Int(2),index.clone(),Value::string(simple_value_kind(&index)),Value::string("a symbol")]))};if e.set(key.as_ref(),value.clone()){stack.push(value);continue;}}} stack.push(self.set_applicable_with_setter(target,vec![index],value,env.clone())?);}
+                Instr::SetApplicableDynamic{target,index}=>{let mut value=Some(stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?);let get_slot=|slot:usize|if slot<base_slots.len(){base_slots.get(slot)}else{temps.get(slot-base_slots.len())};let index=match index{ValueOperand::Slot(slot)=>get_slot(*slot),ValueOperand::Const(i)=>bc.constants.get(*i)}.ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let hash_result=env.with_value(target.as_str(),|target|if let Value::HashTable(table)=target{Some(hash_set_entry_mutating(table,index.clone(),value.take().unwrap(),"hash-table-set!",target))}else{None}).flatten();if let Some(result)=hash_result{stack.push(result?)}else{let target=env.get(target.as_str()).ok_or_else(||SchemeError::new("unbound-variable",vec![Value::string("unbound variable ~S"),Value::symbol(target.as_str())]))?;stack.push(self.set_applicable_with_setter(target,vec![index.clone()],value.take().unwrap(),env.clone())?);}}
+                Instr::SetApplicableOperands{target,index}=>{let value=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let get_slot=|slot:usize|if slot<base_slots.len(){base_slots.get(slot)}else{temps.get(slot-base_slots.len())};let target=get_slot(*target).ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let index=match index{ValueOperand::Slot(slot)=>get_slot(*slot),ValueOperand::Const(i)=>bc.constants.get(*i)}.ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;if let Value::Env(environment)=target{if !is_marked_immutable(target){if let Some(key)=normalized_env_key(index){if environment.set(key.as_ref(),value.clone()){stack.push(value);continue}}}}if let Value::HashTable(table)=target{stack.push(hash_set_entry_mutating(table,index.clone(),value,"hash-table-set!",target)?)}else{stack.push(self.set_applicable_with_setter(target.clone(),vec![index.clone()],value,env.clone())?);}}
                 Instr::QCons=>{let cdr=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let car=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;if let Value::ValuesData(vs)=cdr{let mut items=vec![Value::list(vec![car])];items.extend(vs);return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: too many arguments: (~A~{~^ ~S~})"),Value::symbol("<list*>"),Value::symbol("<list*>"),Value::list(items)]));}if let Value::ValuesData(vs)=car{let mut out=cdr;for v in vs.into_iter().rev(){out=Value::cons(v,out);}stack.push(out);}else{stack.push(Value::cons(car,cdr));}}
                 Instr::QSpliceCons=>{let tail=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let spliced=stack.pop().ok_or_else(||SchemeError::new("unsupported-compiled-form",vec![]))?;let spliced=if let Value::ValuesData(vs)=spliced{if vs.len()!=1{return Err(SchemeError::new("wrong-number-of-args",vec![Value::string("~A: too many arguments: (~A~{~^ ~S~})"),Value::symbol("apply-values"),Value::symbol("apply-values"),Value::list(vs)]));}vs.into_iter().next().unwrap_or(Value::Nil)}else{spliced};let vals=spliced.to_vec().map_err(|_|SchemeError::new("wrong-type-arg",vec![Value::string("apply's last argument should be a proper list: ~S"),Value::list(vec![spliced.clone()])]))?;let mut out=tail;for v in vals.into_iter().rev(){out=Value::cons(v,out);}stack.push(out);}
                 Instr::QVector(n)=>{if stack.len()<*n{return Err(SchemeError::new("unsupported-compiled-form",vec![]));}let vals=stack.split_off(stack.len()-*n);stack.push(Value::Vector(Rc::new(VectorData::new(vals))));}
@@ -1255,6 +1259,7 @@ impl Evaluator {
                 "and"=>{let mut last=Value::Bool(true); for v in args{last=v; if !last.is_true(){return Ok(last);}} Ok(last)}
                 "begin"=>Ok(args.last().cloned().unwrap_or(Value::Unspecified)),
                 "values"=>Ok(if args.is_empty(){Value::Unspecified}else if args.len()==1{args[0].clone()}else{Value::Values(args)}),
+                name if name.len()>=4&&name.starts_with('c')&&name.ends_with('r')&&name[1..name.len()-1].bytes().all(|byte|byte==b'a'||byte==b'd')=>{if args.len()!=1{return Err(SchemeError::new("wrong-number-of-args",vec![Value::symbol(name)]))}let mut value=args[0].clone();for operation in name[1..name.len()-1].bytes().rev(){value=if operation==b'a'{value.car()?}else{value.cdr()?};}Ok(value)}
                 "set!"=>{ if args.len()>=2 { if let Some(s)=args[0].as_symbol(){ if env.set(s,args[1].clone()){return Ok(args[1].clone());} } if args.len()==2 { if set_first_equal(&env,&args[0],args[1].clone()){return Ok(args[1].clone());} if let Value::Pair(_)=&args[0]{ let target_expr=args[0].car()?; let target=if matches!(target_expr.car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("quote")){target_expr.cdr()?.car()?}else{target_expr}; return set_applicable(target, args[0].cdr()?.to_vec()?, args[1].clone()); } } else { let target=if matches!(args[0].car().ok().and_then(|x|x.as_symbol().map(|s|s.to_string())).as_deref(),Some("quote")){args[0].cdr()?.car()?}else{args[0].clone()}; return set_applicable(target, args[1..args.len()-1].to_vec(), args[args.len()-1].clone()); } } Err(SchemeError::new("wrong-type-arg", vec![Value::RootMeta(name)])) }
                 _=>Err(SchemeError::new("wrong-number-of-args", vec![]))
             },
@@ -1590,11 +1595,11 @@ impl Evaluator {
             if idxs.is_empty() {
                 if matches!(target,Value::Iterator(_)) { let name=op_expr.as_symbol().unwrap_or("#<iterator>"); return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("{} (an iterator) does not have a setter: (set! {} {})",name,code_repr(&place),code_repr(&val_expr)))])); }
                 if matches!(target,Value::Macro(_,_)) { let name=op_expr.as_symbol().unwrap_or("#<macro>"); return Err(SchemeError::new("wrong-type-arg",vec![Value::string(format!("{} (a macro) does not have a setter: (set! {} {})",name,code_repr(&place),code_repr(&val_expr)))])); }
-                if let Some(k)=proc_key(&target) { let setter_opt={self.proc_setters.borrow().get(&k).cloned()}; if let Some(setter)=setter_opt { return self.apply_value(setter, vec![val.clone()], env).map(|_| val); } }
+                if let Some(k)=proc_key(&target) { let setter_opt={self.proc_setters.borrow().get(&k).cloned()}; if let Some(setter)=setter_opt { return self.apply_value(setter, vec![val], env); } }
             }
             if !idxs.is_empty() {
-                if let Value::Dilambda(dl)=&target { let mut call_args=idxs.clone(); call_args.push(val.clone()); return self.apply_value(dl.1.clone(),call_args,env).map(|_|val); }
-                if let Some(k)=proc_key(&target) { let setter_opt={self.proc_setters.borrow().get(&k).cloned()}; if let Some(setter)=setter_opt { let mut call_args=idxs.clone(); call_args.push(val.clone()); return self.apply_value(setter,call_args,env).map(|_|val); } else if matches!(target,Value::Procedure(_)) {return Err(SchemeError::new("no-setter",vec![Value::string("~A (~A) does not have a setter: (set! ~S ~S)"),op_expr.clone(),Value::string("a c-function"),place.clone(),val_expr.clone()]));} }
+                if let Value::Dilambda(dl)=&target { let mut call_args=idxs.clone(); call_args.push(val); return self.apply_value(dl.1.clone(),call_args,env); }
+                if let Some(k)=proc_key(&target) { let setter_opt={self.proc_setters.borrow().get(&k).cloned()}; if let Some(setter)=setter_opt { let mut call_args=idxs.clone(); call_args.push(val.clone()); return self.apply_value(setter,call_args,env); } else if matches!(target,Value::Procedure(_)) {return Err(SchemeError::new("no-setter",vec![Value::string("~A (~A) does not have a setter: (set! ~S ~S)"),op_expr.clone(),Value::string("a c-function"),place.clone(),val_expr.clone()]));} }
             }
             if let Value::Symbol(s)=&target { if let Some(actual)=env.get(s) { return set_applicable_from_set(actual, idxs, val, &place); } }
             return set_applicable_from_set(target, idxs, val, &place);
@@ -1640,7 +1645,7 @@ impl Evaluator {
             if bv.len()>2{return Err(SchemeError::new("syntax-error",vec![Value::string(if sequential{"let* variable declaration has more than one value?: ~A in ~A"}else{"let variable declaration, ~A, has more than one value in ~A"}),if sequential{b.clone()}else{Value::list(vec![b.clone()])},Value::string(code_repr(&let_src))]));}
             if matches!(bv[0],Value::Keyword(_)){return Err(SchemeError::new("wrong-type-arg",vec![Value::string("~A: can't bind an immutable object: ~S"),Value::symbol(if sequential{"let*"}else{"let"}),if sequential{b.clone()}else{Value::list(vec![b.clone()])}]));}
             if bv[0].as_symbol().is_none(){let form=if sequential{"let*"}else{"let"}; return Err(SchemeError::new("syntax-error",vec![Value::string(format!("bad variable name ~W in {} (it is ~A, not a symbol) in ~A",form)),bv[0].clone(),Value::string(simple_value_kind(&bv[0])),Value::string(code_repr(&let_src))]));}
-            let n=bv[0].as_symbol().unwrap().to_string(); if !seen.insert(n.clone()){return Err(SchemeError::new("syntax-error",vec![Value::string("duplicate identifier in let: ~S in ~S"),Value::symbol(&n),let_src.clone()]));}
+            let n=bv[0].as_symbol().unwrap().to_string(); if !seen.insert(n.clone())&&!sequential{return Err(SchemeError::new("syntax-error",vec![Value::string("duplicate identifier in let: ~S in ~S"),Value::symbol(&n),let_src.clone()]));}
         }
         if sequential { for b in bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap(); let val=self.eval(bv[1].clone(), new.clone())?; let val=self.normalize_binding_value_ctx("let*",name,val)?; new.define(name, val); } }
         else { let mut vals=Vec::new(); for b in &bindings { let bv=b.to_vec()?; let name=bv[0].as_symbol().unwrap().to_string(); let val=self.eval(bv[1].clone(), env.clone())?; vals.push((name.clone(), self.normalize_binding_value_ctx("let",&name,val)?)); } for (k,v) in vals { new.define(k,v); } }

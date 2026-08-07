@@ -10,6 +10,15 @@ cranelift-frontend = "0.133"
 cranelift-jit = "0.133"
 cranelift-module = "0.133"
 cranelift-native = "0.133"
+sha2 = { version = "0.10", optional = true }
+
+[features]
+mock-records-host = ["dep:sha2"]
+
+[[bin]]
+name = "rust_journal_sdk"
+path = "src/bin/rust_journal_sdk.rs"
+required-features = ["mock-records-host"]
 
 [profile.release]
 lto = "thin"
