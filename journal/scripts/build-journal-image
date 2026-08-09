@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "usage: $0 --variant musl|glibc --kernel PATH --tag IMAGE --evidence-dir DIR" >&2
+  exit 2
+}
+
+variant=
+kernel=
+tag=
+evidence_dir=
+while (($#)); do
+  case "$1" in
+    --variant) variant=${2-}; shift 2 ;;
+    --kernel) kernel=${2-}; shift 2 ;;
+    --tag) tag=${2-}; shift 2 ;;
+    --evidence-dir) evidence_dir=${2-}; shift 2 ;;
+    *) usage ;;
+  esac
+done
+[[ $variant == musl || $variant == glibc ]] || usage
+[[ -f $kernel && -n $tag && -n $evidence_dir ]] || usage
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+journal_dir=$(cd -- "$script_dir/.." && pwd)
+repo_dir=$(git -C "$journal_dir" rev-parse --show-toplevel)
+[[ -z $(git -C "$repo_dir" status --porcelain) ]] || {
+  echo "image inputs require a clean Git checkout" >&2
+  exit 1
+}
+
+commit=$(git -C "$repo_dir" rev-parse HEAD)
+tree=$(git -C "$repo_dir" rev-parse 'HEAD^{tree}')
+lock_sha=$(sha256sum "$journal_dir/Cargo.lock" | awk '{print $1}')
+aot_sha=$(sha256sum "$kernel" | awk '{print $1}')
+[[ $lock_sha == d69e38d29ecabd5ae3d62cf2a7c018b292a9e3a40102a0547971bf0d03e34854 ]]
+[[ $aot_sha =~ ^[0-9a-f]{64}$ ]]
+
+mkdir -p "$evidence_dir"
+context=$(mktemp -d)
+trap 'rm -rf "$context"' EXIT
+git -C "$repo_dir" archive "$commit" | tar -C "$context" -xf -
+cp -- "$kernel" "$context/journal/kernel.wasmer"
+(
+  cd "$context"
+  find . -type f -print0 | sort -z | xargs -0 sha256sum
+) > "$evidence_dir/$variant-context-files.sha256"
+inputs_sha=$(sha256sum "$evidence_dir/$variant-context-files.sha256" | awk '{print $1}')
+cat > "$evidence_dir/$variant-source.txt" <<EOF
+commit=$commit
+tree=$tree
+lock_sha256=$lock_sha
+aot_sha256=$aot_sha
+source_inputs_sha256=$inputs_sha
+EOF
+
+runtime=${CONTAINER_RUNTIME:-podman}
+format=()
+pull=(--pull)
+if [[ $runtime == *podman* ]]; then
+  format=(--format oci)
+  pull=(--pull=never)
+fi
+"$runtime" build --no-cache "${pull[@]}" "${format[@]}" \
+  --build-arg TARGETARCH=amd64 \
+  --build-arg SOURCE_COMMIT="$commit" \
+  --build-arg SOURCE_TREE="$tree" \
+  --build-arg SOURCE_INPUTS_SHA256="$inputs_sha" \
+  --build-arg AOT_SHA256="$aot_sha" \
+  -f "$context/journal/Dockerfile.$variant" \
+  -t "$tag" \
+  "$context"

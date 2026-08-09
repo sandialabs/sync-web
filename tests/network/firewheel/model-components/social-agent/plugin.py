@@ -13,11 +13,20 @@ random.seed(0)
 class Plugin(AbstractPlugin):
     """synchronic_web.social_agent plugin documentation."""
 
-    def run(self, connectivity="2", size="32", activity="0", words="8"):
+    def run(self, connectivity="2", size="32", activity="4", words="8", activity_disabled="0", batch=""):
         connectivity = int(connectivity)
         size = int(size)
         activity = float(activity)
         words = int(words)
+        activity_disabled = int(activity_disabled)
+        batch = None if batch == "" else int(batch)
+        if batch is not None and (batch <= 0 or batch > 1024):
+            raise ValueError("BATCH must be between 1 and 1024")
+        capacities = [count for count in ((size + 1) // 2, size // 2) if count]
+        if batch is not None and (
+            batch > size or any(batch > capacity for capacity in capacities)
+        ):
+            raise ValueError("BATCH exceeds a selectable route/access-group capacity")
 
         journals = [v.name for v in self.g.get_vertices() if v.is_decorated_by(Journal)]
 
@@ -65,6 +74,9 @@ class Plugin(AbstractPlugin):
                         activity,
                         peers,
                         words,
+                        1,
+                        activity_disabled,
+                        batch,
                     ],
                 )
 

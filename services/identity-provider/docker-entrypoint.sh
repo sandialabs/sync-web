@@ -50,6 +50,8 @@ selfservice:
   methods:
     password:
       enabled: true
+      config:
+        min_password_length: 8
 
   flows:
     error:
@@ -98,7 +100,7 @@ fi
 kratos migrate sql -c "$KRATOS_CONFIG_FILE" -e -y
 
 ADMIN_USERNAME="${ADMIN_USERNAME:-}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-${SECRET:-}}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 
 if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
     echo "Seeding admin identity '${ADMIN_USERNAME}'..."

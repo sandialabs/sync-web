@@ -483,7 +483,7 @@ result = fetch(
             "panels": [
                 {
                     "id": 1,
-                    "title": "Successful Activity Requests",
+                    "title": "Logical Path and HTTP Request Throughput",
                     "type": "timeseries",
                     "datasource": {"type": "prometheus", "uid": agent_source_uid},
                     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
@@ -496,9 +496,21 @@ result = fetch(
                                 "type": "prometheus",
                                 "uid": agent_source_uid,
                             },
+                            "expr": 'sum by(instance) (rate(social_agent_activity_path_operations_success_total{job="agent-monitor"}[$window]))',
+                            "editorMode": "code",
+                            "legendFormat": "{{instance}} path-op/s",
+                            "range": True,
+                            "hide": False,
+                        },
+                        {
+                            "refId": "B",
+                            "datasource": {
+                                "type": "prometheus",
+                                "uid": agent_source_uid,
+                            },
                             "expr": 'sum by(instance) (rate(social_agent_activity_requests_success_total{job="agent-monitor"}[$window]))',
                             "editorMode": "code",
-                            "legendFormat": "{{instance}}",
+                            "legendFormat": "{{instance}} req/s",
                             "range": True,
                             "hide": False,
                         }
@@ -506,7 +518,7 @@ result = fetch(
                 },
                 {
                     "id": 2,
-                    "title": "Activity Request Success Rate",
+                    "title": "Logical Path Operation Success Rate",
                     "type": "timeseries",
                     "datasource": {"type": "prometheus", "uid": agent_source_uid},
                     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
@@ -522,7 +534,7 @@ result = fetch(
                                 "type": "prometheus",
                                 "uid": agent_source_uid,
                             },
-                            "expr": 'sum by(instance) (rate(social_agent_activity_requests_success_total{job="agent-monitor"}[$window])) / clamp_min(sum by(instance) (rate(social_agent_activity_requests_total{job="agent-monitor"}[$window])), 1e-9)',
+                            "expr": 'sum by(instance) (rate(social_agent_activity_path_operations_success_total{job="agent-monitor"}[$window])) / clamp_min(sum by(instance) (rate(social_agent_activity_path_operations_total{job="agent-monitor"}[$window])), 1e-9)',
                             "editorMode": "code",
                             "legendFormat": "{{instance}}",
                             "range": True,

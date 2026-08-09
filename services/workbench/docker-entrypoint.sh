@@ -1,12 +1,12 @@
 #!/bin/sh
-set -e
+set -eu
 
-# Generate runtime environment configuration
-cat > /app/build/env-config.js << EOF
+# Generate runtime environment configuration atomically.
+cat > /usr/share/nginx/html/env-config.js.tmp << EOF
 window._env_ = {
   SYNC_WORKBENCH_ENDPOINT: "${SYNC_WORKBENCH_ENDPOINT:-}",
 };
 EOF
+mv /usr/share/nginx/html/env-config.js.tmp /usr/share/nginx/html/env-config.js
 
-# Execute the CMD
-exec "$@"
+exec /docker-entrypoint.sh "$@"

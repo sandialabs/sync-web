@@ -59,12 +59,18 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Self {
+        #[cfg(feature = "test-support")]
+        let config = Config::parse_from(["journal-scenario"]);
+        #[cfg(not(feature = "test-support"))]
+        let config = {
         let mut config = Config::parse();
         if config.database.is_empty() {
             if let Ok(database) = std::env::var("SYNC_WEB_DATABASE") {
                 config.database = database;
             }
         }
+        config
+        };
         config
     }
 }

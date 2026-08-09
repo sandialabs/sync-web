@@ -121,12 +121,14 @@ async fn json_to_scheme(query: Json<Value>) -> RawText<String> {
 #[rocket::main]
 async fn main() {
     let config = Config::new();
+    // Force isolated evaluator health before boot code or request service.
+    let _ = &*JOURNAL;
 
     env_logger::init();
 
     if &config.boot != "" {
-        let result = JOURNAL.evaluate(&config.boot);
-        info!("Boot: {}", result);
+        JOURNAL.evaluate(&config.boot);
+        info!("Boot evaluation completed; result omitted");
     }
 
     if &config.evaluate != "" {
@@ -176,8 +178,8 @@ async fn main() {
                     ))
                     .await;
                 }
-                let result = JOURNAL.evaluate(&config.step);
-                info!("Step ({:.6}): {}", until as f64 / MICRO, result);
+                JOURNAL.evaluate(&config.step);
+                info!("Step ({:.6}) completed; result omitted", until as f64 / MICRO);
                 step += 1;
             }
         });

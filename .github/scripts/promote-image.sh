@@ -3,6 +3,8 @@ set -euo pipefail
 
 image_name="$1"
 version_file="${2:-VERSION}"
+variant="${3:-}"
+preferred="${4:-}"
 
 repo="ghcr.io/${GITHUB_REPOSITORY}/${image_name}"
 version="$(cat "$version_file")"
@@ -23,12 +25,14 @@ if [[ -z "$head_sha" ]]; then
   head_sha="$GITHUB_SHA"
 fi
 
-source="${repo}:sha-${head_sha}"
-echo "Promoting ${source} to ${repo}:latest and ${repo}:${version}"
+suffix="${variant:+-${variant}}"
+source="${repo}:sha-${head_sha}${suffix}"
+tags=(-t "${repo}:latest${suffix}" -t "${repo}:${version}${suffix}")
+if [[ $preferred == preferred ]]; then
+  tags+=(-t "${repo}:latest" -t "${repo}:${version}")
+fi
+echo "Promoting ${source} to variant${preferred:+ and preferred} tags"
 
 docker buildx imagetools inspect "$source" >/dev/null
 
-docker buildx imagetools create \
-  -t "${repo}:latest" \
-  -t "${repo}:${version}" \
-  "$source"
+docker buildx imagetools create "${tags[@]}" "$source"

@@ -1,0 +1,38 @@
+(*call* "sticky-diagnostic-password-0"
+ (lambda (root)
+  (let* ((module (eval ((root 'get) '(root class standard-module))))
+         (std-node ((root 'get) '(root object standard)))
+         (standard (module 'local ((root 'get) '(root class standard)) std-node))
+         (ledger (module 'local ((root 'get) '(root class ledger)) ((root 'get) '(root object ledger))))
+         (federation (module 'local ((root 'get) '(root class federation)) ((root 'get) '(root object federation))))
+         (index 12)
+         (key-path '(*bridge* journal-1 *bridge* journal-3 *crypto* interface public-key))
+         (nested-path '(12 (*bridge* journal-1 chain) -1 (*bridge* journal-3 chain) -1 (*crypto* interface public-key)))
+         (key-object ((federation 'route) ledger `((operation hydrate) (index ,index) (path ,key-path))))
+         (paths '((*crypto* interface public-key) (*crypto* interface endpoint) (*crypto* journal identity id)))
+         (object (let loop ((paths paths) (proof key-object))
+                   (if (null? paths) proof
+                       (let* ((serialization ((ledger 'trace) (cons index (car paths))))
+                              (slice ((standard 'deserialize) serialization)))
+                         (loop (cdr paths) ((standard 'deep-merge!) slice proof))))))
+         (plain ((standard 'deserialize) ((standard 'serialize) object #f)))
+         (traced ((standard 'deserialize)
+                  ((standard 'serialize) object
+                   `(lambda (node)
+                      (letrec ((deep-get
+                                (lambda (node path)
+                                  (if (null? path) node
+                                      (let ((child (((sync-eval node) 'get) (car path))))
+                                        (if (not (sync-node? child)) child
+                                            (deep-get child (cdr path))))))))
+                        (deep-get node ',nested-path))))))
+         (kind (lambda (value) (cond ((byte-vector? value) 'byte-vector)
+                                     ((equal? value '(unknown)) 'unknown)
+                                     ((equal? value '(nothing)) 'nothing)
+                                     (else value)))))
+    (list (list 'before (kind ((federation '~get) standard object key-path)))
+          (list 'plain (kind ((federation '~get) standard plain key-path)))
+          (list 'traced (kind ((federation '~get) standard traced key-path)))
+          (list 'digest (sync-digest object))
+          (list 'plain-digest (sync-digest plain))
+          (list 'traced-digest (sync-digest traced))))))

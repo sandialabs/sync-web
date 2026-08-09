@@ -1,4 +1,4 @@
-FROM nginx:stable-alpine
+FROM nginx:1.30.2-alpine3.23@sha256:5f979dcfed4ce6461873f087e8c980d6e29b084b9e8776d9704a7e989b5f4898
 
 COPY nginx.http.conf /etc/nginx/templates/nginx.http.conf
 COPY nginx.tls.conf /etc/nginx/templates/nginx.tls.conf

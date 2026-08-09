@@ -4,7 +4,7 @@ networks:
 
 services:
   journal:
-    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-ledger}-journal
     working_dir: /srv
     entrypoint: ["/bin/sh", "/srv/run.sh"]
@@ -12,6 +12,9 @@ services:
       - ledger-net
     environment:
       SECRET: ${SECRET:-}
+      INTERFACE_SECRET: ${INTERFACE_SECRET:-}
+      SYNC_WEB_VERSION: ${SYNC_WEB_VERSION:-1.5.0}
+      JOURNAL_PORT: ${JOURNAL_PORT:-8192}
       PERIOD: ${PERIOD:-2}
       WINDOW: ${WINDOW:-1024}
       RUST_LOG: ${RUST_LOG:-INFO}
@@ -19,8 +22,6 @@ services:
       INTERFACE_ADMINS: ${INTERFACE_ADMINS:-admin}
       INTERFACE: ${INTERFACE:-}
       JOURNAL_NAME: ${JOURNAL_NAME:-}
-      BRIDGE_PUBLISH: ${BRIDGE_PUBLISH:-push}
-      BRIDGE_SUBSCRIBE: ${BRIDGE_SUBSCRIBE:-pull}
       LISP_DIR: /srv/lisp
     volumes:
       - database:/srv/database

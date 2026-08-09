@@ -5,8 +5,8 @@ This directory contains a Locust load testing script for testing the synchronic 
 ## Prerequisites
 
 1. Start the current general compose stack from `sync-web`:
-   - `COMPOSE_PROJECT_NAME=sync-local SECRET=password HTTP_PORT=8192 tests/api/local-compose.sh up`
-   - or `COMPOSE_PROJECT_NAME=sync-dev SECRET=password HTTP_PORT=8192 HTTPS_PORT=8193 docker compose -f deploy/compose/general/compose.yaml up -d`
+   - `COMPOSE_PROJECT_NAME=sync-local SECRET=root-password INTERFACE_SECRET=interface-password ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 tests/api/local-compose.sh up`
+   - or `COMPOSE_PROJECT_NAME=sync-dev SECRET=root-password INTERFACE_SECRET=interface-password ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 HTTPS_PORT=8193 docker compose -f deploy/compose/general/compose.yaml up -d`
 
 2. Create an API token from `/auth/settings` or `POST /api/v1/tokens`.
 3. Set `API_TOKEN` to the plaintext token returned at creation time.

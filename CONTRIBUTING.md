@@ -19,7 +19,8 @@ This repository is the Synchronic Web monorepo. Prefer small, focused pull reque
 Run the checks relevant to your change and list them in the PR body. Common checks:
 
 ```sh
-./records/tests/test.sh ./journal/target/debug/journal-sdk
+CARGO_TARGET_DIR=journal/target cargo build --manifest-path records/tests/Cargo.toml
+journal/target/debug/records-test --suite records/tests/suite.toml
 node scripts/sync-platform-package-versions.js
 cd services/explorer && npm test -- --watchAll=false && npm run build
 cd services/gateway && npm test -- --runInBand

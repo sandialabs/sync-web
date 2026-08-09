@@ -9,7 +9,7 @@ head: []
 import { TabItem, Tabs } from '@astrojs/starlight/components';
 
 This section covers day-to-day interaction patterns for users who need to read, write, pin, and synchronize state.
-It focuses on the currently deployed `general` interface shape.
+It focuses on the Sync Web 1.5 `general` interface shape.
 
 ## Graphical Interface
 
@@ -19,29 +19,34 @@ Together they cover the full operator/developer loop: inspect data, make changes
 ### Explorer
 
 The Explorer is the state-navigation and content-management interface.
-It now has three explicit modes:
+It has four explicit modes:
 
 - `Ledger`
   - the default landing mode
   - route-based browsing of committed state across bridges and snapshots
 - `Stage`
-  - local editable staged state
-  - file and directory oriented editing actions
+  - editable staged state at `Self` or the selected working journal
+  - document and directory oriented editing actions using federated `get`/`set!` when routed
+- `Access`
+  - Self-local path-scoped `get`, `set!`, and `resolve` grants
+  - unavailable while a remote working route is selected
 - `Admin`
-  - visible only to interface admins
+  - visible only to local interface admins and available only at `Self`
   - bridge registration and local bridge endpoint sharing
   - public window-size edits and interface admin-list management
 
 Typical Explorer workflow:
 
 1. Start in `Ledger` and synchronize to the latest committed root.
-2. Use the route strip to browse from `Self` through bridges and historical snapshots.
-3. Select a ledger file to switch between content and proof views or pin/unpin it.
-4. Switch to `Stage` when you want to edit local staged files and directories.
-5. Use stage actions to create documents/directories, upload files, edit content, and download files.
-6. If you are an admin, use `Admin` to copy this node's bridge endpoint, register peer bridges, tune the ledger window, or update the interface admin list.
+2. Use the working route to select `Self` or a terminal journal. Every breadcrumb is clickable: selecting `Self`, an intermediate journal, or the current terminal verifies that route prefix and resets both Stage and Ledger to its shared `(*state*)` namespace root while preserving prefix Ledger snapshots. Adding or removing a hop follows the same rule; owner-relative suffixes are not carried between journals. The permanent `*state*` row above the tree children returns to the exact current Stage route or Ledger route/snapshot root. The signed-in user's existing folder is sorted first and emphasized without renaming it. Other user folders remain navigable when public or explicit sharing grants permit access. When grants begin deeper in a namespace, each ancestor exposes its ordinary immediate folder names for navigation, while opening a child still requires applicable public or principal-specific authority. Explicit deep links remain exact, and Ledger synchronization or snapshot changes preserve an accessible current path with namespace-root fallback. Use Ledger's mirrored index controls for historical snapshots.
+3. Select a document to switch among `Content`, view-only `Raw`, and (in Ledger) proof/verification views. Raw preserves exact stored bytes: inert UTF-8/source where valid, allowlisted browser-native media previews selected by bounded magic-byte checks and safe document-name hints, and hex/download fallback otherwise.
+4. Use the `Stage` and `Ledger` tabs as Self-root navigation controls: every click, including the active tab, returns the working route and both selections to Self `(*state*)`, then selects that mode. Use Stage when you want to edit staged documents and directories. Raw remains view-only in Stage and Ledger.
+5. Use stage actions to create documents/directories, upload documents, edit content, and download documents. A denied tree expansion shows an alert beneath that row without replacing the tree, so allowed siblings and upward navigation remain available.
+6. Return the working route to `Self` before using `Access` or `Admin` to manage local policy, bridges, retention settings, or administrators. In Access, a structurally remote principal automatically receives the fixed `key-index (-32 -1)` used for terminal-local bridge-state authentication; Explorer does not expose controls for this range. Exact local `(*state* USER)` and `(*public*)` principals omit the field. The independent `Document history window`, initially `0 … -1`, applies only to resolve and governs committed document-history indexes. The complete stored rule is retained so deletion uses its exact identity. Owner-relative rule paths accept ordinary whitespace-separated segments or quoted human segments such as `data "private documents"`; backslash escapes literal separators, quotes, and backslashes. Each human segment is encoded exactly once (`a%20b` becomes stored `a%2520b`), decoded for display, and retained raw for exact deletion. Administrators explicitly load a username or exact `*state* USER`, and stale namespace responses cannot replace the selected target.
 
-The Explorer is best for operational tasks and data exploration because it separates committed ledger inspection from local staged editing while keeping both in one UI.
+Admin mutations are serialized and failed values remain editable until a mutation and authoritative reload both succeed. Bridge deletion and incoming-preapproval removal require confirmation. Retention-window decreases show authoritative old/new values and warn that pruned unpinned history cannot be resurrected by widening; equal/increased windows proceed without confirmation, and an unknown current size refuses mutation.
+
+The Explorer is best for operational tasks and data exploration because it separates committed Ledger inspection from staged editing while keeping both under one explicit working route.
 
 <img src={`${import.meta.env.BASE_URL}images/screenshots/explorer-desktop.png`} alt="Explorer desktop view" />
 
@@ -70,8 +75,8 @@ Typical Gateway workflow:
 
 1. Start with `GET /docs` to review request and response schemas.
 2. Use `GET /api/v1/general/size` or another stable route to validate connectivity.
-3. Execute public general operations through `GET` routes (for example `size`, `info`, and `trace`).
-4. Execute restricted `general` and optional `root` operations through authenticated `POST` routes.
+3. Use public `GET` routes for `size` and `info`; bridge protocol operations such as `route`, constrained `trace`, and `synchronize!` use public `POST` routes.
+4. Execute restricted application/local administration and optional `root` operations through authenticated `POST` routes.
 5. Move validated requests into application clients or automation scripts using the same gateway contracts.
 
 The Gateway is best for service integration because it standardizes journal calls into HTTP endpoints with explicit request validation.
@@ -147,9 +152,9 @@ The `/interface` execution endpoint accepts Scheme or JSON runtime calls via con
 
 ### Ledger Path Syntax
 
-Public ledger/interface paths use flat token lists. In Scheme, write paths as lists such as `(*state* alice notes)` or `(-1 *state* alice notes)`. In JSON, use the equivalent flat arrays, for example `["*state*", "alice", "notes"]` or `[-1, "*state*", "alice", "notes"]`.
+Public ledger/interface paths use flat token lists. In Scheme, write local paths as `(*state* alice notes)` or `(-1 *state* alice notes)`. Bridge traversal is a concise prefix of directional bridge names with optional indexes: `(-1 partner 12 archive *state* bob report)` selects the current local head, partner index 12, the current archive head, and then Bob's terminal-local report. In JSON, the same path is `[-1, "partner", 12, "archive", "*state*", "bob", "report"]`.
 
-When an indexed/committed operation needs a history index and no explicit index is present, the current head (`-1`) is used. Nested list paths are an internal ledger representation and are not accepted as public API input.
+An optional leading integer selects the local head; each optional integer after a bridge name selects that destination journal's head. Every omitted index defaults to the current head (`-1`). A namespace marker such as `*state*` ends traversal, so remaining tokens are ordinary terminal-local path segments. Nested list paths are an internal ledger representation and are not accepted as public API input.
 
 ### Authentication and Authorization
 
@@ -159,8 +164,8 @@ Restricted operations require an `authentication` field that identifies the call
 
 Two caller identities are recognized:
 
-- **Named user** (e.g. `alice`): a registered user. The gateway injects this automatically when you are logged in via Kratos. When calling the interface directly, you supply it yourself with your username and the interface secret.
-- **Root journal caller**: omit `identity` in the authentication block. This is used by journal automation and has no path restrictions.
+- **Local user principal** (e.g. `(*state* alice)`): a registered local user. The gateway injects this automatically when you are logged in via Kratos. When calling the interface directly, you supply the principal path and the interface secret.
+- **Root journal caller**: omit `identity` in the authentication block, which normalizes to `()`. This is used by journal automation and has no path restrictions.
 
 When calling through the **gateway** (`/api/v1/...`), you do not construct the authentication block — the gateway handles it from your session or API token. When calling the interface **directly** (`/interface`), you supply it manually:
 
@@ -168,7 +173,7 @@ When calling through the **gateway** (`/api/v1/...`), you do not construct the a
   <TabItem label="Lisp">
 
 ```scheme
-(authentication ((identity alice) (credentials "interface-secret")))
+(authentication ((identity (*state* alice)) (credentials "interface-secret")))
 ```
 
   </TabItem>
@@ -176,7 +181,7 @@ When calling through the **gateway** (`/api/v1/...`), you do not construct the a
 
 ```json
 "authentication": {
-  "identity": "alice",
+  "identity": ["*state*", "alice"],
   "credentials": {"*type/string*": "interface-secret"}
 }
 ```
@@ -184,31 +189,36 @@ When calling through the **gateway** (`/api/v1/...`), you do not construct the a
   </TabItem>
 </Tabs>
 
-#### User namespaces and write rules
+#### Namespaces and explicit grants
 
-Each user's writable space is `(*state* <username> ...)`. A user may only write to paths whose first segment after `*state*` matches their own username:
+Each local user's owned namespace is `(*state* <username> ...)`. Owners and local interface administrators can access that namespace. Other local or bridge-derived principals are denied unless the owner creates a recursive path-scoped rule.
 
-```
-(*state* alice notes)     ← alice can write; bob cannot
-(*state* bob notes)       ← bob can write; alice cannot
+A remote rule names the exact terminal-relative principal and the allowed application functions:
+
+```scheme
+((principal (partner *state* alice))
+ (key-index (-1 -1))
+ (path (shared inbox))
+ (get #t)
+ (set! #t)
+ (resolve (0 -1)))
 ```
 
-Reads are more permissive — any authenticated user can read another user's paths unless the path contains `*private*`:
+`key-index` is required for remote principals and constrains which terminal-local committed bridge state may authenticate the remote signing key. The separate `resolve` range constrains document-history indexes. Local and public rules omit `key-index`. Bridge creation alone grants no application access. Gateway `authorize` and `deauthorize` transport the complete exact rule and remain Self-local; `$federation` is rejected.
 
-```
-(*state* alice notes)              ← any authenticated user can read
-(*state* alice *private* journal)  ← only alice (or root/admin) can read
-```
+A `(*public*)` rule applies to every caller for the enabled operations. Grants do not need separate parent rules for navigation: a descendant grant permits reading the ordinary immediate listing of each ancestor directory. For example, a public grant at `(data public)` lets callers traverse `admin → data` and see the names of all folders beneath `data`; opening any non-public folder still requires its own principal-specific grant.
 
 #### Authorization tiers
 
 | Tier | Identity | Privileges |
 | --- | --- | --- |
-| Root | omitted `identity` | All operations on all paths. |
-| Admin | Named user in the admin list | All operations on all paths. |
-| User | Named user not in the admin list | Namespace and visibility rules above apply. |
+| Root | omitted local `identity` | All local query-interface operations. |
+| Local admin | Local principal path in the admin list | All local query-interface operations. |
+| Owner | Local `(*state* <user>)` principal | Own namespace and own authorization rules; cannot invoke `call!` unless separately configured as an Interface administrator. |
+| Granted principal | Exact local or bridge-derived principal | Only explicitly granted `get`, `set!`, and/or `resolve` paths. Authorization rules do not grant `call!`. |
+| Public | `(*public*)` | Only explicitly public data/proof and constrained bridge-control structure. |
 
-Operations requiring admin or root: `bridge!`, `*secret*`, `*admins-get*`, `*admins-set*`, `*window-set*`. Regular users receive a `permissions-error` on these.
+Interface administrators must be local principals. Bridge-derived principals cannot be administrators. Staged `get-batch`/`set-batch!` may use one signed working route, while `resolve-batch` groups canonical committed paths and routes compatible groups internally. Pin/unpin batches retain or cut proofs only at the origin. Bridge management, configuration, access management, retention mutation, and secret/window changes remain local-only.
 
 ### Request Envelope
 
@@ -219,7 +229,7 @@ That keeps client implementations simple and makes troubleshooting easier across
 | --- | --- | --- | --- |
 | `function` | symbol/string | Yes | API function name |
 | `arguments` | object / association list | Usually | Keyword-style fields for ledger calls |
-| `authentication` | alist / object | Restricted calls | `((identity alice) (credentials "secret"))` for named users, or `((credentials "secret"))` for the root journal caller |
+| `authentication` | alist / object | Restricted calls | `((identity (*state* alice)) (credentials "secret"))` for local users, or `((credentials "secret"))` for the root journal caller |
 
 > **Note:**
 >
@@ -237,10 +247,8 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```scheme
 ((function get)
- (arguments ((path (*state* docs article hash))
-             (pinned? #t)
-             (proof? #t)))
- (authentication ((identity alice) (credentials "password"))))
+ (arguments ((path (*state* docs article hash))))
+ (authentication ((identity (*state* alice)) (credentials "password"))))
 ```
 
   </TabItem>
@@ -250,12 +258,10 @@ You can copy them into Workbench first, then move them into automation once vali
 {
   "function": "get",
   "arguments": {
-    "path": ["*state*", "docs", "article", "hash"],
-    "pinned?": true,
-    "proof?": true
+    "path": ["*state*", "docs", "article", "hash"]
   },
   "authentication": {
-    "identity": "alice",
+    "identity": ["*state*", "alice"],
     "credentials": {"*type/string*": "password"}
   }
 }
@@ -264,9 +270,7 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-> **Info: When to use `pinned?` and `proof?`**
->
-> Use `pinned?` when you want to know whether a historical path remains pinned, and use `proof?` when you need the proof payload itself.
+> **Info:** `get` reads current Stage. Use `resolve` with `pinned?` and `proof?` for committed history and verifiable proof material.
 >
 #### Write (`set!`)
 
@@ -278,7 +282,7 @@ You can copy them into Workbench first, then move them into automation once vali
  (arguments ((path (*state* docs article hash))
              (value "0xabc123")
              (expression? #t)))
- (authentication ((identity alice) (credentials "password"))))
+ (authentication ((identity (*state* alice)) (credentials "password"))))
 ```
 
   </TabItem>
@@ -293,7 +297,7 @@ You can copy them into Workbench first, then move them into automation once vali
     "expression?": true
   },
   "authentication": {
-    "identity": "alice",
+    "identity": ["*state*", "alice"],
     "credentials": {"*type/string*": "password"}
   }
 }
@@ -301,6 +305,24 @@ You can copy them into Workbench first, then move them into automation once vali
 
   </TabItem>
 </Tabs>
+
+#### Federated committed read (`resolve`)
+
+Gateway JSON callers add a reserved `$federation` context to the ordinary operation arguments. Only `get`, `set`, and `resolve` accept a non-empty route; only `resolve` accepts `history`, with one index for `Self` plus one for every route hop.
+
+```json
+{
+  "path": [7, "*state*", "bob", "shared", "message"],
+  "pinned?": true,
+  "proof?": true,
+  "$federation": {
+    "route": ["carol", "bob"],
+    "history": [-1, 4, 7]
+  }
+}
+```
+
+The Gateway removes `$federation` from arguments, the origin journal signs a direct terminal invocation, and the returned proof is checked against the exact selected terminal object.
 
 #### Pin (`pin!`)
 
@@ -310,7 +332,7 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function pin!)
  (arguments ((path (-1 *state* docs article hash))))
- (authentication ((identity alice) (credentials "password"))))
+ (authentication ((identity (*state* alice)) (credentials "password"))))
 ```
 
   </TabItem>
@@ -321,7 +343,7 @@ You can copy them into Workbench first, then move them into automation once vali
   "function": "pin!",
   "arguments": {"path": [-1, "*state*", "docs", "article", "hash"]},
   "authentication": {
-    "identity": "alice",
+    "identity": ["*state*", "alice"],
     "credentials": {"*type/string*": "password"}
   }
 }
@@ -329,6 +351,8 @@ You can copy them into Workbench first, then move them into automation once vali
 
   </TabItem>
 </Tabs>
+
+Pin and unpin are always local retention operations. For remote content, first perform a federated `resolve` with `proof?` enabled, then pin the returned proof at its full `Self`-relative bridge/history path. Explorer performs this two-step workflow automatically; it never asks the terminal journal to pin on the origin's behalf.
 
 #### Bridge (`bridge!`)
 
@@ -338,10 +362,8 @@ You can copy them into Workbench first, then move them into automation once vali
 ```scheme
 ((function bridge!)
  (arguments ((name journal_b)
-             (info-local ((interface "http://journal-b.example.org/api/v1/journal/interface")
-                          (policy ((publish push) (subscribe pull)))
-                          (role #f)
-                          (remote-name journal_a)))))
+             (interface "http://journal-b.example.org/api/v1/journal/interface")
+             (remote-name journal_a)))
  (authentication ((credentials "password"))))
 ```
 
@@ -353,12 +375,8 @@ You can copy them into Workbench first, then move them into automation once vali
   "function": "bridge!",
   "arguments": {
     "name": "journal_b",
-    "info-local": {
-      "interface": {"*type/string*": "http://journal-b.example.org/api/v1/journal/interface"},
-      "policy": {"publish": "push", "subscribe": "pull"},
-      "role": false,
-      "remote-name": "journal_a"
-    }
+    "interface": {"*type/string*": "http://journal-b.example.org/api/v1/journal/interface"},
+    "remote-name": "journal_a"
   },
   "authentication": {
     "credentials": {"*type/string*": "password"}

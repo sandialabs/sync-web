@@ -1,0 +1,453 @@
+#!/usr/bin/env python3
+"""Read-only diagnostics for an isolated generated Sync Web network."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from sync_artifacts import (
+    artifact_root,
+    git_state,
+    redact,
+    redact_text,
+    repo_root,
+    timestamp,
+    write_artifacts,
+)
+
+ROOT = repo_root(__file__)
+NETWORK_DIR = ROOT / "tests" / "network" / "compose"
+PRODUCTION_NAME = re.compile(r"(^|[-_])(prod|production|djali)([-_]|$)", re.I)
+SAFE_NAME = re.compile(r"^(sync-|test-|social-agent-network$)[a-zA-Z0-9_.-]*$")
+
+
+class NetworkError(RuntimeError):
+    pass
+
+
+def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(command, cwd=NETWORK_DIR, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if check and result.returncode != 0:
+        raise NetworkError(result.stderr.strip() or "Command failed: " + " ".join(command))
+    return result
+
+
+def validate_project(value: str) -> str:
+    if not value:
+        raise NetworkError("Pass --project or set COMPOSE_PROJECT_NAME; implicit project selection is disabled")
+    if PRODUCTION_NAME.search(value) or not SAFE_NAME.fullmatch(value):
+        raise NetworkError(f"Refusing non-test or production-like project name: {value}")
+    return value
+
+
+def inspect_project(engine: str, project: str) -> list[dict[str, Any]]:
+    ids = run([
+        engine, "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}",
+    ]).stdout.split()
+    if not ids:
+        raise NetworkError(f"No containers found for project {project}")
+    return json.loads(run([engine, "inspect", *ids]).stdout)
+
+
+def container_name(item: dict[str, Any]) -> str:
+    return str(item.get("Name", "")).lstrip("/")
+
+
+def router_urls(engine: str, containers: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    urls = []
+    for item in containers:
+        name = container_name(item)
+        service = item.get("Config", {}).get("Labels", {}).get("com.docker.compose.service", "")
+        if not str(service).startswith("router-"):
+            continue
+        output = run([engine, "port", name, "80/tcp"], check=False).stdout.splitlines()
+        ports = []
+        for line in output:
+            match = re.search(r":(\d+)$", line.strip())
+            if match:
+                ports.append(int(match.group(1)))
+        if ports:
+            urls.append((name, f"http://127.0.0.1:{min(ports)}"))
+    return sorted(urls)
+
+
+def http(url: str, method: str = "GET", body: bytes | None = None) -> tuple[int, str]:
+    request = urllib.request.Request(url, data=body, method=method)
+    if body is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError) as error:
+        return 0, str(error)
+
+
+def mount_source(item: dict[str, Any], destination: str) -> Path | None:
+    for mount in item.get("Mounts", []):
+        if mount.get("Destination") == destination and mount.get("Source"):
+            return Path(str(mount["Source"]))
+    return None
+
+
+def project_scoped(path: Path, project: str) -> bool:
+    return f"/runs/{project}/" in path.resolve().as_posix() + "/"
+
+
+def project_topology(
+    containers: list[dict[str, Any]], project: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    for item in containers:
+        service = str(item.get("Config", {}).get("Labels", {}).get("com.docker.compose.service", ""))
+        if not service.startswith("social-agent-"):
+            continue
+        source = mount_source(item, "/srv/peers.json")
+        if source is None or not project_scoped(source, project):
+            continue
+        try:
+            return json.loads(source.read_text(encoding="utf-8")), str(source)
+        except (OSError, json.JSONDecodeError):
+            return None, str(source)
+    return None, None
+
+
+def benchmark_rows(containers: list[dict[str, Any]], project: str) -> list[dict[str, Any]]:
+    rows = []
+    now = datetime.now(timezone.utc)
+    for item in sorted(containers, key=container_name):
+        service = str(item.get("Config", {}).get("Labels", {}).get("com.docker.compose.service", ""))
+        if not service.startswith("social-agent-"):
+            continue
+        source = mount_source(item, "/srv/results")
+        data = None
+        scoped = bool(source and project_scoped(source, project))
+        if source and scoped:
+            try:
+                data = json.loads((source / "benchmark.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+        age = None
+        if data and data.get("timestamp"):
+            try:
+                stamp = datetime.fromisoformat(str(data["timestamp"]).replace("Z", "+00:00"))
+                age = max(0.0, (now - stamp).total_seconds())
+            except ValueError:
+                pass
+        attempted = int(data.get("activity_requests_total", 0)) if data else None
+        succeeded = int(data.get("activity_requests_success_total", 0)) if data else None
+        failures = int(data.get("requests_failed_total", 0)) if data else None
+        path_attempted = int(
+            data.get("activity_path_operations_total", attempted or 0)
+        ) if data else None
+        path_succeeded = int(
+            data.get("activity_path_operations_success_total", succeeded or 0)
+        ) if data else None
+        rows.append({
+            "service": service,
+            "source": str(source) if source else None,
+            "project_scoped": scoped,
+            "timestamp_age_seconds": age,
+            "requests_total": int(data.get("requests_total", 0)) if data else None,
+            "requests_failed_total": failures,
+            "activity_requests_total": attempted,
+            "activity_requests_success_total": succeeded,
+            "activity_path_operations_total": path_attempted,
+            "activity_path_operations_success_total": path_succeeded,
+            "ready": bool(
+                data and scoped and age is not None and age <= 15
+                and failures == 0 and attempted == succeeded
+                and path_attempted == path_succeeded
+            ),
+        })
+    return rows
+
+
+def row_ready(row: dict[str, Any]) -> bool:
+    return bool(row["running"] and row["health"] in {"none", "healthy"})
+
+
+def status_rows(containers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for item in sorted(containers, key=container_name):
+        state = item.get("State", {})
+        rows.append({
+            "name": container_name(item),
+            "service": item.get("Config", {}).get("Labels", {}).get("com.docker.compose.service"),
+            "image": item.get("Image"),
+            "running": state.get("Running", False),
+            "status": state.get("Status"),
+            "health": state.get("Health", {}).get("Status", "none"),
+            "started_at": state.get("StartedAt"),
+        })
+    return rows
+
+
+def probe(engine: str, containers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results = []
+    for name, base in router_urls(engine, containers):
+        health = http(f"{base}/healthz")
+        size = http(f"{base}/api/v1/general/size")
+        info = http(f"{base}/api/v1/general/info")
+        denied = http(
+            f"{base}/api/v1/general/get",
+            "POST",
+            json.dumps({"path": ["*state*", "admin"]}).encode(),
+        )
+        results.append({
+            "router": name,
+            "base_url": base,
+            "health": health[0],
+            "size": size[0],
+            "size_body": size[1][:200],
+            "info": info[0],
+            "unauthenticated_get": denied[0],
+            "ok": health[0] == 200 and size[0] == 200 and info[0] == 200 and denied[0] == 401,
+        })
+    return results
+
+
+def print_status(rows: list[dict[str, Any]], benchmarks: list[dict[str, Any]] | None = None) -> None:
+    print(f"{'SERVICE':24} {'RUNNING':7} {'HEALTH':10} IMAGE")
+    for row in rows:
+        print(f"{str(row['service']):24} {str(row['running']):7} {str(row['health']):10} {row['image']}")
+    if benchmarks:
+        print("\nSOCIAL SEMANTIC READINESS")
+        print(f"{'SERVICE':24} {'READY':5} {'FAILED':6} {'REQUESTS':18} {'PATH OPS':18} AGE")
+        for row in benchmarks:
+            activity = f"{row['activity_requests_success_total']}/{row['activity_requests_total']}"
+            paths = f"{row['activity_path_operations_success_total']}/{row['activity_path_operations_total']}"
+            age = "?" if row["timestamp_age_seconds"] is None else f"{row['timestamp_age_seconds']:.1f}s"
+            print(
+                f"{row['service']:24} {str(row['ready']):5} "
+                f"{str(row['requests_failed_total']):6} {activity:18} {paths:18} {age}"
+            )
+
+
+def bounded_logs(engine: str, containers: list[dict[str, Any]], tail: int) -> dict[str, str]:
+    logs = {}
+    for item in sorted(containers, key=container_name):
+        name = container_name(item)
+        result = run([engine, "logs", "--tail", str(tail), name], check=False)
+        logs[name] = redact_text(result.stdout + result.stderr)
+    return logs
+
+
+def snapshot(
+    engine: str,
+    project: str,
+    containers: list[dict[str, Any]],
+    tail: int,
+) -> tuple[Path, bool]:
+    destination = artifact_root(ROOT, "sync-network") / timestamp()
+    destination.mkdir(parents=True, exist_ok=True)
+    rows = status_rows(containers)
+    probes = probe(engine, containers)
+    benchmarks = benchmark_rows(containers, project)
+    topology, topology_source = project_topology(containers, project)
+    (destination / "inspect.json").write_text(
+        json.dumps(redact(containers), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    logs = bounded_logs(engine, containers, tail)
+    log_dir = destination / "logs"
+    log_dir.mkdir()
+    for name, content in logs.items():
+        (log_dir / f"{name}.log").write_text(content, encoding="utf-8")
+
+    stats_result = run([
+        engine, "stats", "--no-stream", "--format", "{{json .}}",
+        *[container_name(item) for item in containers],
+    ], check=False)
+    stats = []
+    for line in stats_result.stdout.splitlines():
+        try:
+            stats.append(json.loads(line))
+        except json.JSONDecodeError:
+            stats.append({"raw": line})
+
+    mounts = []
+    for item in containers:
+        for mount in item.get("Mounts", []):
+            source = mount.get("Source")
+            size = None
+            if source and Path(source).exists():
+                result = subprocess.run(["du", "-sb", source], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                if result.returncode == 0:
+                    size = int(result.stdout.split()[0])
+            mounts.append({
+                "container": container_name(item),
+                "destination": mount.get("Destination"),
+                "type": mount.get("Type"),
+                "size_bytes": size,
+            })
+
+    host = {
+        "loadavg": Path("/proc/loadavg").read_text().strip() if Path("/proc/loadavg").exists() else None,
+        "file_nr": Path("/proc/sys/fs/file-nr").read_text().strip() if Path("/proc/sys/fs/file-nr").exists() else None,
+        "memory": run(["free", "-b"], check=False).stdout,
+    }
+    summary = {
+        "tool": "sync-network",
+        "project": project,
+        "engine": engine,
+        "git": git_state(ROOT),
+        "containers": rows,
+        "probes": probes,
+        "stats": stats,
+        "mounts": mounts,
+        "host": host,
+        "topology": topology,
+        "topology_source": topology_source,
+        "semantic_readiness": benchmarks,
+        "warnings": [
+            warning for warning in (
+                None if topology_source else "No immutable project-scoped topology was found",
+                None if benchmarks and all(item["project_scoped"] for item in benchmarks)
+                else "Project-scoped benchmark results are unavailable",
+            ) if warning
+        ],
+        "ok": (
+            all(row_ready(row) for row in rows)
+            and bool(probes) and all(item["ok"] for item in probes)
+            and bool(benchmarks) and all(item["ready"] for item in benchmarks)
+            and topology is not None
+        ),
+    }
+    report = [
+        "# sync-network snapshot",
+        "",
+        f"- Project: `{project}`",
+        f"- Result: {'PASS' if summary['ok'] else 'FAIL'}",
+        f"- Commit: `{summary['git']['commit']}`",
+        "",
+        "| Service | Running | Health |",
+        "|---|---:|---|",
+        *[f"| {row['service']} | {row['running']} | {row['health']} |" for row in rows],
+        "",
+        "| Router | Health | Size | Info | Unauthenticated get |",
+        "|---|---:|---:|---:|---:|",
+        *[
+            f"| {item['router']} | {item['health']} | {item['size']} | {item['info']} | {item['unauthenticated_get']} |"
+            for item in probes
+        ],
+        "",
+        "| Social agent | Ready | Failed | Request success/attempts | Path-op success/attempts | Age |",
+        "|---|---:|---:|---:|---:|---:|",
+        *[
+            f"| {item['service']} | {item['ready']} | {item['requests_failed_total']} | "
+            f"{item['activity_requests_success_total']}/{item['activity_requests_total']} | "
+            f"{item['activity_path_operations_success_total']}/{item['activity_path_operations_total']} | "
+            f"{item['timestamp_age_seconds']} |"
+            for item in benchmarks
+        ],
+        "",
+        "## Resource summary",
+        "",
+        f"- Host load: `{host['loadavg']}`",
+        f"- Host file handles: `{host['file_nr']}`",
+        f"- Host memory: `{host['memory'].splitlines()[1].strip() if len(host['memory'].splitlines()) > 1 else host['memory'].strip()}`",
+        "- Largest container memory samples:",
+        *[
+            f"  - `{item.get('Name', item.get('Container', '?'))}`: `{item.get('MemUsage', '?')}`"
+            for item in sorted(stats, key=lambda value: value.get("MemUsage", ""), reverse=True)[:5]
+        ],
+        "- Largest mounts:",
+        *[
+            f"  - `{item['container']}:{item['destination']}`: `{item['size_bytes']}` bytes"
+            for item in sorted(mounts, key=lambda value: value.get("size_bytes") or -1, reverse=True)[:5]
+        ],
+        *(["", "## Warnings", "", *[f"- {item}" for item in summary["warnings"]]] if summary["warnings"] else []),
+    ]
+    write_artifacts(destination, redact(summary), report, [f"{engine} inspect <project:{project}>"])
+    return destination, bool(summary["ok"])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("status", "wait-ready", "probe", "snapshot", "logs"))
+    parser.add_argument("--project", default=os.environ.get("COMPOSE_PROJECT_NAME", ""))
+    parser.add_argument("--engine", default=os.environ.get("CONTAINER_RUNTIME", "podman"))
+    parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--interval", type=float, default=2.0)
+    parser.add_argument("--tail", type=int, default=100)
+    args = parser.parse_args()
+
+    try:
+        project = validate_project(args.project)
+        containers = inspect_project(args.engine, project)
+        if args.command == "status":
+            print_status(status_rows(containers), benchmark_rows(containers, project))
+            topology, source = project_topology(containers, project)
+            print(f"\nTOPOLOGY: {source if topology is not None else 'unavailable (legacy/stale global topology is not used)'}")
+            return 0
+        if args.command == "logs":
+            for name, content in bounded_logs(args.engine, containers, args.tail).items():
+                print(f"===== {name} =====")
+                print(content.rstrip())
+            return 0
+        if args.command == "probe":
+            results = probe(args.engine, containers)
+            benchmarks = benchmark_rows(containers, project)
+            topology, source = project_topology(containers, project)
+            for item in results:
+                print(json.dumps({"kind": "router", **item}, sort_keys=True))
+            for item in benchmarks:
+                print(json.dumps({"kind": "social-agent", **item}, sort_keys=True))
+            print(json.dumps({
+                "kind": "topology",
+                "ok": topology is not None,
+                "source": source,
+            }, sort_keys=True))
+            return 0 if (
+                results and all(item["ok"] for item in results)
+                and benchmarks and all(item["ready"] for item in benchmarks)
+                and topology is not None
+            ) else 1
+        if args.command == "wait-ready":
+            deadline = time.monotonic() + args.timeout
+            while True:
+                containers = inspect_project(args.engine, project)
+                rows = status_rows(containers)
+                probes = probe(args.engine, containers)
+                benchmarks = benchmark_rows(containers, project)
+                topology, _ = project_topology(containers, project)
+                ready = (
+                    all(row_ready(row) for row in rows)
+                    and probes and all(item["ok"] for item in probes)
+                    and benchmarks and all(item["ready"] for item in benchmarks)
+                    and topology is not None
+                )
+                if ready:
+                    print(
+                        f"READY: {project} ({len(probes)} routers, "
+                        f"{len(benchmarks)} clean social agents)"
+                    )
+                    return 0
+                if time.monotonic() >= deadline:
+                    print_status(rows, benchmarks)
+                    if topology is None:
+                        print("TOPOLOGY: unavailable; regenerate with the project-scoped harness")
+                    return 1
+                time.sleep(args.interval)
+        destination, ok = snapshot(args.engine, project, containers, args.tail)
+        print(f"Snapshot: {destination.relative_to(ROOT)}")
+        return 0 if ok else 1
+    except NetworkError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

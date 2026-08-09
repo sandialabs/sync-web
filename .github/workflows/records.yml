@@ -35,18 +35,42 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Install LLVM 22 and native dependencies
         run: |
           sudo apt update
-          sudo apt install -y llvm-dev libclang-dev clang
+          sudo apt install -y clang cmake libclang-dev libzstd-dev llvm-dev wget zlib1g-dev
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y libpolly-22-dev
+          echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.96.0
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: journal
-      - name: Build journal binary
-        working-directory: journal
-        run: cargo build --release
+          workspaces: |
+            journal
+            records/tests
+      - name: Build and verify current-source Wasmer AOT
+        env:
+          LLVM_CONFIG_PATH: /usr/lib/llvm-22/bin/llvm-config
+          LIBCLANG_PATH: /usr/lib/llvm-22/lib
+        run: |
+          out="$GITHUB_WORKSPACE/journal/target/records-kernel"
+          scripts/build-wasmer-kernel "$out"
+          rm -rf "$out/bundle"
+          mkdir "$out/bundle"
+          cp "$out"/{builder.txt,cargo.txt,kernel.wasmer,llvm.txt,native-link-libs.sha256,provenance.json,rustc.txt,source.sha256,wasi-clang.txt} "$out/bundle/"
+          cp "$out/build/pair-1/kernel.wasm" "$out/bundle/kernel.wasm"
+          journal/scripts/check-wasmer-kernel-provenance.py "$out/bundle" "$GITHUB_SHA"
+          echo "Wasmer AOT SHA-256: $(sha256sum "$out/kernel.wasmer" | awk '{print $1}')" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build records test runner
+        run: |
+          source journal/target/records-kernel/env.sh
+          CARGO_TARGET_DIR=journal/target cargo test --locked --manifest-path records/tests/Cargo.toml
+          CARGO_TARGET_DIR=journal/target cargo build --release --locked --manifest-path records/tests/Cargo.toml
       - name: Run records tests
-        run: records/tests/test.sh journal/target/release/journal-sdk
+        run: |
+          source journal/target/records-kernel/env.sh
+          journal/target/release/records-test --suite records/tests/suite.toml --jobs 2

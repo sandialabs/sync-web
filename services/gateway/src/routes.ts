@@ -33,7 +33,7 @@ const isJsonContentType = (contentType: string): boolean =>
 const escapeLispString = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
-const extractJsonArguments = (body: unknown): unknown => {
+const extractJsonArguments = (body: unknown, allowArgumentsKey = false): unknown => {
   if (body === undefined) {
     return undefined;
   }
@@ -47,7 +47,7 @@ const extractJsonArguments = (body: unknown): unknown => {
   }
   const record = body as Record<string, unknown>;
 
-  if ("arguments" in record) {
+  if ("arguments" in record && !allowArgumentsKey) {
     throw new Error(
       "Gateway JSON bodies must provide operation arguments directly, not under an arguments wrapper."
     );
@@ -63,146 +63,6 @@ const extractJsonArguments = (body: unknown): unknown => {
   return record;
 };
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === "object" && !Array.isArray(value);
-
-type SchemeNode =
-  | { type: "list"; values: SchemeNode[] }
-  | { type: "symbol"; value: string }
-  | { type: "string"; value: string }
-  | { type: "byte-vector"; value: number[] }
-  | { type: "quoted"; value: SchemeNode };
-
-const jsonToSchemeExpression = (value: unknown): string => {
-  if (value === null || value === undefined) return "()";
-  if (typeof value === "boolean") return value ? "#t" : "#f";
-  if (typeof value === "number") return String(value);
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return `(${value.map(jsonToSchemeExpression).join(" ")})`;
-  if (!isPlainRecord(value)) {
-    throw new Error("Unsupported JSON value in Scheme batch expression.");
-  }
-
-  if (Object.keys(value).length === 1) {
-    const stringValue = value["*type/string*"];
-    if (typeof stringValue === "string") return `"${escapeLispString(stringValue)}"`;
-    const quotedValue = value["*type/quoted*"];
-    if (quotedValue !== undefined) return `'${jsonToSchemeExpression(quotedValue)}`;
-    const byteVectorValue = value["*type/byte-vector*"];
-    if (typeof byteVectorValue === "string") {
-      const bytes = byteVectorValue.match(/.{1,2}/g)?.map((byte) => Number.parseInt(byte, 16)) ?? [];
-      return `#u(${bytes.join(" ")})`;
-    }
-    const vectorValue = value["*type/vector*"];
-    if (Array.isArray(vectorValue)) return `#(${vectorValue.map(jsonToSchemeExpression).join(" ")})`;
-    const pairValue = value["*type/pair*"];
-    if (Array.isArray(pairValue) && pairValue.length === 2) {
-      return `(${jsonToSchemeExpression(pairValue[0])} . ${jsonToSchemeExpression(pairValue[1])})`;
-    }
-  }
-
-  return `(${Object.entries(value)
-    .map(([key, entry]) => `(${key} ${jsonToSchemeExpression(entry)})`)
-    .join(" ")})`;
-};
-
-const parseSchemeResult = (text: string): unknown => {
-  let index = 0;
-  const peek = () => text[index];
-  const next = () => text[index++];
-  const skipSpace = () => {
-    while (index < text.length && /\s/.test(text[index])) index += 1;
-  };
-
-  const parseString = (): SchemeNode => {
-    next();
-    let value = "";
-    while (index < text.length) {
-      const char = next();
-      if (char === '"') break;
-      if (char === "\\") {
-        value += next() ?? "";
-      } else {
-        value += char;
-      }
-    }
-    return { type: "string", value };
-  };
-
-  const parseAtom = (): { type: "symbol"; value: string } => {
-    let value = "";
-    while (index < text.length && !/\s|\(|\)|'/.test(peek())) value += next();
-    return { type: "symbol", value };
-  };
-
-  const parseByteVector = (): SchemeNode => {
-    index += 3; // #u(
-    const values: number[] = [];
-    while (index < text.length) {
-      skipSpace();
-      if (peek() === ")") {
-        next();
-        break;
-      }
-      const atom = parseAtom();
-      const byte = Number.parseInt(atom.value, 10);
-      if (!Number.isNaN(byte)) values.push(byte);
-    }
-    return { type: "byte-vector", value: values };
-  };
-
-  const parseNode = (): SchemeNode => {
-    skipSpace();
-    if (text.startsWith("#u(", index)) return parseByteVector();
-    if (peek() === "'") {
-      next();
-      return { type: "quoted", value: parseNode() };
-    }
-    if (peek() === '"') return parseString();
-    if (peek() === "(") {
-      next();
-      const values: SchemeNode[] = [];
-      while (index < text.length) {
-        skipSpace();
-        if (peek() === ")") {
-          next();
-          break;
-        }
-        values.push(parseNode());
-      }
-      return { type: "list", values };
-    }
-    return parseAtom();
-  };
-
-  const nodeToJson = (node: SchemeNode): unknown => {
-    if (node.type === "string") return { "*type/string*": node.value };
-    if (node.type === "byte-vector") {
-      return { "*type/byte-vector*": node.value.map((byte) => byte.toString(16).padStart(2, "0")).join("") };
-    }
-    if (node.type === "quoted") return { "*type/quoted*": nodeToJson(node.value) };
-    if (node.type === "symbol") {
-      if (node.value === "#t") return true;
-      if (node.value === "#f") return false;
-      if (/^-?\d+(\.\d+)?$/.test(node.value)) return Number(node.value);
-      return node.value;
-    }
-    if (node.values.length === 0) return null;
-    const assoc = node.values.every((entry) =>
-      entry.type === "list" && entry.values.length === 2 && entry.values[0].type === "symbol"
-    );
-    if (assoc) {
-      return Object.fromEntries(node.values.map((entry) => {
-        const pair = entry as { type: "list"; values: [SchemeNode, SchemeNode] };
-        return [(pair.values[0] as { type: "symbol"; value: string }).value, nodeToJson(pair.values[1])];
-      }));
-    }
-    return node.values.map(nodeToJson);
-  };
-
-  return nodeToJson(parseNode());
-};
-
 const extractSchemeArguments = (body: unknown): string => {
   if (typeof body === "string") return body;
   if (Buffer.isBuffer(body)) return body.toString("utf8");
@@ -213,14 +73,79 @@ const buildSchemeExpression = (
   functionName: string,
   argsExpression: string,
   authSecret?: string,
-  identityId?: string
+  identityId?: string,
+  routeTarget?: string[],
+  historyIndexes?: number[]
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    const identityPart = identityId ? `(identity ${identityId}) ` : "";
-    parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
+    if (routeTarget && routeTarget.length > 0) {
+      parts.push(
+        `(invocation ((identity ${identityId}) (route-source ()) ` +
+        `(route-target (${routeTarget.join(" ")})) ` +
+        `${historyIndexes ? `(history-indexes (${historyIndexes.join(" ")})) ` : ""}` +
+        `(credentials "${escapeLispString(authSecret)}")))`
+      );
+    } else {
+      const identityPart = identityId ? `(identity (*state* ${identityId})) ` : "";
+      parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
+    }
   }
   return `(${parts.join(" ")})`;
+};
+
+const extractFederationContext = (body: unknown): {
+  argsBody: unknown;
+  present: boolean;
+  routeTarget?: string[];
+  historyIndexes?: number[];
+} => {
+  if (!body || typeof body !== "object" || Array.isArray(body) || Buffer.isBuffer(body)) {
+    return { argsBody: body, present: false };
+  }
+  const record = body as Record<string, unknown>;
+  const context = record.$federation;
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    return { argsBody: body, present: false };
+  }
+  const federation = context as Record<string, unknown>;
+  const route = federation.route;
+  const history = federation.history;
+  if (!Array.isArray(route) || !route.every((name) => typeof name === "string")) {
+    throw new Error("$federation.route must be an array of bridge names");
+  }
+  if (history !== undefined &&
+      (!Array.isArray(history) || !history.every((index) => Number.isInteger(index)))) {
+    throw new Error("$federation.history must be an array of integer indexes");
+  }
+  const { $federation: _ignored, ...argsBody } = record;
+  return {
+    argsBody,
+    present: true,
+    routeTarget: route,
+    historyIndexes: history as number[] | undefined,
+  };
+};
+
+const validateFederationContext = (
+  functionName: string,
+  context: ReturnType<typeof extractFederationContext>,
+  root: boolean,
+): void => {
+  if (!context.present) return;
+  if (root) {
+    throw new Error("Federation context is not allowed on root operations");
+  }
+  const route = context.routeTarget ?? [];
+  if (route.length === 0) {
+    throw new Error("Federation context requires a nonempty route");
+  }
+  if (!new Set(["get", "set!", "get-batch", "set-batch!"]).has(functionName)) {
+    throw new Error(`Federation context is not allowed for ${functionName}`);
+  }
+  if (context.historyIndexes) {
+    throw new Error("Federation history is not part of the public Gateway envelope");
+  }
 };
 
 const buildRootSchemeExpression = (
@@ -269,18 +194,18 @@ const callWithNegotiation = async (input: {
     );
   }
 
-  const rawArgs = extractJsonArguments(request.body);
-  if (!root && functionName === "batch!") {
-    const expression = buildSchemeExpression(
-      functionName,
-      jsonToSchemeExpression(rawArgs),
-      authSecret,
-      identityId
-    );
-    const result = await journal.callScheme({ expression, functionName });
-    return typeof result === "string" ? parseSchemeResult(result) : result;
+  const federation = extractFederationContext(request.body);
+  validateFederationContext(functionName, federation, root);
+  const rawArgs = extractJsonArguments(
+    federation.argsBody,
+    !root && functionName === "call!"
+  );
+  if (!root && functionName === "call!") {
+    if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs) ||
+        !Array.isArray((rawArgs as Record<string, unknown>).arguments)) {
+      throw new Error("Gateway JSON bodies must provide call arguments as an array");
+    }
   }
-
   const args = rawArgs;
   return root
     ? journal.callRootJson({
@@ -293,6 +218,8 @@ const callWithNegotiation = async (input: {
         args,
         authentication: authSecret,
         identityId,
+        ...(federation.routeTarget ? { routeTarget: federation.routeTarget } : {}),
+        ...(federation.historyIndexes ? { historyIndexes: federation.historyIndexes } : {}),
       });
 };
 
@@ -315,23 +242,33 @@ const writeEventStreamHeaders = (reply: FastifyReply): void => {
 
 const generalAliases = {
   get: "get",
+  "get-batch": "get-batch",
   set: "set!",
   pin: "pin!",
+  "pin-batch": "pin-batch!",
   unpin: "unpin!",
-  batch: "batch!",
+  "unpin-batch": "unpin-batch!",
+  call: "call!",
+  "set-batch": "set-batch!",
   info: "info",
-  synchronize: "synchronize",
+  size: "size",
   "synchronize!": "synchronize!",
   resolve: "resolve",
+  "resolve-batch": "resolve-batch",
   trace: "trace",
+  "trace-batch": "trace-batch",
+  route: "route",
   bridge: "bridge!",
   "delete-bridge": "delete-bridge!",
-  "delete-subscriber": "delete-subscriber!",
   config: "config",
+  "update-config": "update-config!",
   admins: "*admins-get*",
   "set-admins": "*admins-set*",
   "set-window": "*window-set*",
   "set-secret": "*secret*",
+  authorizations: "authorizations",
+  authorize: "authorize!",
+  deauthorize: "deauthorize!",
 } as const;
 
 const rootAliases = {
@@ -343,19 +280,24 @@ const rootAliases = {
   "set-query": "*set-query*",
 } as const;
 
-const publicGeneralFunctions = new Set<string>(["synchronize", "synchronize!", "trace"]);
+const publicGeneralFunctions = new Set<string>(["synchronize!", "trace", "trace-batch", "route"]);
 const eventedGeneralOperations = new Set<string>([
   "set",
   "pin",
+  "pin-batch",
   "unpin",
-  "batch",
+  "unpin-batch",
+  "call",
+  "set-batch",
   "bridge",
   "delete-bridge",
-  "delete-subscriber",
   "synchronize!",
+  "update-config",
   "set-admins",
   "set-window",
   "set-secret",
+  "authorize",
+  "deauthorize",
 ]);
 const eventedRootOperations = new Set<string>([
   "step",
@@ -365,6 +307,10 @@ const eventedRootOperations = new Set<string>([
 ]);
 const requestModeDescription =
   "JSON mode: Content-Type application/json with a keyword argument object. Legacy array arguments are also accepted for compatibility. Scheme mode: Content-Type text/plain or application/scheme with a raw Scheme arguments expression (the gateway wraps it into the full journal transport call).";
+const authorizationDescription =
+  "Authorization is Self-local. `user` is the local owner namespace, normally [`*state*`, `USER`], and `rule.path` is owner-relative. A remote `rule.principal` is the exact terminal-relative bridge principal and requires `key-index`, the terminal-local committed bridge-state authentication window. Exact local [`*state*`, `USER`] and [`*public*`] principals omit `key-index`. `resolve` is separate: true enables all retained document history, false disables it, and a two-integer range constrains document-history indexes.";
+const authorizationBodyDescription =
+  "Authorization body. The schema stays permissive so existing object and legacy-array transports remain accepted; the example shows canonical fields and tuple shapes.";
 
 const generalOperationDocs: Record<string, { summary: string; description: string }> = {
   get: {
@@ -372,55 +318,90 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls general function `get`. Reads the current staged view only.",
   },
+  "get-batch": {
+    summary: "Read ordered staged paths",
+    description:
+      "Calls `get-batch`. Returns ordered path/content entries from one staged Ledger snapshot, preserves duplicate paths, and optionally uses one signed working route.",
+  },
   set: {
     summary: "Stage a state write",
     description:
       "Calls general function `set!`. Writes to staged state; pair with root `step` for durable chain progression.",
   },
+  "set-batch": {
+    summary: "Atomically stage ordered writes",
+    description:
+      "Calls `set-batch!`. Validates all path/value cardinalities, compares optional expected values against one staged snapshot, applies every write atomically in request order, and optionally uses one signed working route.",
+  },
   pin: {
     summary: "Pin state/proof into permanent history",
     description:
-      "Calls general function `pin!`. Keeps selected path/proof material across retention windows.",
+      "Calls general function `pin!` with one canonical committed path. Interface resolves and verifies remote proof material before retaining it at the origin.",
+  },
+  "pin-batch": {
+    summary: "Atomically pin ordered committed paths",
+    description:
+      "Calls `pin-batch!`. Fetches and verifies compact proof groups before atomically retaining every path at the origin.",
   },
   unpin: {
     summary: "Remove a previously pinned path/proof",
     description:
-      "Calls general function `unpin!`. Returns selected content to normal retention behavior.",
+      "Calls general function `unpin!` with the same canonical committed path and returns origin-retained content to normal retention behavior.",
   },
-  batch: {
-    summary: "Execute multiple general requests in order",
+  "unpin-batch": {
+    summary: "Atomically unpin committed paths",
     description:
-      "Calls general function `batch!`. Accepts a `queries` list of request-shaped entries and executes them in order against the ledger.",
+      "Calls `unpin-batch!`. Applies digest-preserving proof cuts for all authorized paths in one local mutation.",
+  },
+  call: {
+    summary: "Call a staged Scheme program",
+    description:
+      "Calls general function `call!`. Interface evaluates the staged procedure from `path` outside `sync-let` in a masked environment for a configured administrator/root, supplies the authenticated journal capability, and applies the explicit `arguments` list. Owners, policy grantees, and federated principals cannot invoke it.",
   },
   info: {
     summary: "Get public info",
     description:
       "Calls public general function `info`. Returns public node metadata.",
   },
-  synchronize: {
-    summary: "Generate synchronization payload",
-    description:
-      "Calls public general function `synchronize`. Used by bridges/services to fetch digest/proof material for anti-entropy synchronization.",
-  },
   "synchronize!": {
-    summary: "Receive pushed synchronization payload",
+    summary: "Exchange reciprocal signed heads",
     description:
-      "Calls public peer function `synchronize!`. Used by bridge publishers to push signed synchronization payloads to subscribers; journal signature verification and bridge policy checks are authoritative.",
+      "Calls public peer function `synchronize!`. Applies the initiator head and returns the acceptor head in one reciprocal exchange.",
   },
   resolve: {
     summary: "Resolve committed chain content",
     description:
-      "Calls general function `resolve`. Reads indexed/committed content with optional pinned/proof metadata.",
+      "Calls general function `resolve`. The path contains the origin index, optional alias/index hops, and terminal state path; Interface performs federation normalization.",
+  },
+  "resolve-batch": {
+    summary: "Resolve ordered committed paths",
+    description:
+      "Calls `resolve-batch`. Paths may span local and federated route/history groups; verified multiproofs remain internal and results preserve request order.",
   },
   trace: {
     summary: "Trace remote content against a chain index",
     description:
       "Calls public general function `trace`. Used by bridges/services to fetch a serialized remote path view from a committed chain index.",
   },
-  bridge: {
-    summary: "Register or update a bridge",
+  "trace-batch": {
+    summary: "Trace multiple paths into one multiproof",
     description:
-      "Calls general function `bridge!` with a bridge name and local bridge info. The local info includes the peer interface, local policy, role, and remote-name for publisher-initiated pushes.",
+      "Calls public `trace-batch`. Returns one compact serialized proof for authorized paths sharing an authenticated history anchor.",
+  },
+  route: {
+    summary: "Resolve a federated journal route",
+    description:
+      "Calls public function `route`. Resolves canonical committed endpoint/key material through reciprocal bridges.",
+  },
+  bridge: {
+    summary: "Create a reciprocal bridge",
+    description:
+      "Calls `bridge!` with the local peer alias, peer interface, and the name the peer should use for this journal.",
+  },
+  "update-config": {
+    summary: "Update ledger configuration",
+    description:
+      "Calls admin function `update-config!`. Used for bridge acceptance/preapproval and other explicit configuration updates.",
   },
   config: {
     summary: "Read full node config",
@@ -436,6 +417,18 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     summary: "Replace interface admins",
     description:
       "Calls general function `*admins-set*`. Replaces the interface admin username list wholesale.",
+  },
+  authorizations: {
+    summary: "List authorization rules",
+    description: `Calls general function \`authorizations\`. Returns exact local rules for an owner principal. ${authorizationDescription}`,
+  },
+  authorize: {
+    summary: "Add authorization rule",
+    description: `Calls general function \`authorize!\`. Adds an exact local rule. ${authorizationDescription}`,
+  },
+  deauthorize: {
+    summary: "Remove authorization rule",
+    description: `Calls general function \`deauthorize!\`. The rule must be shape-equivalent to the stored rule, including \`key-index\` and Resolve range. ${authorizationDescription}`,
   },
   "set-window": {
     summary: "Set ledger window size",
@@ -468,7 +461,7 @@ const rootOperationDocs: Record<string, { summary: string; description: string }
   "set-secret": {
     summary: "Rotate admin/root secret",
     description:
-      "Calls root function `*set-secret*`. Changes the root credential.",
+      "Calls root function `*set-secret*`. Atomically changes the root credential and commits an identity-bound journal signing-key rotation; runtime root-secret configuration must then use the new value.",
   },
   "set-step": {
     summary: "Replace step handler",
@@ -482,68 +475,107 @@ const rootOperationDocs: Record<string, { summary: string; description: string }
   },
 };
 
-const makeBodyContent = (jsonExample?: unknown, schemeExample?: string) => ({
+const makeBodyContent = (
+  jsonExample?: unknown,
+  schemeExample?: string,
+  operationDescription?: string,
+) => ({
   content: {
     "application/json": {
       schema: {
         type: ["array", "object"],
-        description: "Keyword argument object (preferred) or legacy array.",
+        description: operationDescription || "Keyword argument object (preferred) or legacy array.",
         ...(jsonExample !== undefined ? { example: jsonExample } : {}),
       },
     },
     "text/plain": {
       schema: {
         type: "string",
-        description: "Raw Scheme arguments expression.",
+        description: operationDescription
+          ? `${operationDescription} Raw Scheme arguments expression.`
+          : "Raw Scheme arguments expression.",
         ...(schemeExample !== undefined ? { example: schemeExample } : {}),
       },
     },
     "application/scheme": {
       schema: {
         type: "string",
-        description: "Raw Scheme arguments expression.",
+        description: operationDescription
+          ? `${operationDescription} Raw Scheme arguments expression.`
+          : "Raw Scheme arguments expression.",
         ...(schemeExample !== undefined ? { example: schemeExample } : {}),
       },
     },
   },
 });
 
+const authorizationRuleExample = {
+  principal: ["peer-a", "*state*", "bob"],
+  "key-index": [-32, -1],
+  path: ["docs"],
+  get: true,
+  "set!": false,
+  resolve: [0, -1],
+};
+const authorizationSchemeRuleExample =
+  "((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (get #t) (set! #f) (resolve (0 -1)))";
+
 const generalOperationExamples: Record<string, unknown> = {
   get:          { path: ["*state*", "mykey"], "expression?": true },
-  set:          { path: ["*state*", "mykey"], value: "myvalue", "expression?": true },
-  pin:          { path: [-1, "*state*", "mykey"] },
-  unpin:        { path: [-1, "*state*", "mykey"] },
-  resolve:      { path: [-1, "*state*", "mykey"], "pinned?": true, "proof?": false, "expression?": true },
-  batch:        { queries: [{ function: "get", arguments: { path: ["*state*", "mykey"] } }, { function: "config" }] },
+  "get-batch": { paths: [["*state*", "a"], ["*state*", "b"]], "expression?": true },
+  set:          { path: ["*state*", "mykey"], value: "myvalue", expected: "oldvalue", "expression?": true },
+  pin:          { path: [-1, "peer-a", -1, "*state*", "mykey"] },
+  "pin-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]] },
+  unpin:        { path: [-1, "peer-a", -1, "*state*", "mykey"] },
+  "unpin-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]] },
+  resolve:      { path: [-1, "peer-a", -1, "*state*", "mykey"], "pinned?": true, "proof?": false, "expression?": true },
+  "resolve-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]], "pinned?": true, "expression?": true },
+  call:         { path: ["*state*", "alice", "programs", "example"], arguments: [] },
+  "set-batch": { paths: [["*state*", "mykey"]], values: ["myvalue"], expected: ["oldvalue"], "expression?": true },
   info:         {},
-  bridge:       { name: "peer-a", "info-local": { interface: "http://peer-a/interface", policy: { publish: "push", subscribe: "pull" }, role: false, "remote-name": "my-journal" } },
+  bridge:       { name: "peer-a", interface: "http://peer-a/interface", "remote-name": "my-journal" },
+  "update-config": { path: ["public", "bridge-accept"], value: "preapproved" },
   config:       {},
   admins:       {},
-  "set-admins": { admins: ["admin", "alice"] },
+  "set-admins": { admins: [["*state*", "admin"], ["*state*", "alice"]] },
   "set-window": { value: 128 },
   "set-secret": { secret: "new-secret" },
-  synchronize:  { index: 0 },
-  "synchronize!": { name: "peer-a", index: -1, response: [] },
-  trace:        { index: 0, path: [-1, "*state*", "mykey"] },
+  authorizations: { user: ["*state*", "alice"] },
+  authorize: { user: ["*state*", "alice"], rule: authorizationRuleExample },
+  deauthorize: { user: ["*state*", "alice"], rule: authorizationRuleExample },
+  "synchronize!": { name: "peer-a", response: [], info: {}, interface: "https://peer-a/interface", "remote-name": "local" },
+  trace:        { index: 0, path: ["*state*", "mykey"] },
+  "trace-batch": { index: 0, paths: [["*state*", "a"], ["*state*", "b"]] },
+  route:        { "route-target": ["peer-a"] },
 };
 
 const generalSchemeExamples: Record<string, string> = {
   get:          "((path (*state* mykey)))",
-  set:          "((path (*state* mykey)) (value myvalue))",
-  pin:          "((path (-1 *state* mykey)))",
-  unpin:        "((path (-1 *state* mykey)))",
-  resolve:      "((path (-1 *state* mykey)) (pinned? #t) (proof? #f))",
-  batch:        "((queries (((function get) (arguments ((path (*state* mykey)))) ((function config))))))",
+  "get-batch": "((paths ((*state* a) (*state* b))))",
+  set:          "((path (*state* mykey)) (value myvalue) (expected oldvalue))",
+  pin:          "((path (-1 peer-a -1 *state* mykey)))",
+  "pin-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))",
+  unpin:        "((path (-1 peer-a -1 *state* mykey)))",
+  "unpin-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))",
+  resolve:      "((path (-1 peer-a -1 *state* mykey)) (pinned? #t) (proof? #f))",
+  "resolve-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))) (pinned? #t))",
+  call:         "((path (*state* alice programs example)) (arguments ()))",
+  "set-batch": "((paths ((*state* mykey))) (values (myvalue)) (expected (oldvalue)) (expression? #t))",
   info:         "()",
-  bridge:       "((name peer-a) (info-local ((interface \"http://peer-a/interface\") (policy ((publish push) (subscribe pull))) (role #f) (remote-name my-journal))))",
+  bridge:       "((name peer-a) (interface \"http://peer-a/interface\") (remote-name my-journal))",
+  "update-config": "((path (public bridge-accept)) (value preapproved))",
   config:       "()",
   admins:       "()",
-  "set-admins": "((admins (admin alice)))",
+  "set-admins": "((admins ((*state* admin) (*state* alice))))",
   "set-window": "((value 128))",
   "set-secret": "((secret new-secret))",
-  synchronize:  "((index 0))",
-  "synchronize!": "((name peer-a) (index -1) (response ()))",
-  trace:        "((index 0) (path (-1 *state* mykey)))",
+  authorizations: "((user (*state* alice)))",
+  authorize: `((user (*state* alice)) (rule ${authorizationSchemeRuleExample}))`,
+  deauthorize: `((user (*state* alice)) (rule ${authorizationSchemeRuleExample}))`,
+  "synchronize!": "((name peer-a) (response ()) (info ()) (interface \"https://peer-a/interface\") (remote-name local))",
+  trace:        "((index 0) (path (*state* mykey)))",
+  "trace-batch": "((index 0) (paths ((*state* a) (*state* b))))",
+  route:        "((route-target (peer-a)))",
 };
 
 const rootOperationExamples: Record<string, unknown> = {
@@ -1093,7 +1125,13 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
             generalOperationDocs[operation]?.summary ||
             `General operation '${operation}'`,
           description: `${generalOperationDocs[operation]?.description || "General operation."} ${requestModeDescription}`,
-          body: makeBodyContent(generalOperationExamples[operation], generalSchemeExamples[operation]),
+          body: makeBodyContent(
+            generalOperationExamples[operation],
+            generalSchemeExamples[operation],
+            new Set(["authorizations", "authorize", "deauthorize"]).has(operation)
+              ? authorizationBodyDescription
+              : undefined,
+          ),
         },
       },
       async (request) => {
@@ -1315,7 +1353,9 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       errorMessage.includes("JSON body must use") ||
       errorMessage.includes("Gateway JSON bodies must provide") ||
       errorMessage.includes("Gateway JSON bodies should provide") ||
-      errorMessage.includes("Scheme requests must provide")
+      errorMessage.includes("Scheme requests must provide") ||
+      errorMessage.includes("Federation context") ||
+      errorMessage.includes("Federation history")
     ) {
       return reply.code(400).send({
         error: "invalid_request",

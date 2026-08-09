@@ -1,0 +1,43 @@
+\section{Integrity-Protected State}
+\label{sec:integrity-state}
+\label{sec:substrate}
+\label{sec:partial-knowledge}
+
+\subsection{The Value of Verifiable State}
+
+Versioned systems preserve the path by which information changed. Git turns a working tree into a succession of content-addressed snapshots. Append-only databases and blockchains bind later entries to earlier ones. Transparency systems publish authenticated views that clients and witnesses can compare~\cite{Haber1991timestamp,Laurie2014certificate,Melara2015coniks}. Their common achievement is a durable answer to a simple question: does the evidence now presented belong to the state that was previously committed? That answer changes the character of a record. A mutable database row asks the operator for its current value. A committed state can also be held by a recipient, cited by digest, compared with another copy, and revisited after the operator changes its presentation. History becomes portable evidence that recipients can preserve alongside the service. This remains useful even when the record is incomplete, disputed, or false: integrity preserves the object of later analysis. Most authenticated structures assume that a verifier receives a query result and a compact proof against a known root~\cite{Martel2004general,Miller2014authenticated}. The Synchronic Web extends this idea into a persistent representation of partial knowledge. A recipient can retain one region of a state, discard another, and later combine compatible evidence while referring throughout to the same logical commitment. That capability begins with a deliberately small structural model.
+
+\subsection{A Minimal Verifiable Structure}
+
+The native substrate is an integrity-verifiable binary data-structure DAG in which immutable substructures may be shared by many parents. A \emph{logical digest} names recursively defined content or structure, while a \emph{local handle} retrieves the representation available in one store. This separation lets the same logical state use different persistence layouts and lets one handle retrieve either complete structure or a compact record of its digest. Maps, objects, histories, and resources grow from five substrate forms, shown in \cref{fig:dag-stump}:
+
+\begin{itemize}
+  \item \textbf{Root:} a stable local name mapped to a node handle.
+  \item \textbf{Branch:} two child handles with a logical digest derived from their digests.
+  \item \textbf{Leaf:} raw bytes stored under a double-hashed handle and logical content digest.
+  \item \textbf{Stump:} one retained digest for structure whose internal representation is unavailable.
+  \item \textbf{Null:} the distinguished all-zero word denoting empty structure.
+\end{itemize}
+
+A digest commits recursively to everything beneath it. Changing one leaf produces new digests along every dependent path to the root; the old node digest continues to identify the old state, while advancing the durable root handle selects its successor. The stump gives missing structure a precise place in this model by preserving the digest expected at one position and ending traversal at an identified boundary. Null records actual emptiness, an unknown value records the absence of a usable commitment, and a stump records committed structure awaiting evidence. Local mutation is therefore movement among immutable logical states, and partial possession is a precise statement about which regions of one such state are currently known.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/dag-stump}}
+  \caption{Persisted DAG Node Forms}
+  \label{fig:dag-stump}
+\end{figure}
+
+\subsection{Proof Under Partial Possession}
+
+A slice follows selected semantic paths through a complete state and replaces unrelated material with stumps; because the result retains the original root digest, every included resource remains bound to the complete state from which it came. Object-aware slicing follows documented protocols as well as physical DAG edges, extending the economy of compact Merkle multiproofs~\cite{Ramabaja2020compact}. Pruning applies the same transformation to material already held locally, shrinking possession while the logical state remains fixed; deletion instead constructs a successor state in which the resource is absent, allowing a journal to release storage while preserving an exact historical commitment~\cite{Crosby2009efficient}. Merge moves in the other direction by replacing a stump with matching structure or recursively combining compatible branches; a digest mismatch aborts the operation and leaves conflict resolution to domain policy. Serialization then carries node kinds, bytes, and retained digests across a transport boundary so a client can reconstruct the same logical root, retain one proof, and accumulate neighboring evidence through later responses.
+
+\input{algorithms/deep-slice}
+
+\input{algorithms/deep-prune}
+
+\input{algorithms/merge-partial}
+
+\subsection{Integrity as Infrastructure}
+
+Partial possession separates auditability from bulk custody. An auditor can retain the report, definitions, path, and ancestor evidence relevant to one decision while the source keeps operational data in its native system; another institution can preserve a complementary slice, and their copies remain comparable because both resolve to the same commitment. Availability then grows from replication, pinning, media renewal, and operating institutions: a digest may outlive every full copy of the bytes it names, integrity makes each recovered copy checkable, and retention determines whether recovery remains possible. Selective transfer, citation, archival sampling, and cross-organizational inspection all follow from distributing these responsibilities among parties with different interests and storage budgets. A small substrate concentrates trust in construction, hashing, persistence, and controlled evaluation while rich semantics remain visible and historically evolvable in stored objects above it. Verification still needs bounds on encoded size, node count, recursion, allocation, and traversal because structurally valid evidence may be adversarially deep or broad. Within those bounds, the substrate adds verifiable internal partiality to content addressing: structure can be selectively possessed and later restored under one identity. Once roots advance through signed committed steps, that identity becomes durable evidence about change; Section~3 develops this succession and shows how independent histories can become evidence for one another.

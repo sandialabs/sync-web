@@ -5,22 +5,28 @@
     "example": "((function size))",
     "permission": "any"
   },
-  "synchronize": {
-    "description": "Returns a serialized proof of the chain state up to the specified index. Used for bridge synchronization to verify chain integrity and fetch missing data.",
-    "template": "((function synchronize) (arguments ((index <index>))))",
-    "example": "((function synchronize) (arguments ((index 0))))",
-    "permission": "any"
-  },
   "resolve": {
-    "description": "Returns committed/indexed content for a specific path. Optional pinned? and proof? flags control whether metadata and serialized proof material are included.",
-    "template": "((function resolve) (arguments ((path <path>) (pinned? <pinned?>) (proof? <proof?>))) (authentication ((credentials <secret>))))",
-    "example": "((function resolve) (arguments ((path (-1 (*state* key))) (pinned? #t) (proof? #f))) (authentication ((credentials \"mysecret\"))))",
+    "description": "Returns committed/indexed content for a specific path. Optional pinned? and proof? flags control whether local pin status and serialized proof material are included.",
+    "template": "((function resolve) (arguments ((path <path>) (pinned? <pinned?>) (proof? <proof?>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function resolve) (arguments ((path (-1 *state* alice key)) (pinned? #t) (proof? #f))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "resolve-batch": {
+    "description": "Resolves up to 1,024 ordered committed paths from one request. Paths may span local and federated route/history groups; compact proofs are verified internally, duplicates remain ordered, and optional pinned? status is origin-local.",
+    "template": "((function resolve-batch) (arguments ((paths (<committed-path> ...)) (pinned? <pinned?>) (expression? <expression?>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function resolve-batch) (arguments ((paths ((-1 *state* alice key) (-1 peer-a -1 *state* bob key))) (pinned? #t) (expression? #t))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
   },
   "trace": {
     "description": "Returns a serialized traced object for a committed path at a specific chain index. Used by bridges and remote synchronization helpers.",
     "template": "((function trace) (arguments ((index <index>) (path <path>))))",
-    "example": "((function trace) (arguments ((index 0) (path (-1 (*state* key))))))",
+    "example": "((function trace) (arguments ((index 0) (path (*state* key)))))",
+    "permission": "any"
+  },
+  "trace-batch": {
+    "description": "Returns one compact serialized union proof for up to 1,024 authorized paths sharing one history anchor. Heterogeneous anchors require separate calls or resolve-batch grouping.",
+    "template": "((function trace-batch) (arguments ((index <index>) (paths (<path> ...)))))",
+    "example": "((function trace-batch) (arguments ((index 0) (paths ((*state* alice one) (*state* alice two))))))",
     "permission": "any"
   },
   "info": {
@@ -31,51 +37,123 @@
   },
   "get": {
     "description": "Retrieves data from the current staging area only. Use resolve for committed/indexed reads.",
-    "template": "((function get) (arguments ((path <path>))) (authentication ((credentials <secret>))))",
-    "example": "((function get) (arguments ((path (*state* *time*)))) (authentication ((credentials \"mysecret\"))))",
+    "template": "((function get) (arguments ((path <path>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function get) (arguments ((path (*state* alice documents note)))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "get-batch": {
+    "description": "Reads up to 1,024 ordered staged paths from one snapshot. Duplicate and missing paths remain in request order; expression? controls value decoding.",
+    "template": "((function get-batch) (arguments ((paths (<path> ...)) (expression? <expression?>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function get-batch) (arguments ((paths ((*state* alice one) (*state* alice missing))) (expression? #t))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
   },
   "set!": {
-    "description": "Sets a value at the specified path in the staging area. The path must start with a list beginning with '*state*'. Changes are staged until the next *step* commits them.",
-    "template": "((function set!) (arguments ((path <path>) (value <value>) (expression? <expression?>))) (authentication ((credentials <secret>))))",
-    "example": "((function set!) (arguments ((path (*state* mykey)) (value \"myvalue\") (expression? #t))) (authentication ((credentials \"mysecret\"))))",
+    "description": "Sets a staged value. Optional expected content makes the write conditional: mismatch returns #f without mutation and requires both get and set! authority.",
+    "template": "((function set!) (arguments ((path <path>) (value <value>) (expected <old-value>) (expression? <expression?>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function set!) (arguments ((path (*state* alice documents note)) (value \"myvalue\") (expected \"oldvalue\") (expression? #t))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
+  },
+  "call!": {
+    "description": "Interface loads the current staged Scheme procedure once for a configured administrator/root, evaluates it outside sync-let in a masked environment, and applies it to the only authenticated journal capability followed by the explicit arguments list. Authorization rules and namespace ownership cannot grant it; execution is local-only and non-atomic.",
+    "template": "((function call!) (arguments ((path <staged-path>) (arguments (<argument> ...)))) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function call!) (arguments ((path (*state* alice programs example)) (arguments (1 2)))) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
   },
   "pin!": {
     "description": "Pins data at the specified path to prevent it from being pruned. The path must include a chain index as the first element. Pinned data is preserved in the permanent chain.",
-    "template": "((function pin!) (arguments ((path <path>))) (authentication ((credentials <secret>))))",
-    "example": "((function pin!) (arguments ((path (-1 (*state* important-data))))) (authentication ((credentials \"mysecret\"))))",
+    "template": "((function pin!) (arguments ((path <path>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function pin!) (arguments ((path (-1 *state* alice important-data)))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "pin-batch!": {
+    "description": "Atomically pins up to 1,024 complete origin-relative committed paths. Remote proof groups are fetched and verified before the one local retention mutation; any failed member rolls back all retention changes.",
+    "template": "((function pin-batch!) (arguments ((paths (<committed-path> ...)))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function pin-batch!) (arguments ((paths ((-1 *state* alice important-data) (-1 peer-a -1 *state* bob shared))))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
   },
   "unpin!": {
     "description": "Unpins data at the specified path, allowing it to be pruned. The path must include a chain index as the first element.",
-    "template": "((function unpin!) (arguments ((path <path>))) (authentication ((credentials <secret>))))",
-    "example": "((function unpin!) (arguments ((path (-1 (*state* old-data))))) (authentication ((credentials \"mysecret\"))))",
+    "template": "((function unpin!) (arguments ((path <path>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function unpin!) (arguments ((path (-1 *state* alice old-data)))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
   },
-  "batch!": {
-    "description": "Executes multiple general requests in order under one authenticated call. Each item in queries includes a function name and an optional arguments object.",
-    "template": "((function batch!) (arguments ((queries (((function <function-1>) (arguments ((<key-1> <value-1>) ...))) ((function <function-2>)) ...)))) (authentication ((credentials <secret>))))",
-    "example": "((function batch!) (arguments ((queries (((function get) (arguments ((path (*state* *time*)))) ((function config)))))) (authentication ((credentials \"mysecret\"))))",
+  "unpin-batch!": {
+    "description": "Atomically removes retained proof material for up to 1,024 complete origin-relative paths. Duplicate and overlapping cuts are idempotent; malformed members roll back the batch.",
+    "template": "((function unpin-batch!) (arguments ((paths (<committed-path> ...)))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function unpin-batch!) (arguments ((paths ((-1 *state* alice old-data) (-1 peer-a -1 *state* bob old-data))))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
   },
   "config": {
     "description": "Returns the full config of the ledger, including both public and private settings.",
-    "template": "((function config) (authentication ((credentials <secret>))))",
-    "example": "((function config) (authentication ((credentials \"mysecret\"))))",
-    "permission": "user"
+    "template": "((function config) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function config) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
   },
   "bridge!": {
-    "description": "Adds or updates a bridge/publication target. The local info records the peer interface, local policy, role, and proposed remote name.",
-    "template": "((function bridge!) (arguments ((name <name>) (info-local ((interface <endpoint>) (policy ((publish push) (subscribe pull))) (role #f) (remote-name <remote-name>))))) (authentication ((credentials <secret>))))",
-    "example": "((function bridge!) (arguments ((name alice) (info-local ((interface \"http://alice.example.com/api/v1/journal/interface\") (policy ((publish push) (subscribe pull))) (role #f) (remote-name local-journal))))) (authentication ((credentials \"mysecret\"))))",
-    "permission": "user"
+    "description": "Creates a reciprocal bridge and takes responsibility for initiating synchronization.",
+    "template": "((function bridge!) (arguments ((name <name>) (interface <endpoint>) (remote-name <remote-name>))) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function bridge!) (arguments ((name alice) (interface \"http://alice.example.com/api/v1/journal/interface\") (remote-name local-journal))) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
+  },
+  "update-config!": {
+    "description": "Updates a ledger configuration path. Used for bridge acceptance and preapproval settings.",
+    "template": "((function update-config!) (arguments ((path <path>) (value <value>))) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function update-config!) (arguments ((path (public bridge-accept)) (value preapproved))) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
   },
   "*secret*": {
-    "description": "Changes the user authentication secret. Requires the current user secret for authentication.",
-    "template": "((function *secret*) (arguments ((secret <new-secret>))) (authentication ((credentials <old-secret>))))",
-    "example": "((function *secret*) (arguments ((secret \"new-user-secret\"))) (authentication ((credentials \"old-user-secret\"))))",
+    "description": "Rotates the journal-wide Interface authentication secret and corresponding Interface public signing key. Configured local Interface administrators/root only.",
+    "template": "((function *secret*) (arguments ((secret <new-interface-secret>))) (authentication ((identity (*state* <admin>)) (credentials <current-interface-secret>))))",
+    "example": "((function *secret*) (arguments ((secret \"new-interface-secret\"))) (authentication ((identity (*state* admin)) (credentials \"current-interface-secret\"))))",
+    "permission": "admin"
+  },
+  "set-batch!": {
+    "description": "Atomically stages multiple path/value writes. Optional expected values are checked against one snapshot; any mismatch returns #f without mutation and requires get plus set! authority for every path.",
+    "template": "((function set-batch!) (arguments ((paths (<path> ...)) (values (<value> ...)) (expected (<old-value> ...)) (expression? <expression?>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function set-batch!) (arguments ((paths ((*state* alice one) (*state* alice two))) (values (1 2)) (expected (0 1)) (expression? #t))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
     "permission": "user"
+  },
+  "delete-bridge!": {
+    "description": "Deletes a local reciprocal bridge and its alias-scoped authorization state. Configured local Interface administrators/root only.",
+    "template": "((function delete-bridge!) (arguments ((name <bridge-name>))) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function delete-bridge!) (arguments ((name peer-a))) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
+  },
+  "authorizations": {
+    "description": "Lists exact authorization rules owned by a local (*state* USER) namespace. Owners may list their own rules; Interface administrators/root may manage local namespaces.",
+    "template": "((function authorizations) (arguments ((user (*state* <owner>)))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function authorizations) (arguments ((user (*state* alice)))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "authorize!": {
+    "description": "Adds an exact owner-local rule. Remote principals require terminal authentication key-index; Resolve has a separate document-history range. Exact local/public rules omit key-index.",
+    "template": "((function authorize!) (arguments ((user (*state* <owner>)) (rule <exact-rule>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function authorize!) (arguments ((user (*state* alice)) (rule ((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (get #t) (set! #f) (resolve (0 -1)))))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "deauthorize!": {
+    "description": "Deletes an owner-local authorization rule using the complete exact stored shape, including key-index and Resolve range.",
+    "template": "((function deauthorize!) (arguments ((user (*state* <owner>)) (rule <exact-rule>))) (authentication ((identity (*state* <user>)) (credentials <secret>))))",
+    "example": "((function deauthorize!) (arguments ((user (*state* alice)) (rule ((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (get #t) (set! #f) (resolve (0 -1)))))) (authentication ((identity (*state* alice)) (credentials \"mysecret\"))))",
+    "permission": "user"
+  },
+  "*admins-get*": {
+    "description": "Returns configured local Interface administrator principals. Interface administrators/root only.",
+    "template": "((function *admins-get*) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function *admins-get*) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
+  },
+  "*admins-set*": {
+    "description": "Replaces configured local Interface administrator principals. Every entry must be exact (*state* USER). Interface administrators/root only.",
+    "template": "((function *admins-set*) (arguments ((admins ((*state* <user>) ...)))) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function *admins-set*) (arguments ((admins ((*state* admin) (*state* alice))))) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
+  },
+  "*window-set*": {
+    "description": "Sets the positive ledger retention window. Interface administrators/root only; decreasing may prune unpinned history.",
+    "template": "((function *window-set*) (arguments ((value <positive-integer>))) (authentication ((identity (*state* <admin>)) (credentials <secret>))))",
+    "example": "((function *window-set*) (arguments ((value 128))) (authentication ((identity (*state* admin)) (credentials \"mysecret\"))))",
+    "permission": "admin"
   },
   "*eval*": {
     "description": "Evaluates an arbitrary Scheme expression with full access to the journal internals. Extremely powerful and dangerous - use with caution.",

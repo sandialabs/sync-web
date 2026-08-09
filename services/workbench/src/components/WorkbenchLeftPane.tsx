@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { FunctionEntry, ApiEntry, ExampleEntry, LeftPaneTab } from '../types/workbench';
+import { FunctionEntry, ApiEntry, ApiPermission, ExampleEntry, LeftPaneTab } from '../types/workbench';
+
+const apiPermissions: ApiPermission[] = ['any', 'user', 'admin', 'root'];
 
 interface WorkbenchLeftPaneProps {
   onUseExample: (code: string) => void;
@@ -21,7 +23,7 @@ export const WorkbenchLeftPane: React.FC<WorkbenchLeftPaneProps> = ({ onUseExamp
   const [apiError, setApiError] = useState<string | null>(null);
   const [apiSearch, setApiSearch] = useState('');
   const [expandedApi, setExpandedApi] = useState<string | null>(null);
-  const [apiFilter, setApiFilter] = useState<'all' | 'any' | 'user' | 'root'>('all');
+  const [apiFilter, setApiFilter] = useState<'all' | ApiPermission>('all');
 
   // Examples state
   const [examples, setExamples] = useState<ExampleEntry[]>([]);
@@ -68,13 +70,22 @@ export const WorkbenchLeftPane: React.FC<WorkbenchLeftPaneProps> = ({ onUseExamp
           throw new Error(`Failed to load API: ${response.status}`);
         }
         const data = await response.json();
-        const entries: ApiEntry[] = Object.entries(data).map(([name, info]: [string, any]) => ({
-          name,
-          description: info.description || '',
-          template: info.template || '',
-          example: info.example || '',
-          permission: info.permission || 'user',
-        }));
+        const entries: ApiEntry[] = Object.entries(data).map(([name, info]: [string, any]) => {
+          if (!info || typeof info !== 'object'
+              || typeof info.description !== 'string'
+              || typeof info.template !== 'string'
+              || typeof info.example !== 'string'
+              || !apiPermissions.includes(info.permission)) {
+            throw new Error(`Invalid API catalog entry: ${name}`);
+          }
+          return {
+            name,
+            description: info.description,
+            template: info.template,
+            example: info.example,
+            permission: info.permission,
+          };
+        });
         setApiEntries(entries);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load API';
@@ -244,6 +255,12 @@ export const WorkbenchLeftPane: React.FC<WorkbenchLeftPaneProps> = ({ onUseExamp
             onClick={() => setApiFilter('user')}
           >
             User
+          </button>
+          <button
+            className={`api-filter-btn ${apiFilter === 'admin' ? 'active' : ''}`}
+            onClick={() => setApiFilter('admin')}
+          >
+            Admin
           </button>
           <button
             className={`api-filter-btn ${apiFilter === 'root' ? 'active' : ''}`}

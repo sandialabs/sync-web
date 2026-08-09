@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FastifyBaseLogger } from "fastify";
-import { createJournalClient, JournalSemanticError, redactAuth } from "../src/journal";
+import { createJournalClient, JournalSemanticError } from "../src/journal";
 
 const noop = () => {};
 const logger = {
@@ -36,7 +36,7 @@ test("callJson omits identity when no identityId provided", async (t) => {
   assert.deepEqual(body.authentication.credentials, { "*type/string*": "secret" });
 });
 
-test("callJson sends username symbol when identityId provided", async (t) => {
+test("callJson sends local principal path when identityId provided", async (t) => {
   let captured: string | undefined;
   t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
     captured = init.body as string;
@@ -44,8 +44,32 @@ test("callJson sends username symbol when identityId provided", async (t) => {
   });
   await makeClient().callJson({ functionName: "get", authentication: "secret", identityId: "alice" });
   const body = JSON.parse(captured!);
-  assert.equal(body.authentication.identity, "alice");
+  assert.deepEqual(body.authentication.identity, ["*state*", "alice"]);
   assert.deepEqual(body.authentication.credentials, { "*type/string*": "secret" });
+});
+
+test("callJson builds a federated invocation with optional Ledger indexes", async (t) => {
+  let captured: string | undefined;
+  t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+    captured = init.body as string;
+    return respondWith("ok");
+  });
+  await makeClient().callJson({
+    functionName: "resolve",
+    authentication: "secret",
+    identityId: "alice",
+    routeTarget: ["carol", "bob"],
+    historyIndexes: [-1, 3, 7],
+  });
+  const body = JSON.parse(captured!);
+  assert.equal("authentication" in body, false);
+  assert.deepEqual(body.invocation, {
+    identity: "alice",
+    "route-source": [],
+    "route-target": ["carol", "bob"],
+    "history-indexes": [-1, 3, 7],
+    credentials: { "*type/string*": "secret" },
+  });
 });
 
 test("callJson omits authentication block when no authentication provided", async (t) => {
@@ -89,27 +113,44 @@ test("callJson throws on request timeout", async (t) => {
   );
 });
 
-// --- redactAuth ---
+test("forwarding diagnostics omit request, response, and credential bodies", async (t) => {
+  const entries: unknown[][] = [];
+  const recordingLogger = {
+    info: (...args: unknown[]) => entries.push(args),
+    warn: (...args: unknown[]) => entries.push(args),
+    error: (...args: unknown[]) => entries.push(args),
+    debug: noop, trace: noop, fatal: noop,
+    child: () => recordingLogger,
+  } as unknown as FastifyBaseLogger;
+  const client = createJournalClient(JOURNAL_EP, ROOT_EP, 5000, recordingLogger, {
+    debugForwarding: true,
+  });
+  t.mock.method(globalThis, "fetch", async () => respondWith("RESPONSE-LEAK-SENTINEL"));
 
-test("redactAuth masks credentials in new envelope shape", () => {
-  const body = {
-    function: "get",
-    authentication: { identity: "alice", credentials: { "*type/string*": "secret" } },
-  };
-  const result = redactAuth(body);
-  assert.deepEqual((result.authentication as Record<string, unknown>).credentials, "***REDACTED***");
-  assert.equal((result.authentication as Record<string, unknown>).identity, "alice");
-  assert.equal((body.authentication as Record<string, unknown>).credentials["*type/string*"], "secret");
-});
+  await client.callJson({
+    functionName: "set!",
+    args: { value: "BODY-LEAK-SENTINEL" },
+    authentication: "INTERFACE-LEAK-SENTINEL",
+  });
+  await client.callScheme({
+    functionName: "set!",
+    expression: '(set! "SCHEME-LEAK-SENTINEL")',
+  });
+  await client.callRootJson({
+    functionName: "*set-secret*",
+    args: ["NEW-ROOT-LEAK-SENTINEL"],
+    authentication: "ROOT-LEAK-SENTINEL",
+  });
 
-test("redactAuth masks whole authentication when no credentials key", () => {
-  const body = { function: "size", authentication: "plain-secret" };
-  const result = redactAuth(body);
-  assert.equal(result.authentication, "***REDACTED***");
-});
-
-test("redactAuth is a no-op when no authentication field", () => {
-  const body = { function: "size" };
-  const result = redactAuth(body);
-  assert.deepEqual(result, body);
+  const logged = JSON.stringify(entries);
+  for (const sentinel of [
+    "RESPONSE-LEAK-SENTINEL",
+    "BODY-LEAK-SENTINEL",
+    "INTERFACE-LEAK-SENTINEL",
+    "SCHEME-LEAK-SENTINEL",
+    "NEW-ROOT-LEAK-SENTINEL",
+    "ROOT-LEAK-SENTINEL",
+  ]) {
+    assert.equal(logged.includes(sentinel), false, `logged ${sentinel}`);
+  }
 });

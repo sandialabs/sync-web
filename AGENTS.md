@@ -37,6 +37,12 @@
 - Before submitting pull requests, identify and run Github Actions locally where relevant and possible.
   - Relevant actions are in .github/workflows/*.yml.
 
+## Security
+
+- Root secrets and private keys must never be stored in Journal state, Root objects, Ledger or Federation objects, sync-node graphs, history, proofs, or the Journal database.
+- The one explicit exception is the independently rotatable Interface bearer credential, which may be stored in private Root state so trusted periodic orchestration can reenter the ordinary Interface. Its verifier must remain different from the Root verifier at installation and through rotation in either direction. It must never enter Ledger or Federation objects, user state, history, proofs, traces, logs, or public configuration. Treat Journal backups as live Interface credentials and rotate after disclosure or untrusted restoration.
+- Other secret material may exist only outside the Journal persistence boundary, such as in operator-managed secret configuration or a request-transient host capability. A private field, unexported path, exclusion from proofs, or other obscurity does not create another exception: if the Journal can persist or reopen the value, it is prohibited secret storage.
+
 ## Development
 
 - When working with s7 scheme/lisp code, consult `/records/LANGUAGE.md`

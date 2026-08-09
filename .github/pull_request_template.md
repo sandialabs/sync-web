@@ -28,7 +28,8 @@ Other checks run:
 
 ## Deployment / records impact
 
-- [ ] No record changes, or existing deployments require `JOURNAL_UPDATE=1`
+- [ ] No record changes, or the release explicitly requires a fresh database and atomically rejects every nonfresh volume
+- [ ] No migration/conversion code is introduced; prior databases retain their exact runtime for read-only historical access
 - [ ] No runtime-managed admin/config state will be reset by updates
 - [ ] Public deployment variables and defaults remain safe (`ORIGIN`, `INTERFACE`, `JOURNAL_NAME`, secrets)
 - [ ] No destructive volume/data commands are added or documented without explicit warnings
@@ -37,6 +38,7 @@ Other checks run:
 
 - [ ] No secrets, private data, local databases, generated caches, or runtime artifacts committed
 - [ ] Release/container/binary artifact implications considered
+- [ ] Exact-image fresh single-node and sticky federation journeys run, or omission is explained
 - [ ] Security-sensitive changes are described here or handled privately via `SECURITY.md`
 
 ## Notes / risks

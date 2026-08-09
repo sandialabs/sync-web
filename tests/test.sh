@@ -20,8 +20,14 @@ if [ -n "$CUSTOM_SETUP" ]; then
     build_args+=(--build-arg "CUSTOM_SETUP=$CUSTOM_SETUP")
 fi
 
-echo "--- journal ---"
-$CONTAINER_RUNTIME build --target test "${build_args[@]}" -f "$ROOT/journal/Dockerfile" "$ROOT/journal"
+echo "--- journal (qualified Alpine/musl Wasmer image) ---"
+: "${SYNC_WEB_WASMER_KERNEL:?set SYNC_WEB_WASMER_KERNEL to the qualified AOT artifact}"
+CONTAINER_RUNTIME="$CONTAINER_RUNTIME" \
+  "$ROOT/journal/scripts/build-journal-image" \
+  --variant musl \
+  --kernel "$SYNC_WEB_WASMER_KERNEL" \
+  --tag localhost/sync-web/journal-sdk:test-musl \
+  --evidence-dir "$ROOT/target/test-journal-image"
 
 echo "--- file-system ---"
 $CONTAINER_RUNTIME build --target test "${build_args[@]}" -f "$ROOT/services/file-system/Dockerfile" "$ROOT/services/file-system"
@@ -40,7 +46,8 @@ $CONTAINER_RUNTIME build --target test "${build_args[@]}" -f "$ROOT/services/wor
 
 echo "--- integration ---"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-sync-test}" \
-CUSTOM_SETUP="$CUSTOM_SETUP" SECRET=password HTTP_PORT=8192 HTTPS_PORT=8193 \
+CUSTOM_SETUP="$CUSTOM_SETUP" SECRET=root-password INTERFACE_SECRET=interface-password \
+ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 HTTPS_PORT=8193 \
   "$ROOT/tests/api/local-compose.sh" smoke
 
 echo "--- all passed ---"

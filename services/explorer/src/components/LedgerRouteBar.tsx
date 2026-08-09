@@ -4,28 +4,32 @@ import { normalizeSnapshotInput } from '../utils/ledgerRoute';
 
 interface LedgerRouteBarProps {
   hops: LedgerHop[];
-  peerChoices: string[] | null;
+  peerChoices?: string[] | null;
   rootIndex: number;
   onSynchronize: () => void;
+  isSynchronizing?: boolean;
   onSnapshotChange: (index: number, value: string) => void;
   onStepSnapshot: (index: number, direction: 'older' | 'newer') => void;
-  onRemoveHop: () => void;
-  onOpenPeerPicker: () => void;
-  onClosePeerPicker: () => void;
-  onChoosePeer: (peerName: string) => void;
+  onRemoveHop?: () => void;
+  onOpenPeerPicker?: () => void;
+  onClosePeerPicker?: () => void;
+  onChoosePeer?: (peerName: string) => void;
+  readOnlyRoute?: boolean;
 }
 
 const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
   hops,
-  peerChoices,
+  peerChoices = null,
   rootIndex,
   onSynchronize,
+  isSynchronizing = false,
   onSnapshotChange,
   onStepSnapshot,
-  onRemoveHop,
-  onOpenPeerPicker,
-  onClosePeerPicker,
-  onChoosePeer,
+  onRemoveHop = () => undefined,
+  onOpenPeerPicker = () => undefined,
+  onClosePeerPicker = () => undefined,
+  onChoosePeer = () => undefined,
+  readOnlyRoute = false,
 }) => {
   const pickerOpen = Array.isArray(peerChoices);
   const getSnapshotDisplayValue = (hop: LedgerHop, index: number): string => {
@@ -69,11 +73,12 @@ const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
           >
             {index === 0 && (
               <button
-                className="sync-pill sync-pill-inline"
+                className={`sync-pill sync-pill-inline ${isSynchronizing ? 'synchronizing' : ''}`}
                 title="Synchronize latest committed root"
                 onClick={onSynchronize}
+                disabled={isSynchronizing}
               >
-                <span className="sync-pill-icon">⟳</span>
+                <span className="sync-pill-icon" aria-hidden="true">⟳</span>
               </button>
             )}
             <div className="hop-tag">{hop.name}</div>
@@ -97,7 +102,7 @@ const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
         </React.Fragment>
       ))}
 
-      <div className="route-control-rail">
+      {!readOnlyRoute && <div className="route-control-rail">
         {pickerOpen ? (
           <div className="peer-picker-shell">
             <button className="route-action" title="Exit bridge selection" onClick={onClosePeerPicker}>
@@ -136,7 +141,7 @@ const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
             </button>
           </>
         )}
-      </div>
+      </div>}
     </div>
   );
 };

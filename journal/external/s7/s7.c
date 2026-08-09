@@ -4643,6 +4643,7 @@ static s7_pointer object_to_truncated_string(s7_scheme *sc, s7_pointer p, s7_int
 static const char *type_name(s7_scheme *sc, s7_pointer arg, article_t article);
 static s7_pointer cons_unchecked(s7_scheme *sc, s7_pointer a, s7_pointer b);
 static s7_pointer unbound_variable(s7_scheme *sc, s7_pointer sym);
+static noreturn void unbound_variable_error_nr(s7_scheme *sc, s7_pointer sym);
 
 
 #define bold_text    "\033[1m"
@@ -6094,14 +6095,14 @@ static s7_pointer find_let(s7_scheme *sc, s7_pointer obj)
   return(sc->nil);
 }
 
-static inline s7_pointer lookup_slot_from(s7_pointer symbol, s7_pointer e);
+static inline s7_pointer lookup_slot_from(s7_scheme *sc, s7_pointer symbol, s7_pointer e);
 
 static s7_pointer find_method(s7_scheme *sc, s7_pointer let, s7_pointer symbol)
 {
   s7_pointer slot;
   if (symbol_id(symbol) == 0) /* this means the symbol has never been used locally, so how can it be a method? */
     return(sc->undefined);
-  slot = lookup_slot_from(symbol, let);
+  slot = lookup_slot_from(sc, symbol, let);
   if (slot != global_slot(symbol))
     return(slot_value(slot));
   return(sc->undefined);
@@ -6496,7 +6497,7 @@ static s7_pointer g_is_immutable(s7_scheme *sc, s7_pointer args)
 	    wrong_type_error_nr(sc, sc->is_immutable_symbol, 2, e, a_let_string);
 	  if (e == sc->rootlet)
 	    slot = global_slot(p);
-	  else slot = lookup_slot_from((is_keyword(p)) ? keyword_symbol(p) : p, e);
+	  else slot = lookup_slot_from(sc, (is_keyword(p)) ? keyword_symbol(p) : p, e);
 	}
       else slot = s7_slot(sc, p);
       if (is_slot(slot)) /* might be #<undefined> */
@@ -9886,6 +9887,48 @@ static s7_pointer sublet_1(s7_scheme *sc, s7_pointer e, s7_pointer bindings, s7_
 }
 
 s7_pointer s7_sublet(s7_scheme *sc, s7_pointer e, s7_pointer bindings) {return(sublet_1(sc, e, bindings, sc->sublet_symbol));}
+s7_pointer s7_make_closed_let(s7_scheme *sc) {return(make_let(sc, NULL));}
+#define closed_let_missing_slot(e) let_slots(e) /* s7_seal_let inserts this last, at the slot-list head */
+s7_pointer s7_seal_let(s7_scheme *sc, s7_pointer e)
+{
+  add_slot_checked_with_id(sc, e, make_symbol(sc, "%closed-let-missing", 19), sc->undefined);
+  set_immutable(e);
+  for (s7_pointer slot = let_slots(e); tis_slot(slot); slot = next_slot(slot))
+    set_immutable_slot(slot);
+  return(e);
+}
+
+s7_pointer s7_sublet_with_cloned_bindings(s7_scheme *sc, s7_pointer e)
+{
+  s7_pointer mask, new_e, previous = NULL;
+  if ((!is_let(e)) || (!is_immutable(e)) ||
+      (!tis_slot(closed_let_missing_slot(e))) ||
+      (slot_value(closed_let_missing_slot(e)) != sc->undefined))
+    wrong_type_error_nr(sc, sc->sublet_symbol, 1, e,
+                        wrap_string(sc, "a sealed capability let", 23));
+  mask = let_outlet(e);
+  if ((!is_let(mask)) || (!is_immutable(mask)) || (let_outlet(mask)) ||
+      (!tis_slot(closed_let_missing_slot(mask))) ||
+      (slot_value(closed_let_missing_slot(mask)) != sc->undefined))
+    wrong_type_error_nr(sc, sc->sublet_symbol, 1, e,
+                        wrap_string(sc, "a sealed capability let with a closed mask", 42));
+  new_e = make_let(sc, e);
+  set_all_methods(new_e, e);
+  sc->temp3 = new_e;
+  for (s7_pointer slot = next_slot(closed_let_missing_slot(e)); tis_slot(slot); slot = next_slot(slot))
+    {
+      s7_pointer clone;
+      new_cell(sc, clone, T_SLOT);
+      slot_set_symbol_and_value(clone, slot_symbol(slot), slot_value(slot));
+      if (symbol_id(slot_symbol(clone)) != let_id(new_e))
+        symbol_set_local_slot(slot_symbol(clone), let_id(new_e), clone);
+      if (previous) slot_set_next(previous, clone); else let_set_slots(new_e, clone);
+      slot_set_next(clone, slot_end);
+      previous = clone;
+    }
+  sc->temp3 = sc->unused;
+  return(new_e);
+}
 
 static s7_pointer g_sublet(s7_scheme *sc, s7_pointer args)
 {
@@ -10593,15 +10636,25 @@ static Inline s7_pointer inline_lookup_from(s7_scheme *sc, const s7_pointer symb
     return(local_value(symbol));
   if (let_id(e) > symbol_id(symbol)) /* let is newer so look back in the outlet chain */
     {
-      do {e = let_outlet(e);} while (let_id(e) > symbol_id(symbol));
+      do
+        {
+          if ((e != sc->rootlet) && (!let_outlet(e))) unbound_variable_error_nr(sc, symbol);
+          e = let_outlet(e);
+        }
+      while (let_id(e) > symbol_id(symbol));
       if (let_id(e) == symbol_id(symbol))
 	return(local_value(symbol));
     }
+  bool closed = false;
   for (; e; e = let_outlet(e))
-    for (s7_pointer y = let_slots(e); tis_slot(y); y = next_slot(y))
-      if (slot_symbol(y) == symbol)
-	return(slot_value(y));
+    {
+      if ((e != sc->rootlet) && (!let_outlet(e))) closed = true;
+      for (s7_pointer y = let_slots(e); tis_slot(y); y = next_slot(y))
+        if (slot_symbol(y) == symbol)
+          return(slot_value(y));
+    }
 
+  if (closed) unbound_variable_error_nr(sc, symbol);
   if (is_slot(global_slot(symbol)))
     return(global_value(symbol));
 #if WITH_GCC
@@ -10620,25 +10673,28 @@ static inline s7_pointer lookup(s7_scheme *sc, const s7_pointer symbol) /* looku
   return(inline_lookup_from(sc, symbol, sc->curlet));
 }
 
-static inline s7_pointer lookup_slot_from(s7_pointer symbol, s7_pointer e)
+static inline s7_pointer lookup_slot_from(s7_scheme *sc, s7_pointer symbol, s7_pointer e)
 {
   if (let_id(e) == symbol_id(symbol))
     return(local_slot(symbol));
   if (let_id(e) > symbol_id(symbol))
     {
-      do {e = let_outlet(e);} while (let_id(e) > symbol_id(symbol));
+      do {if ((e != sc->rootlet) && (is_immutable(e)) && (!let_outlet(e))) return(closed_let_missing_slot(e)); e = let_outlet(e);} while (let_id(e) > symbol_id(symbol));
       if (let_id(e) == symbol_id(symbol))
 	return(local_slot(symbol));
     }
   for (; e; e = let_outlet(e))
-    for (s7_pointer y = let_slots(e); tis_slot(y); y = next_slot(y))
-      if (slot_symbol(y) == symbol)
-	return(y);
+    {
+      for (s7_pointer y = let_slots(e); tis_slot(y); y = next_slot(y))
+        if (slot_symbol(y) == symbol)
+          return(y);
+      if ((e != sc->rootlet) && (is_immutable(e)) && (!let_outlet(e))) return(closed_let_missing_slot(e));
+    }
   return(global_slot(symbol));
 }
 
-s7_pointer s7_slot(s7_scheme *sc, s7_pointer symbol) {return(lookup_slot_from(symbol, sc->curlet));}
-static s7_pointer lookup_slot_with_let(s7_scheme *sc, s7_pointer symbol, s7_pointer let) {return(lookup_slot_from(symbol, let));}
+s7_pointer s7_slot(s7_scheme *sc, s7_pointer symbol) {return(lookup_slot_from(sc, symbol, sc->curlet));}
+static s7_pointer lookup_slot_with_let(s7_scheme *sc, s7_pointer symbol, s7_pointer let) {return(lookup_slot_from(sc, symbol, let));}
 
 s7_pointer s7_slot_value(s7_pointer slot) {return(slot_value(slot));}
 
@@ -30903,7 +30959,7 @@ s7_pointer s7_load_path(s7_scheme *sc) {return(s7_symbol_local_value(sc, sc->loa
 
 s7_pointer s7_add_to_load_path(s7_scheme *sc, const char *dir)
 {
-  s7_pointer slot = lookup_slot_from(sc->load_path_symbol, sc->curlet); /* rootlet possible here */
+  s7_pointer slot = lookup_slot_from(sc, sc->load_path_symbol, sc->curlet); /* rootlet possible here */
   s7_pointer path = cons(sc, s7_make_string(sc, dir), slot_value(slot));
   slot_set_value(slot, path);
   return(path);

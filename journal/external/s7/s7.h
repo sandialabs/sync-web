@@ -412,6 +412,9 @@ s7_pointer s7_curlet(s7_scheme *sc);                                        /* (
 s7_pointer s7_set_curlet(s7_scheme *sc, s7_pointer e);                      /* returns previous curlet */
 s7_pointer s7_outlet(s7_scheme *sc, s7_pointer e);                          /* (outlet e) */
 s7_pointer s7_sublet(s7_scheme *sc, s7_pointer env, s7_pointer bindings);   /* (sublet e ...) */
+s7_pointer s7_make_closed_let(s7_scheme *sc);                               /* environment with no outlet */
+s7_pointer s7_seal_let(s7_scheme *sc, s7_pointer env);                      /* add missing sentinel and make bindings immutable */
+s7_pointer s7_sublet_with_cloned_bindings(s7_scheme *sc, s7_pointer env);   /* clone sealed capability slots over closed mask */
 s7_pointer s7_inlet(s7_scheme *sc, s7_pointer bindings);                    /* (inlet ...) */
 s7_pointer s7_varlet(s7_scheme *sc, s7_pointer env, s7_pointer symbol, s7_pointer value); /* (varlet env symbol value) */
 s7_pointer s7_let_to_list(s7_scheme *sc, s7_pointer env);                   /* (let->list env) */

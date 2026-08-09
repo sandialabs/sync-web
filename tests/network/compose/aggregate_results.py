@@ -71,6 +71,17 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
     activity_requests_success_total = sum(
         item.get("activity_requests_success_total", 0) for item in snapshots
     )
+    activity_path_operations_total = sum(
+        item.get("activity_path_operations_total", item.get("activity_requests_total", 0))
+        for item in snapshots
+    )
+    activity_path_operations_success_total = sum(
+        item.get(
+            "activity_path_operations_success_total",
+            item.get("activity_requests_success_total", 0),
+        )
+        for item in snapshots
+    )
     requests_per_second = sum(item.get("requests_per_second", 0.0) for item in snapshots)
     get_requests_per_second = sum(
         item.get("get_requests_per_second", 0.0) for item in snapshots
@@ -81,14 +92,25 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
     activity_cycles_per_second = sum(
         item.get("activity_cycles_per_second", 0.0) for item in snapshots
     )
+    activity_requests_per_second = sum(
+        item.get("activity_requests_per_second", 0.0) for item in snapshots
+    )
+    activity_path_operations_per_second = sum(
+        item.get("activity_path_operations_per_second", 0.0) for item in snapshots
+    )
     requests_per_second_lifetime = sum(
         item.get("requests_per_second_lifetime", 0.0) for item in snapshots
     )
     activity_cycles_per_second_lifetime = sum(
         item.get("activity_cycles_per_second_lifetime", 0.0) for item in snapshots
     )
+    activity_path_operations_per_second_lifetime = sum(
+        item.get("activity_path_operations_per_second_lifetime", 0.0)
+        for item in snapshots
+    )
 
     activity_request_success_rate = 100.0
+    activity_path_operation_success_rate = 100.0
     if previous is not None:
         delta_requests_total = (
             activity_requests_total - previous["activity_requests_total"]
@@ -100,6 +122,18 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
         if delta_requests_total > 0:
             activity_request_success_rate = (
                 delta_requests_success / delta_requests_total
+            ) * 100.0
+        delta_path_operations_total = (
+            activity_path_operations_total
+            - previous["activity_path_operations_total"]
+        )
+        delta_path_operations_success = (
+            activity_path_operations_success_total
+            - previous["activity_path_operations_success_total"]
+        )
+        if delta_path_operations_total > 0:
+            activity_path_operation_success_rate = (
+                delta_path_operations_success / delta_path_operations_total
             ) * 100.0
 
     return {
@@ -126,12 +160,18 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
         "activity_requests_total": activity_requests_total,
         "activity_requests_success_total": activity_requests_success_total,
         "activity_request_success_rate": activity_request_success_rate,
+        "activity_path_operations_total": activity_path_operations_total,
+        "activity_path_operations_success_total": activity_path_operations_success_total,
+        "activity_path_operation_success_rate": activity_path_operation_success_rate,
         "requests_per_second": requests_per_second,
         "get_requests_per_second": get_requests_per_second,
         "set_requests_per_second": set_requests_per_second,
         "activity_cycles_per_second": activity_cycles_per_second,
+        "activity_requests_per_second": activity_requests_per_second,
+        "activity_path_operations_per_second": activity_path_operations_per_second,
         "requests_per_second_lifetime": requests_per_second_lifetime,
         "activity_cycles_per_second_lifetime": activity_cycles_per_second_lifetime,
+        "activity_path_operations_per_second_lifetime": activity_path_operations_per_second_lifetime,
     }
 
 
@@ -142,15 +182,10 @@ class AggregationState:
         self._latest = None
         self._throughput_window_seconds = throughput_window_seconds
 
-    def _activity_requests_per_second_windowed(self, snapshot):
+    def _counter_per_second_windowed(self, snapshot, counter):
         samples = list(self._history)
         samples.append(
-            {
-                "recorded_at": snapshot["recorded_at"],
-                "activity_requests_success_total": snapshot[
-                    "activity_requests_success_total"
-                ],
-            }
+            {"recorded_at": snapshot["recorded_at"], counter: snapshot[counter]}
         )
 
         if len(samples) < 2:
@@ -164,16 +199,18 @@ class AggregationState:
                 break
 
         elapsed = max(snapshot["recorded_at"] - window_start["recorded_at"], 1e-9)
-        delta_requests = (
-            snapshot["activity_requests_success_total"]
-            - window_start["activity_requests_success_total"]
-        )
-        return max(delta_requests, 0) / elapsed
+        delta = snapshot[counter] - window_start[counter]
+        return max(delta, 0) / elapsed
 
     def update(self, snapshot):
         with self._lock:
-            snapshot["activity_requests_per_second"] = (
-                self._activity_requests_per_second_windowed(snapshot)
+            snapshot["activity_requests_per_second"] = self._counter_per_second_windowed(
+                snapshot, "activity_requests_success_total"
+            )
+            snapshot["activity_path_operations_per_second"] = (
+                self._counter_per_second_windowed(
+                    snapshot, "activity_path_operations_success_total"
+                )
             )
             self._latest = snapshot
             self._history.append(
@@ -187,10 +224,22 @@ class AggregationState:
                     "activity_request_success_rate": snapshot[
                         "activity_request_success_rate"
                     ],
+                    "activity_path_operations_per_second": snapshot[
+                        "activity_path_operations_per_second"
+                    ],
+                    "activity_path_operation_success_rate": snapshot[
+                        "activity_path_operation_success_rate"
+                    ],
                     "activity_cycles_total": snapshot["activity_cycles_total"],
                     "activity_requests_total": snapshot["activity_requests_total"],
                     "activity_requests_success_total": snapshot[
                         "activity_requests_success_total"
+                    ],
+                    "activity_path_operations_total": snapshot[
+                        "activity_path_operations_total"
+                    ],
+                    "activity_path_operations_success_total": snapshot[
+                        "activity_path_operations_success_total"
                     ],
                 }
             )
@@ -287,17 +336,18 @@ def build_dashboard_html():
   <h1>Social Agent Network Benchmark</h1>
   <p class="meta" id="meta">Loading…</p>
   <div class="summary">
-    <div><div class="label">Request Throughput (8s Avg)</div><div class="value" id="throughput">-</div></div>
-    <div><div class="label">Request Success Rate</div><div class="value" id="success-rate">-</div></div>
+    <div><div class="label">Logical Path Throughput (8s Avg)</div><div class="value" id="throughput">-</div></div>
+    <div><div class="label">HTTP Request Throughput (8s Avg)</div><div class="value" id="request-throughput">-</div></div>
+    <div><div class="label">Logical Path Success Rate</div><div class="value" id="success-rate">-</div></div>
     <div><div class="label">Agents Reporting</div><div class="value" id="agents">-</div></div>
   </div>
   <div class="wrap">
     <div class="card">
-      <h2>Successful requests / second (8s avg)</h2>
+      <h2>Successful logical path operations / second (8s avg)</h2>
       <svg id="throughput-chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
     </div>
     <div class="card">
-      <h2>Request success rate (%)</h2>
+      <h2>Logical path operation success rate (%)</h2>
       <svg id="success-chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
     </div>
   </div>
@@ -352,19 +402,20 @@ def build_dashboard_html():
       const snapshot = await snapshotRes.json();
 
       document.getElementById("meta").textContent = `Updated ${snapshot.timestamp}`;
-      document.getElementById("throughput").textContent = `${snapshot.activity_requests_per_second.toFixed(2)} req/s`;
-      document.getElementById("success-rate").textContent = `${snapshot.activity_request_success_rate.toFixed(1)}%`;
+      document.getElementById("throughput").textContent = `${snapshot.activity_path_operations_per_second.toFixed(2)} path-op/s`;
+      document.getElementById("request-throughput").textContent = `${snapshot.activity_requests_per_second.toFixed(2)} req/s`;
+      document.getElementById("success-rate").textContent = `${snapshot.activity_path_operation_success_rate.toFixed(1)}%`;
       document.getElementById("agents").textContent = String(snapshot.agents_reporting);
 
       renderChart(
         document.getElementById("throughput-chart"),
-        history.map(item => item.activity_requests_per_second || 0),
+        history.map(item => item.activity_path_operations_per_second || 0),
         "#0b7285",
         { decimals: 1, yStep: 10 }
       );
       renderChart(
         document.getElementById("success-chart"),
-        history.map(item => item.activity_request_success_rate || 0),
+        history.map(item => item.activity_path_operation_success_rate || 0),
         "#2b8a3e",
         { max: 100, decimals: 0, yStep: 10 }
       );

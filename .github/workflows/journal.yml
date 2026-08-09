@@ -36,18 +36,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt update && sudo apt install -y llvm-dev libclang-dev clang
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install LLVM 22 and native dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y clang cmake libclang-dev libzstd-dev llvm-dev wget zlib1g-dev
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y libpolly-22-dev
+          echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@1.96.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: journal
-      - name: Build
+      - name: Build and verify current-source Wasmer AOT
+        env:
+          LLVM_CONFIG_PATH: /usr/lib/llvm-22/bin/llvm-config
+          LIBCLANG_PATH: /usr/lib/llvm-22/lib
+        run: |
+          out="$GITHUB_WORKSPACE/journal/target/ci-kernel"
+          scripts/build-wasmer-kernel "$out"
+          rm -rf "$out/bundle"
+          mkdir "$out/bundle"
+          cp "$out"/{builder.txt,cargo.txt,kernel.wasmer,llvm.txt,native-link-libs.sha256,provenance.json,rustc.txt,source.sha256,wasi-clang.txt} "$out/bundle/"
+          cp "$out/build/pair-1/kernel.wasm" "$out/bundle/kernel.wasm"
+          journal/scripts/check-wasmer-kernel-provenance.py "$out/bundle" "$GITHUB_SHA"
+          echo "Wasmer AOT SHA-256: $(sha256sum "$out/kernel.wasmer" | awk '{print $1}')" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check linkage feature graphs
         working-directory: journal
-        run: cargo build
-      - name: Test
+        run: |
+          python3 scripts/check-musl-linkage-config.py
+          scripts/check-clang-feature-graph.sh non-musl
+          python3 scripts/check-journal-image-config.py
+      - name: Build and test Wasmer-only Journal
         working-directory: journal
-        run: cargo test
+        run: |
+          source target/ci-kernel/env.sh
+          cargo build --locked
+          cargo test --locked
+          cargo check --locked --features test-support --lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qualified-wasmer-kernel
+          path: journal/target/ci-kernel/bundle/
+          if-no-files-found: error
 
   build-journal-sdk:
     needs: [changes, test-journal]
@@ -58,50 +90,36 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: qualified-wasmer-kernel
+          path: target/qualified-kernel
+      - name: Verify tested Wasmer AOT provenance
+        run: journal/scripts/check-wasmer-kernel-provenance.py target/qualified-kernel "$GITHUB_SHA"
       - name: Login to Github registry
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - name: Build journal-sdk pull request validation image
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
+      - name: Build provenance-locked musl image
+        env:
+          CONTAINER_RUNTIME: docker
+        run: |
+          mkdir -p target/journal-image-evidence
+          journal/scripts/build-journal-image --variant musl \
+            --kernel target/qualified-kernel/kernel.wasmer \
+            --tag ghcr.io/${{ github.repository }}/journal-sdk:sha-${{ github.sha }}-musl \
+            --evidence-dir target/journal-image-evidence
+      - name: Push SHA-tagged validation image
+        if: github.event_name != 'pull_request'
+        run: docker push ghcr.io/${{ github.repository }}/journal-sdk:sha-${{ github.sha }}-musl
+      - uses: actions/upload-artifact@v4
         with:
-          context: journal
-          target: runtime
-          platforms: linux/amd64
-          push: false
-          tags: ghcr.io/${{ github.repository }}/journal-sdk:pr-validation
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache
-      - name: Build and push SHA-tagged journal-sdk validation image
-        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
-        uses: docker/build-push-action@v6
-        with:
-          context: journal
-          target: runtime
-          platforms: linux/amd64
-          push: true
-          tags: ghcr.io/${{ github.repository }}/journal-sdk:sha-${{ github.sha }}
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache,mode=max
-      - name: Build and push journal-sdk for direct main journal changes
-        if: github.ref == 'refs/heads/main' && needs.changes.outputs.version != 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: journal
-          target: runtime
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}/journal-sdk:latest
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/journal-sdk:cache,mode=max
+          name: journal-image-provenance
+          path: target/journal-image-evidence
+          if-no-files-found: error
 
   compose-smoke:
     needs: [changes, test-journal, build-journal-sdk]
@@ -109,8 +127,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: qualified-wasmer-kernel
+          path: target/qualified-kernel
       - name: Run compose smoke test
         run: |
+          journal/scripts/check-wasmer-kernel-provenance.py target/qualified-kernel "$GITHUB_SHA"
+          SYNC_WEB_WASMER_KERNEL="$PWD/target/qualified-kernel/kernel.wasmer" \
+          LOCAL_COMPOSE_RELEASE_QA=1 \
           SECRET=password \
           PORT=8192 \
           tests/api/local-compose.sh smoke
@@ -135,4 +160,4 @@ jobs:
       - name: Promote validated image
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/promote-image.sh journal-sdk
+        run: .github/scripts/promote-image.sh journal-sdk VERSION musl preferred

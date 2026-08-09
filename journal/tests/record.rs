@@ -90,13 +90,13 @@ fn test_sync_load() {
     assert(
         "(let* ((code '(lambda (state) (define* (self (arg #f)) (if arg arg state))))
                 (node (sync-cons (expression->byte-vector code) (sync-null))))
-           ((sync-eval node #f) 'hello))",
+           ((sync-eval node) 'hello))",
         "hello",
     );
     assert(
         "(let* ((code '(lambda (state) (define* (self (arg #f)) (if arg arg state))))
                 (node (sync-cons (expression->byte-vector code) (sync-null))))
-           (sync-node? ((sync-eval node #f))))",
+           (sync-node? ((sync-eval node))))",
         "#t",
     );
 }

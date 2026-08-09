@@ -13,7 +13,8 @@ Service components of the Synchronic Web monorepo:
 Run the compose stack from the repo root:
 
 ```bash
-COMPOSE_PROJECT_NAME=sync-local SECRET=password \
+COMPOSE_PROJECT_NAME=sync-local SECRET=root-password \
+INTERFACE_SECRET=interface-password ADMIN_PASSWORD=admin-pass \
 HTTP_PORT=8192 HTTPS_PORT=8193 \
 tests/api/local-compose.sh up
 ```
@@ -21,7 +22,8 @@ tests/api/local-compose.sh up
 Run with direct HTTP compose deployment (no TLS):
 
 ```bash
-COMPOSE_PROJECT_NAME=sync-dev SECRET=password \
+COMPOSE_PROJECT_NAME=sync-dev SECRET=root-password \
+INTERFACE_SECRET=interface-password ADMIN_PASSWORD=admin-pass \
 HTTP_PORT=8192 HTTPS_PORT=8193 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
@@ -32,7 +34,8 @@ Run with optional TLS (single compose file; router auto-enables TLS if cert/key 
 COMPOSE_PROJECT_NAME=sync-prod \
 TLS_CERT_HOST_PATH=/absolute/path/to/fullchain.pem \
 TLS_KEY_HOST_PATH=/absolute/path/to/privkey.pem \
-SECRET=password ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
+SECRET=root-password INTERFACE_SECRET=interface-password \
+ADMIN_PASSWORD='<independent-password>' ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 

@@ -2,6 +2,12 @@
 
 This repo has several independent validation layers. Run the checks relevant to the area you changed.
 
+## Compact orchestration
+
+- `scripts/sync-check --changed --base origin/main` conservatively maps committed, staged, unstaged, and untracked changes to existing component checks. Use `--plan` to inspect its selection and `--full` for every profile. Complete logs and a compact report are written under `target/sync-check/`.
+- `scripts/sync-network status|wait-ready|probe|logs|snapshot --project <isolated-name>` provides read-only diagnostics for an existing generated multi-node network. Exact test project names are required and production-like names are rejected. It does not create, restart, or remove containers.
+- Both tools use the local artifact contract documented in [`scripts/README.md`](../scripts/README.md).
+
 ## Core journal and records
 
 - Rust journal tests
@@ -10,8 +16,8 @@ This repo has several independent validation layers. Run the checks relevant to 
   - Command: `cargo test`
 - Scheme record tests
   - Path: repo root
-  - Requires: built `journal-sdk` binary
-  - Command: `./records/tests/test.sh ./journal/target/debug/journal-sdk`
+  - Requires: Rust toolchain with Cargo and C build dependencies
+  - Command: `CARGO_TARGET_DIR=journal/target cargo build --manifest-path records/tests/Cargo.toml && journal/target/debug/records-test --suite records/tests/suite.toml`
 
 ## Services
 
@@ -39,12 +45,24 @@ This repo has several independent validation layers. Run the checks relevant to 
 - Direct non-version changes on `main` are a fallback path and may still rebuild images. Prefer PR branches for release changes.
 - Journal image builds use `cargo-chef` and registry BuildKit cache. Source-only Rust changes can reuse dependency layers; dependency graph changes in `journal/Cargo.toml` or lockfile inputs invalidate the dependency recipe and require a real rebuild per architecture.
 
+## Release QA
+
+- Lightweight release harness and provenance checks
+  - Command: `scripts/sync-check release-qa deploy --jobs 1 --keep-going`
+- Exact fresh single-node journey
+  - Command: `LOCAL_COMPOSE_RELEASE_QA=1 COMPOSE_PROJECT_NAME=sync-release-local SECRET=root-password INTERFACE_SECRET=interface-password ADMIN_PASSWORD=admin-pass tests/api/local-compose.sh smoke`
+- Sticky four-node route qualification and unchanged Journal restart
+  - Command: `CONTAINER_RUNTIME=podman CONTAINER_COMPOSE='podman compose' tests/release-qa/run_sticky_readiness.sh --build`
+  - Notes: requires an exclusive container-heavy lane; preserves an exact image manifest and fails on any post-ready route/proof/counter regression.
+
+See [`tests/release-qa/README.md`](../tests/release-qa/README.md) for exact-image repeat and cleanup requirements.
+
 ## Integrated local stack
 
 - Single-node compose smoke
   - Path: repo root
   - Requires: Docker Compose, Podman Compose, or `podman-compose`; `curl`; Python 3 for smoke helpers
-  - Command: `COMPOSE_PROJECT_NAME=sync-local SECRET=password tests/api/local-compose.sh smoke`
+  - Command: `COMPOSE_PROJECT_NAME=sync-local SECRET=root-password INTERFACE_SECRET=interface-password ADMIN_PASSWORD=admin-pass tests/api/local-compose.sh smoke`
   - Notes: builds local images, starts the general compose stack, runs API/WebDAV checks, and tears the stack down.
 
 - Container image test targets

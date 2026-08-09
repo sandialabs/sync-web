@@ -43,7 +43,7 @@ func TestParseLedgerStateRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Segment{Str("*state*")}
+	want := []Segment{Int(-1), Str("*state*")}
 	if parsed.Namespace != NamespaceLedger || !parsed.Directory || !reflect.DeepEqual(parsed.Path, want) {
 		t.Fatalf("unexpected parse: %#v", parsed)
 	}
@@ -54,7 +54,7 @@ func TestParseLedgerLatestShorthand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Segment{Str("*state*"), Str("alice"), Str("notes.txt")}
+	want := []Segment{Int(-1), Str("*state*"), Str("alice"), Str("notes.txt")}
 	if parsed.Namespace != NamespaceLedger || !reflect.DeepEqual(parsed.Path, want) {
 		t.Fatalf("unexpected parse: %#v", parsed)
 	}
@@ -98,20 +98,20 @@ func TestParseLedgerBridgeShorthand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Segment{Str("*bridge*"), Str("bob"), Str("*state*"), Str("docs"), Str("readme.md")}
+	want := []Segment{Int(-1), Str("bob"), Int(-1), Str("*state*"), Str("docs"), Str("readme.md")}
 	if !reflect.DeepEqual(parsed.Path, want) {
-		t.Fatalf("unexpected path: %#v", parsed.Path)
+		t.Fatalf("unexpected parse: %#v", parsed)
 	}
 }
 
 func TestParseLedgerBridgeExplicitIndexes(t *testing.T) {
-	parsed, err := ParseWebDAVPath("/webdav/ledger/minus/1/bridge/bob/minus/1/state/docs/readme.md")
+	parsed, err := ParseWebDAVPath("/webdav/ledger/2/5/bridge/bob/minus/2/bridge/carol/7/state/docs/readme.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Segment{Int(-1), Str("*bridge*"), Str("bob"), Int(-1), Str("*state*"), Str("docs"), Str("readme.md")}
+	want := []Segment{Int(25), Str("bob"), Int(-2), Str("carol"), Int(7), Str("*state*"), Str("docs"), Str("readme.md")}
 	if !reflect.DeepEqual(parsed.Path, want) {
-		t.Fatalf("unexpected path: %#v", parsed.Path)
+		t.Fatalf("unexpected parse: %#v", parsed)
 	}
 }
 

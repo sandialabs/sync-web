@@ -1,0 +1,95 @@
+FROM docker.io/library/rust@sha256:c993d32d95cc146bd12c84d66f0b924a6a96f3988325f39c144f2f9893dea120 AS builder
+
+ARG TARGETARCH
+ARG SOURCE_COMMIT
+ARG SOURCE_TREE
+ARG SOURCE_INPUTS_SHA256
+ARG AOT_SHA256
+ENV CC=clang \
+    CXX=clang++ \
+    CARGO_INCREMENTAL=0 \
+    CARGO_BUILD_JOBS=4 \
+    SYNC_WEB_WASMER_KERNEL=/src/journal/kernel.wasmer \
+    SYNC_WEB_WASMER_KERNEL_SHA256=$AOT_SHA256
+
+RUN test "$TARGETARCH" = amd64 && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    binutils=2.40-2 \
+    build-essential=12.9 \
+    clang=1:14.0-55.7~deb12u1 \
+    cmake=3.25.1-1 \
+    file=1:5.44-3 \
+    libclang-dev=1:14.0-55.7~deb12u1 \
+    libssl-dev=3.0.20-1~deb12u2 \
+    pkg-config=1.8.1-1 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/journal
+COPY . /src
+RUN test "$SOURCE_COMMIT" != unknown && \
+    test "$SOURCE_TREE" != unknown && \
+    test "$SOURCE_INPUTS_SHA256" != unknown && \
+    test "$(sha256sum Cargo.lock | awk '{print $1}')" = d69e38d29ecabd5ae3d62cf2a7c018b292a9e3a40102a0547971bf0d03e34854 && \
+    test "$(sha256sum kernel.wasmer | awk '{print $1}')" = "$AOT_SHA256" && \
+    scripts/check-journal-image-config.py && \
+    scripts/check-clang-feature-graph.sh non-musl > /tmp/clang-feature-tree.txt && \
+    rustc -Vv > /tmp/rustc.txt && cargo -Vv > /tmp/cargo.txt && dpkg-query -W > /tmp/builder-packages.txt && \
+    cargo build --release --locked --features wasmer-evaluator --bin journal-sdk --bin ledger && \
+    RUST_TEST_THREADS=1 cargo test --release --locked --features wasmer-evaluator && \
+    cp target/release/journal-sdk /tmp/journal-sdk && \
+    cp target/release/ledger /tmp/ledger && \
+    sha256sum /tmp/journal-sdk /tmp/ledger > /tmp/release-binaries.sha256 && \
+    file /tmp/journal-sdk /tmp/ledger > /tmp/release-binaries.file && \
+    ldd /tmp/journal-sdk > /tmp/journal-sdk.ldd && \
+    ldd /tmp/ledger > /tmp/ledger.ldd && \
+    readelf -d /tmp/journal-sdk > /tmp/journal-sdk.dynamic && \
+    readelf -d /tmp/ledger > /tmp/ledger.dynamic && \
+    readelf -l /tmp/journal-sdk > /tmp/journal-sdk.program-headers && \
+    readelf -l /tmp/ledger > /tmp/ledger.program-headers
+
+FROM docker.io/library/debian@sha256:74a21da88cf4b2e8fde34558376153c5cd80b00ca81da2e659387e76524edc73
+
+ARG TARGETARCH
+ARG SOURCE_COMMIT
+ARG SOURCE_TREE
+ARG SOURCE_INPUTS_SHA256
+ARG AOT_SHA256
+RUN test "$TARGETARCH" = amd64 && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates=20230311+deb12u1 \
+    libgcc-s1=12.2.0-14+deb12u1 \
+    libssl3=3.0.20-1~deb12u2 \
+    libstdc++6=12.2.0-14+deb12u1 \
+    wget=1.21.3-1+deb12u1 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv
+COPY --from=builder /tmp/journal-sdk /srv/journal-sdk
+COPY journal/kernel.wasmer /srv/kernel.wasmer
+COPY --from=builder /tmp/rustc.txt /srv/build-provenance/rustc.txt
+COPY --from=builder /tmp/cargo.txt /srv/build-provenance/cargo.txt
+COPY --from=builder /tmp/builder-packages.txt /srv/build-provenance/builder-packages.txt
+COPY --from=builder /tmp/clang-feature-tree.txt /srv/build-provenance/clang-feature-tree.txt
+COPY --from=builder /tmp/release-binaries.sha256 /srv/build-provenance/release-binaries.sha256
+COPY --from=builder /tmp/release-binaries.file /srv/build-provenance/release-binaries.file
+COPY --from=builder /tmp/journal-sdk.ldd /srv/build-provenance/journal-sdk.ldd
+COPY --from=builder /tmp/ledger.ldd /srv/build-provenance/ledger.ldd
+COPY --from=builder /tmp/journal-sdk.dynamic /srv/build-provenance/journal-sdk.dynamic
+COPY --from=builder /tmp/ledger.dynamic /srv/build-provenance/ledger.dynamic
+COPY --from=builder /tmp/journal-sdk.program-headers /srv/build-provenance/journal-sdk.program-headers
+COPY --from=builder /tmp/ledger.program-headers /srv/build-provenance/ledger.program-headers
+
+ENV ROCKET_WORKERS=4 \
+    SYNC_WEB_WASMER_KERNEL=/srv/kernel.wasmer \
+    SYNC_WEB_WASMER_KERNEL_SHA256=$AOT_SHA256
+LABEL org.opencontainers.image.revision="$SOURCE_COMMIT" \
+      sync-web.source-tree="$SOURCE_TREE" \
+      sync-web.source-inputs-sha256="$SOURCE_INPUTS_SHA256" \
+      sync-web.lock-sha256="d69e38d29ecabd5ae3d62cf2a7c018b292a9e3a40102a0547971bf0d03e34854" \
+      sync-web.aot-sha256="$AOT_SHA256" \
+      sync-web.toolchain="rustc 1.96.0 ac68faa20 x86_64-unknown-linux-gnu; cargo 1.96.0 30a34c682" \
+      sync-web.variant="debian-bookworm-slim-glibc"
+
+RUN test "$(sha256sum /srv/kernel.wasmer | awk '{print $1}')" = "$AOT_SHA256" && \
+    /srv/journal-sdk --version && test "$(/srv/journal-sdk --evaluate '(+ 1 2)')" = 3
+
+ENTRYPOINT ["/srv/journal-sdk"]
+CMD ["--port", "80", "--database", "db"]

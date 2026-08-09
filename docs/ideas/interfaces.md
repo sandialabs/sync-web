@@ -8,7 +8,7 @@ different client type. The journal itself is never exposed directly.
 Primary interface for AI agents and coding tools (Claude Code, Cursor, etc.).
 
 - Transport: HTTP/SSE — no client install required; agents connect to a URL
-- **Tools**: journal operations (`get`, `set!`, `batch!`, `resolve`, etc.)
+- **Tools**: dedicated journal operations (`get`, `set!`, `get-batch`, `set-batch!`, `resolve`, etc.) plus staged `call!` programs for application-specific composition
 - **Resources**: S7 style guide, interface.scm API reference, architecture docs, library
   index — injected into model context automatically at session start
 - **Prompts**: workflow templates for common sync-web patterns

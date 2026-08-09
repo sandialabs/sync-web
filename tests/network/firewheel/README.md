@@ -27,13 +27,14 @@ Simulates social agents that interact with the ledger system, generating realist
 
 **Features:**
 - Configurable agent connectivity and activity levels
-- Variable agent population sizes
-- Peer-to-peer communication
-- Realistic social interaction patterns
+- Configurable deterministic users with per-user public/private key splits
+- Same-user private authorization over bounded walks, including finite journal revisits, with exact-route and different-user denial
+- Origin-local retention of verified remote proofs
+- Independent per-user in-place activity and accounting without moving or creating fixture keys
 
 ## Quick Start
 
-Run a basic experiment with 4 journals and 4 agents running at a period of one step every 4 seconds, each with network monitoring, 2 outgoing peers and 32 key-value pairs per node, each value 8 words long, and serial activity enabled (`ACTIVITY=0`)
+Run a basic experiment with 4 journals and 4 agents running at a period of one step every 4 seconds, each with network monitoring, 2 outgoing peers and 32 key-value pairs per node, each value 8 words long, and one controlled activity cycle every 2 seconds:
 
 ```bash
 firewheel experiment -r synchronic_web.general_journal:4:2 synchronic_web.social_agent:4:32:2:8 synchronic_web.network_monitor control_network minimega.launch
@@ -59,13 +60,16 @@ To access the Grafana monitoring dashboard:
 ### Social Agent Parameters
 - **Connectivity**: Number of peer connections per agent
 - **Size**: Agent population size
-- **Activity**: Seconds between activity cycles. `0` means serial unpaced mode and is the current default.
+- **Activity**: Seconds between per-user activity cycles. The default is `4`; `0` removes the delay for maximum-throughput saturation traffic. Use `ACTIVITY_DISABLED=1` for setup-only runs.
+- **Users**: Number of deterministic non-admin fixture users (compose/runtime `USERS`).
+- **Segments**: Maximum federated walk length for same-user private authority; bounded walks may revisit journals (compose/runtime `SEGMENTS`, default `2`).
+- **Batch**: Optional positive final social-agent argument/runtime `BATCH`. When present, continuous activity uses same-route unique `get-batch`/`set-batch` and latest-index `pin-batch`/`unpin-batch`; setup remains scalar. It must not exceed `1024` or any selectable public/private group capacity. Metrics report logical path operations separately from HTTP requests.
 
 ## Example Configurations
 
 ### Small Test Environment
 ```bash
-firewheel experiment -r synchronic_web.general_journal:2:2 synchronic_web.network_monitor synchronic_web.social_agent:1:16:0 control_network minimega.launch
+firewheel experiment -r synchronic_web.general_journal:2:2 synchronic_web.network_monitor synchronic_web.social_agent:1:16:4 control_network minimega.launch
 ```
 
 ### Medium Scale Simulation

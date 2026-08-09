@@ -1,0 +1,45 @@
+\section{History and Entanglement}
+\label{sec:history-entanglement}
+\label{sec:historical-structure}
+\label{sec:bridges}
+
+\subsection{Integrity Across Boundaries}
+
+Organizations already exchange information through shared clouds, data lakes, APIs, replicated databases, signed documents, and ledgers. Each arrangement chooses a center of gravity. A shared platform centralizes custody and policy. Replication creates additional copies while usually aiming at one application state. Signed files travel independently but carry limited context about succession. Webs of trust connect keys and attestations while leaving application data to other systems. Blockchain bridges transfer claims between consensus domains and inherit the complexity of both sides. Many important relationships require a different shape. A manufacturer and buyer, laboratory and regulator, publisher and archive, or two neighboring communities may each need its own history. They still need evidence that a foreign state existed before a later local event, and they may need that evidence after one participant becomes unreachable. The desired result connects their histories while each institution retains its own governance. Secure timelines provide the starting point. A service repeatedly commits its state into a one-way succession, allowing later authenticators to establish the order of earlier states. Timeline entanglement carries signed authenticators across service boundaries and incorporates them into later foreign authenticators~\cite{Maniatis2002timeline}. This creates portable temporal mappings: the past of one service becomes an input to the future of another. Synchronic Web bridges apply that principle to histories whose states contain ordinary resources and executable interpretation.
+
+\subsection{A Bridge Between Histories}
+
+A journal first turns local mutation into a committed step. Applications accumulate a proposed state, inspect it, and then ask the journal to advance; the step compares the proposal with the previous head, records declared mutation metadata and explicit state such as time and retained remote heads, incorporates eligible evidence, constructs a canonical pre-signature view, signs its digest, and advances the durable root. An authorized signing-key transition also requires a step even when application state is unchanged. Time, remote responses, randomness, and operator choices enter as explicit values under the normative model, while applications needing exhaustive provenance store durable event objects or batch descriptions. \Cref{fig:step-anatomy} shows the logical result: application state, declared transition information, retained foreign heads, time evidence, identity and key-lineage material, and signatures share one integrity-protected tree. Algorithm~\ref{alg:commit-step} exposes the signing sequence by inserting the stable identity commitment, current rotation index and optional transition, journal and interface descriptor fields, blanking both generic and journal-namespaced public-key and signature fields to create the canonical view, signing its digest, and finally filling those signing fields.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{0.96\textwidth}{!}{\input{figures/step-anatomy}}
+  \caption{Committed Step Anatomy}
+  \label{fig:step-anatomy}
+\end{figure}
+
+\input{algorithms/commit-step}
+
+A bridge is a reciprocal signed-head-retention relationship. The journal that creates it becomes the sole ongoing synchronization initiator, and the acceptor returns its own signed head in the same replay-accepted exchange; this scheduling role supports private or intermittently reachable journals through outbound connectivity and keeps commit cadence under local control. As shown in \cref{fig:bridge-reciprocal}, the initiator sends its stable identity and head signed by its current journal key, and the acceptor verifies nonempty history, the identity bound to the relationship, any predecessor-authorized key transition from its retained checkpoint, the committed descriptor endpoint, monotonic index, and predecessor continuity before staging the new head and returning corresponding evidence. The initiator performs the same checks locally. The implementation rejects older heads, same-index forks, unrecognized identities or key transitions, and newer heads that omit the retained predecessor digest. Acceptance records the foreign head as staged local state and returns an \texttt{accepted-index}; incorporation occurs only when a later local \texttt{step!} includes that head in the receiving journal's committed tree. If B incorporates A's head $A_i$ into $B_j$, then $A_i$ precedes $B_j$, and $B_j$ together with an inclusion proof becomes evidence that B incorporated A. Each journal may advance immediately, slowly, or after administrative review, so repeated exchange creates a weave of coarse ordering relations while the journals retain distinct sequences through disagreement. Re-establishing a locally matching relationship may request a signed, read-only establishment check: only an exact reciprocal descriptor, identity, and pair of retained indexes returns \texttt{established?}; any difference falls back to the full exchange that advances or repairs the relationship. Ordinary scheduled synchronization continues to exchange and apply heads.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/bridge-reciprocal-sequence}}
+  \caption{Bidirectional Head Exchange}
+  \label{fig:bridge-reciprocal}
+\end{figure}
+
+\subsection{Retention and Practicality}
+
+Historical identity and historical possession are separate choices. A journal may retain recent heads in full while permanent history keeps chain continuity, signatures, selected proofs, and explicit pins; pruning replaces released material with stumps, pinning merges a chosen slice into the evidence held for a historical head, and unpinning releases that local obligation. A finite recent-history window is therefore a possession policy rather than an archival promise: shrinking it immediately releases newly excluded unpinned material, while later widening changes future retention without reconstructing what was released. Preservation becomes purpose-driven: a buyer can pin an inspection report and its definitions, an archive can retain a complete site capture, and a witness can store signed heads and incorporation receipts. Each role pays for the evidence it values, immutable sharing reduces duplication among related states, and replication and media renewal turn local retention into long-term availability. Bridge operation exposes a similar set of practical controls. Synchronization cadence determines temporal resolution and network cost, while the signed-head and control-path protocol determines the public material exchanged. Locked-down journals may preapprove a stable journal identity; open journals may automatically accept valid creator-initiated relationships whose creator retains initiation responsibility. Repeated synchronization safely confirms or advances acceptance, local stepping remains independent of remote traffic, and a later signed head with an inclusion proof establishes incorporation.
+
+\subsection{History at Network Scale}
+
+Sparse bridges turn entanglement into a network property. A foreign head may itself contain other incorporated heads, so historical reachability composes recursively: from one selected journal, a verifier can follow committed checkpoints across several relationships while preserving the path by which each piece of evidence became known. The result is a Web of historical viewpoints, each retaining its own timeline. At this scale witnesses become central because a journal can sign distinct branches for isolated peers; when witnesses compare heads or later histories incorporate conflicting views, the signed divergence becomes durable evidence. Transparency overlays and gossip develop this comparison as a general accountability technique~\cite{Chase2016transparency}; entangled journals contribute the retained cross-history checkpoints, signatures establish authorship of each branch, and witness topology determines how quickly divergence becomes visible. \Cref{fig:entangled-state} captures the two forms of change now in play. Along one timeline, the normative explicit-input model produces a deterministic successor. Across timelines, a foreign head enters another journal's committed state and establishes an ordering edge. Together they allow computation to remain local while evidence becomes historically connected. A large network will evolve while these histories accumulate: object formats, authorization rules, query languages, and application protocols will change on different schedules, and historical evidence remains most useful when the definitions needed to interpret it travel with the state itself. This change-management problem leads to the next layer, self-encoding structure.
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{\textwidth}{!}{\input{figures/entangled-state}}
+  \caption{Computation and Entangled State}
+  \label{fig:entangled-state}
+\end{figure}

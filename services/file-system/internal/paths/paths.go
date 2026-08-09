@@ -106,6 +106,9 @@ func parseLedger(parts []string, isDir bool) (ParsedPath, error) {
 	if len(rest) != 0 {
 		return ParsedPath{}, fmt.Errorf("unexpected trailing ledger path segments: %s", strings.Join(rest, "/"))
 	}
+	if len(path) == 0 || !path[0].IsInt {
+		path = append([]Segment{Int(-1)}, path...)
+	}
 	return ParsedPath{Namespace: NamespaceLedger, Path: path, Directory: isDir}, nil
 }
 
@@ -134,6 +137,9 @@ func parseLedgerSynthetic(parts []string, isDir bool) (ParsedPath, bool, error) 
 
 func parseBridgeSynthetic(parts []string, prefix []Segment) (ParsedPath, bool, error) {
 	if len(parts) == 1 {
+		if len(prefix) == 0 {
+			prefix = []Segment{Int(-1)}
+		}
 		path := append(append([]Segment{}, prefix...), Str("*bridge*"))
 		return ParsedPath{Namespace: NamespaceLedger, Path: path, Directory: true}, true, nil
 	}
@@ -199,7 +205,10 @@ func parseLedgerHead(parts []string) ([]Segment, []string, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		path := []Segment{Str("*bridge*"), Str(name)}
+		path := []Segment{Str(name)}
+		if len(tail) == 0 || !tail[0].IsInt {
+			path = append(path, Int(-1))
+		}
 		path = append(path, tail...)
 		return path, rest, nil
 	default:
