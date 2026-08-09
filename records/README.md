@@ -1,53 +1,64 @@
 # Synchronic Web Records
 
-This directory contains reusable record artifacts, primarily Lisp/Scheme modules and tests, for use with the Synchronic Web Journal SDK (`journal/`). The active modules here provide the standard object system, storage structures, ledger logic, and authenticated interface layer used by the current sync-record stack.
+This directory contains the Scheme object and interface composition used by the
+Synchronic Web Journal SDK. Durable state is built from sync nodes; the Rust
+journal supplies persistence, evaluation, cryptography, serialization tracing,
+and HTTP transport primitives.
 
-## Contents
+Read [`LANGUAGE.md`](LANGUAGE.md) before changing active record code.
 
-- `lisp/`
-  - `root.scm`: Installs the root object and admin-controlled call/query/step hooks.
-  - `standard.scm`: The shared object model used by the other modules. Public object boundaries now work primarily on `sync-node` values, with explicit `(sync-eval node #f)` where a live object is needed internally. `make` builds an uninitialized shell and `init` applies `*init*` when constructor arguments are needed.
-  - `tree.scm`, `linear-chain.scm`, `log-chain.scm`, `ledger.scm`, `interface.scm`: Active record modules and data structures. `ledger.scm` now stores its configuration directly rather than delegating to a separate configuration class.
-  - `archive/`: Historical or auxiliary Scheme modules retained for reference.
-- `tests/`
-  - Direct test harnesses such as `test-standard.scm`, `test-tree.scm`, `test-chain.scm`, `test-ledger.scm`, and `test-interface.scm`.
-  - `test.sh`: Shell script to run the test suite.
-  - `README.md`: Documentation for running and developing tests.
+## Active modules
 
-## Usage
+- `lisp/root.scm` — journal Root and privileged query/step hooks.
+- `lisp/standard.scm` — shared object compiler, deep object operations, and
+  structural proof serialization facade.
+- `lisp/tree.scm` — Tree-native byte-vector values and Merkle directory paths.
+- `lisp/linear-chain.scm` and `lisp/log-chain.scm` — history/proof chains.
+- `lisp/ledger.scm` — Stage, permanent/temporary history, proofs, retention,
+  signatures, and anchored peer evidence.
+- `lisp/federation.scm` — reciprocal bridge operations, routing, networking,
+  signed invocation transport/authentication, and peer operational state.
+- `lisp/authorization.scm` — path-scoped `get`, `set!`, and `resolve` policy.
+- `lisp/interface.scm` — fresh installation and the authenticated external API.
 
-These Scheme modules are intended to be loaded into a running Synchronic Web Journal instance, either at startup or dynamically via the API. In the current layout, `root.scm` provides the outer journal root layer and `interface.scm` installs the authenticated record interface backed by `ledger.scm` and the supporting classes.
+`lisp/archive/` is historical reference material and is not installed by the
+active stack.
 
-### Example: Using with the Journal SDK
+## Installation
 
-1. **Build and run the Journal SDK**  
-   See `journal/README.md` for build instructions.
+Use `deploy/compose/general/run.sh`, `deploy/compose/ledger/run.sh`, or the
+bundled `deploy/bin/ledger` executable. These entry points pass all active class
+forms to `interface.scm` in the required order.
 
-2. **Load record modules**  
-   You can load the provided Scheme files into the journal using the web interface or by passing them as arguments to the SDK. In practice, `interface.scm` is the entry point that installs and wires together the other active modules.
-   For example:
-   ```
-   ./journal-sdk -e "($( cat lisp/interface.scm ) #t \"admin-pass\" \"interface-pass\" 4 \
-     '$( cat lisp/root.scm ) '$( cat lisp/standard.scm ) '$( cat lisp/log-chain.scm ) \
-     '$( cat lisp/tree.scm ) '$( cat lisp/ledger.scm ))"
-   ```
+Sync Web 1.5 is fresh-install-only. The Interface rejects every nonempty root
+before mutation; the Compose runners additionally record and check the platform
+version in each fresh database volume. Preserve older databases with their exact
+runtime for read-only historical access rather than loading them with 1.5.
 
-3. **Invoke record/ledger operations**  
-   Use the installed query interface to call functions such as:
-   ```
-   ((function set!) (arguments ((path (*state* my data path)) (value 42))) (authentication "interface-pass"))
-   ((function get) (arguments ((path (*state* my data path)))) (authentication "interface-pass"))
-   ```
+## Object and execution boundaries
 
-## Notes
-
-- The current codebase prefers `sync-node` values at module boundaries. In particular, `standard 'make` returns an uninitialized shell node, while `standard 'init` returns an initialized node.
-- When a caller needs the loaded object form, use `(sync-eval node #f)` explicitly.
+- `standard.make` returns an uninitialized object node; `standard.init` invokes
+  `*init*` and returns the initialized node.
+- `(sync-eval node)` takes exactly one argument and loads object code in the
+  current environment.
+- Installed Root, Interface, Standard, Ledger, Federation, and Authorization are
+  trusted host composition.
+- Tree, Chain, custom, peer, and historical behavior executes through explicit
+  `sync-let` child boundaries.
+- User payloads are byte vectors stored directly by Tree. `expression?` is an
+  Interface codec, not a durable metadata or Document wrapper.
 
 ## Testing
 
-See `tests/README.md` for more details on running and developing tests.
+The canonical suite is [`tests/suite.toml`](tests/suite.toml). It runs each case
+in an isolated process:
 
-## Contributing
+```sh
+CARGO_TARGET_DIR=journal/target cargo build --manifest-path records/tests/Cargo.toml
+journal/target/debug/records-test --suite records/tests/suite.toml --jobs 13
+```
 
-Contributions of new record modules, bug fixes, and test cases are welcome! Please open issues or pull requests on GitHub.
+Unit cases live under `tests/unit/`; deterministic multi-journal cases live
+under `tests/interface/`. See [`tests/README.md`](tests/README.md) and
+[`tests/interface/README.md`](tests/interface/README.md) for focused commands
+and scheduler semantics.

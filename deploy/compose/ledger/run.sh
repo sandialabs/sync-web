@@ -1,7 +1,21 @@
 #!/bin/sh
+set -e
+
+PLATFORM_VERSION="${SYNC_WEB_VERSION:-}"
+VERSION_MARKER="database/.sync-web-version"
+
+if [ -z "$PLATFORM_VERSION" ]; then
+    echo "Must set the SYNC_WEB_VERSION variable" >&2
+    exit 1
+fi
 
 if [ -z "$SECRET" ]; then
-    echo Must set the SECRET variable""
+    echo "Must set the SECRET variable" >&2
+    exit 1
+fi
+
+if [ -z "$INTERFACE_SECRET" ]; then
+    echo "Must set the INTERFACE_SECRET variable" >&2
     exit 1
 fi
 
@@ -38,10 +52,27 @@ build_admins_list() {
     OLD_IFS="$IFS"
     IFS=","
     for name in ${INTERFACE_ADMINS:-}; do
-        result="$result '$name"
+        if [ -n "$result" ]; then
+            result="$result "
+        fi
+        result="$result(*state* $name)"
     done
     IFS="$OLD_IFS"
-    echo "(list$result)"
+    echo "($result)"
+}
+
+checked_evaluate() {
+    label="$1"
+    expected="$2"
+    expr="$3"
+    if ! output=$(printf '%s' "$expr" | RUST_LOG=$RUST_LOG ./journal-sdk -e - -d database); then
+        echo "$label failed; result omitted" >&2
+        return 1
+    fi
+    if [ "$output" != "$expected" ]; then
+        echo "$label failed; result omitted" >&2
+        return 1
+    fi
 }
 
 run_startup() {
@@ -51,28 +82,41 @@ run_startup() {
     chain=$( cat "$(resolve_lisp_file log-chain.scm)" )
     tree=$( cat "$(resolve_lisp_file tree.scm)" )
     ledger=$( cat "$(resolve_lisp_file ledger.scm)" )
-    document=$( cat "$(resolve_lisp_file document.scm)" )
+    federation=$( cat "$(resolve_lisp_file federation.scm)" )
+    authorization=$( cat "$(resolve_lisp_file authorization.scm)" )
     interface=$( cat "$(resolve_lisp_file interface.scm)" )
     admins=$( build_admins_list )
-    interface_url="${INTERFACE:-$SECRET}"
+    interface_url="${INTERFACE:-http://localhost:${JOURNAL_PORT:-8192}/interface}"
     journal_name="${JOURNAL_NAME:-$interface_url}"
-    bridge_publish="${BRIDGE_PUBLISH:-push}"
-    bridge_subscribe="${BRIDGE_SUBSCRIBE:-pull}"
-    bridge_policy="((publish $bridge_publish) (subscribe $bridge_subscribe))"
-    config="((clear? $clear_flag) (root-secret \"$SECRET\") (interface-secret \"$SECRET\") (admins $admins) (window $WINDOW) (root $root) (interface \"$interface_url\") (name \"$journal_name\") (push-enabled? #t) (bridge-policy $bridge_policy))"
-    expr="($interface $config '$standard '$chain '$tree '$ledger '$document)"
+    config="((clear? $clear_flag) (root-secret \"$SECRET\") (interface-secret \"$INTERFACE_SECRET\") (admins $admins) (window $WINDOW) (root $root) (interface \"$interface_url\") (name \"$journal_name\"))"
+    expr="($interface $config '$standard '$chain '$tree '$ledger '$federation '$authorization)"
     if [ "$clear_flag" = "#f" ]; then
         expr="(*eval* \"$SECRET\" $expr)"
     fi
-    printf '%s' "$expr" | RUST_LOG=$RUST_LOG ./journal-sdk -e - -d database
+    checked_evaluate "Journal record installation" '"Installed interface"' "$expr"
 }
 
+fresh_install=0
 if [ -d database ] && [ -n "$(find database -mindepth 1 -print -quit 2>/dev/null)" ]; then
+    if [ ! -f "$VERSION_MARKER" ]; then
+        echo "Existing database predates the fresh-only $PLATFORM_VERSION layout; preserve it and use a new volume" >&2
+        exit 1
+    fi
+    installed_version=$(cat "$VERSION_MARKER")
+    if [ "$installed_version" != "$PLATFORM_VERSION" ]; then
+        echo "Database version $installed_version cannot be opened by fresh-only $PLATFORM_VERSION" >&2
+        exit 1
+    fi
     if [ "$JOURNAL_UPDATE" = "1" ]; then
         run_startup "#f"
     fi
 else
     run_startup "#t"
+    fresh_install=1
+fi
+
+if [ "$fresh_install" = "1" ]; then
+    printf '%s\n' "$PLATFORM_VERSION" > "$VERSION_MARKER"
 fi
 
 step="(*step* \"$SECRET\")"

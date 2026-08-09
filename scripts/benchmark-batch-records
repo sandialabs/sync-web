@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""Reproducible Wasmer scalar-versus-batch Records benchmark.
+
+The benchmark runs each arm in a fresh deterministic one-journal scenario through
+the required verified AOT, uses release binaries, counterbalances arm order, and
+records complete /usr/bin/time resource output. It is local and starts no containers.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import statistics
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+COUNTS = (1, 32, 1024)
+OPERATIONS = ("get", "resolve", "trace")
+MODES = ("scalar", "batch")
+REPEATS = {1: 100, 32: 10, 1024: 1}
+RECORD_SOURCES = (
+    "root.scm", "standard.scm", "log-chain.scm", "tree.scm", "ledger.scm",
+    "federation.scm", "authorization.scm", "interface.scm",
+)
+
+
+def source(operation: str, mode: str, count: int, repeats: int) -> str:
+    indexes = list(range(count))
+    paths = "(" + " ".join(f"(*state* bench {i})" for i in indexes) + ")"
+    committed = "(" + " ".join(f"(-1 *state* bench {i})" for i in indexes) + ")"
+    actions: list[str] = []
+    expected_items = " ".join(
+        f"((path (*state* bench {i})) (content {i}))" for i in indexes
+    )
+    expected_committed = " ".join(
+        f"((path (-1 *state* bench {i})) (content {i}))" for i in indexes
+    )
+    if mode != "setup":
+        for _ in range(repeats):
+            if mode == "scalar":
+                for i in indexes:
+                    if operation == "get":
+                        call = f"((*journal* journal-1 'get) '(*state* bench {i}) :expression? #t)"
+                        expected = str(i)
+                    elif operation == "resolve":
+                        call = (
+                            f"((*journal* journal-1 'resolve) '(-1 *state* bench {i}) "
+                            ":pinned? #f :proof? #f :expression? #t)"
+                        )
+                        expected = str(i)
+                    else:
+                        call = (
+                            f"((*journal* journal-1 'trace) "
+                            f"'((index -1) (path (*state* bench {i}))))"
+                        )
+                        expected = "serialization?"
+                    actions.append(f"    (test-submit {call} :expect {expected})")
+            else:
+                if operation == "get":
+                    call = f"((*journal* journal-1 'get-batch) '{paths} :expression? #t)"
+                    expected = f"'((results ({expected_items})))"
+                elif operation == "resolve":
+                    call = (
+                        f"((*journal* journal-1 'resolve-batch) '{committed} "
+                        ":pinned? #f :expression? #t)"
+                    )
+                    expected = f"'((results ({expected_committed})))"
+                else:
+                    call = (
+                        f"((*journal* journal-1 'trace-batch) "
+                        f"'((index -1) (paths {paths})))"
+                    )
+                    expected = "serialization?"
+                actions.append(f"    (test-submit {call} :expect {expected})")
+    trace_setup = ""
+    if operation == "trace":
+        internal = "(" + " ".join(
+            f"(0 *state* bench {i})" for i in indexes
+        ) + ")"
+        members = "(" + " ".join(
+            f"(0 (*state* bench {i}))" for i in indexes
+        ) + ")"
+        expected_values = " ".join(map(str, indexes))
+        trace_setup = f"""    ;; Both public arms must select these exact concrete committed paths.
+    (if (not (equal? (map (lambda (path) (cons -1 path)) paths)
+                     '{committed}))
+        (error 'benchmark-error "Scalar and batch trace paths differ"))
+    (define (serialization? result)
+      (and (list? result) (pair? result)
+           (let loop ((entries result))
+             (or (null? entries)
+                 (and (pair? (car entries))
+                      (= (length (car entries)) 2)
+                      (symbol? (caar entries))
+                      (pair? (cadar entries))
+                      (memq (car (cadar entries)) '(c s p))
+                      (loop (cdr entries)))))))
+    ;; Validate the exact common anchor, digest, and every requested member in
+    ;; the Journal evaluator, where strict deserialization primitives live.
+    (test-submit
+      (raw journal-1
+           '(*call* "pass-1"
+                    (lambda (root)
+                      (let* ((standard
+                              (sync-eval
+                               ((root 'get) '(root object standard))))
+                             (ledger
+                              (sync-eval
+                               ((root 'get) '(root object ledger))))
+                             (paths '{internal})
+                             (members '{members})
+                             (batch
+                              ((standard 'deserialize)
+                               ((ledger 'trace-batch) paths)))
+                             (scalars
+                              (map
+                               (lambda (path)
+                                 ((standard 'deserialize)
+                                  ((ledger 'trace) path)))
+                               paths)))
+                        (cons
+                         (and (not (null? scalars))
+                              (let loop ((proofs scalars))
+                                (or (null? proofs)
+                                    (and (equal? (sync-digest batch)
+                                                 (sync-digest (car proofs)))
+                                         (loop (cdr proofs))))))
+                         (map
+                          (lambda (path)
+                            (byte-vector->expression
+                             ((standard 'deep-get) batch path)))
+                          members))))))
+      :expect '(#t {expected_values}))
+"""
+    return f"""(lambda (make-interface-harness)
+  (with-let (make-interface-harness :journals 1 :users '(alice))
+    (define indexes '({' '.join(map(str, indexes))}))
+    (define paths '{paths})
+    (test-submit
+      ((*journal* journal-1 'set-batch!)
+       `((paths ,paths) (values ,indexes) (expression? #t)))
+      :expect #t)
+    (test-submit ((*journal* journal-1 'step!)) :expect 1)
+{trace_setup}{chr(10).join(actions)}
+    (test-report)))
+"""
+
+
+def parse_time(path: Path) -> dict[str, float]:
+    text = path.read_text()
+    elapsed = re.search(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): (\d+):(\d+\.\d+)", text)
+    if not elapsed:
+        raise RuntimeError(f"cannot parse elapsed time from {path}")
+    value = lambda label: float(re.search(rf"{re.escape(label)}: ([0-9.]+)", text).group(1))  # type: ignore[union-attr]
+    return {
+        "wall_seconds": int(elapsed.group(1)) * 60 + float(elapsed.group(2)),
+        "user_seconds": value("User time (seconds)"),
+        "system_seconds": value("System time (seconds)"),
+        "max_rss_kib": value("Maximum resident set size (kbytes)"),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=ROOT / "target" / "batch-records-benchmark")
+    parser.add_argument("--binary", type=Path, help="prebuilt release records-test")
+    parser.add_argument("--pairs", type=int, default=2)
+    parser.add_argument("--quick", action="store_true", help="one pair at counts 1 and 32")
+    parser.add_argument("--plan", action="store_true")
+    args = parser.parse_args()
+    counts = COUNTS[:2] if args.quick else COUNTS
+    pairs = 1 if args.quick else args.pairs
+    if pairs < 1:
+        parser.error("--pairs must be positive")
+    plan = [
+        {"pair": pair, "operation": operation, "count": count, "mode": mode,
+         "repeats": REPEATS[count]}
+        for pair in range(1, pairs + 1)
+        for operation in OPERATIONS
+        for count in counts
+        for mode in (("scalar", "batch") if pair % 2 else ("batch", "scalar"))
+    ]
+    if args.plan:
+        print(json.dumps(plan, indent=2))
+        return 0
+
+    for name in ("SYNC_WEB_WASMER_KERNEL", "SYNC_WEB_WASMER_KERNEL_SHA256"):
+        if not os.environ.get(name):
+            raise SystemExit(f"{name} is required for Wasmer benchmark qualification")
+
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    binary = args.binary.resolve() if args.binary else ROOT / "journal" / "target" / "release" / "records-test"
+    if not args.binary:
+        env = os.environ.copy()
+        env["CARGO_TARGET_DIR"] = str(ROOT / "journal" / "target")
+        subprocess.run(
+            ["cargo", "build", "--release", "--manifest-path", str(ROOT / "records/tests/Cargo.toml")],
+            cwd=ROOT, env=env, check=True,
+        )
+    if not binary.is_file():
+        raise SystemExit(f"records-test not found: {binary}")
+
+    common = [
+        str(ROOT / "records/tests/interface/interface-harness.scm"), "SOURCE",
+        *(str(ROOT / "records/lisp" / name) for name in RECORD_SOURCES),
+    ]
+    rows: list[dict[str, object]] = []
+    for item in plan:
+        label = f"{item['operation']}-{item['mode']}-{item['count']}-p{item['pair']}"
+        scenario = output / f"{label}.scm"
+        scenario.write_text(source(
+            str(item["operation"]), str(item["mode"]), int(item["count"]), int(item["repeats"])
+        ))
+        command = [str(binary), *common]
+        command[2] = str(scenario)
+        stdout = output / f"{label}.stdout"
+        stderr = output / f"{label}.stderr"
+        timing = output / f"{label}.time"
+        started = time.time()
+        with stdout.open("wb") as out, stderr.open("wb") as err:
+            completed = subprocess.run(
+                ["/usr/bin/time", "-v", "-o", str(timing), *command],
+                cwd=ROOT, stdout=out, stderr=err,
+            )
+        if completed.returncode != 0:
+            raise SystemExit(f"{label} failed; see {stderr}")
+        values = parse_time(timing)
+        rows.append({
+            **item, **values, "label": label, "started_unix": started,
+            "stdout_sha256": hashlib.sha256(stdout.read_bytes()).hexdigest(),
+        })
+
+    identity = {
+        "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip(),
+        "binary": str(binary),
+        "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        "pairs": pairs,
+        "counts": counts,
+        "semantic_contract": {
+            "get": "exact requested staged values",
+            "resolve": "exact requested committed paths and values",
+            "trace": "identical concrete indexed paths; exact proof digest and every member",
+        },
+        "rows": rows,
+    }
+    (output / "results.json").write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
+    lines = ["# Scalar versus batch Records benchmark", "", f"Commit: `{identity['commit']}`", "",
+             "| operation | count | mode | pair | wall s | user s | system s | RSS KiB |",
+             "|---|---:|---|---:|---:|---:|---:|---:|"]
+    for row in rows:
+        lines.append(
+            f"| {row['operation']} | {row['count']} | {row['mode']} | {row['pair']} | "
+            f"{row['wall_seconds']:.3f} | {row['user_seconds']:.3f} | "
+            f"{row['system_seconds']:.3f} | {row['max_rss_kib']:.0f} |"
+        )
+    lines.extend([
+        "", "## Mean batch/scalar ratios", "",
+        "Ratios below 1 favor batch; each resource is reported independently.", "",
+        "| operation | count | wall | user | system | RSS |",
+        "|---|---:|---:|---:|---:|---:|",
+    ])
+    for operation in OPERATIONS:
+        for count in counts:
+            selected = [
+                row for row in rows
+                if row["operation"] == operation and row["count"] == count
+            ]
+            means = {
+                mode: {
+                    metric: statistics.mean(
+                        float(row[metric]) for row in selected if row["mode"] == mode
+                    )
+                    for metric in ("wall_seconds", "user_seconds", "system_seconds", "max_rss_kib")
+                }
+                for mode in MODES
+            }
+            ratios = {
+                metric: means["batch"][metric] / means["scalar"][metric]
+                for metric in means["scalar"]
+            }
+            lines.append(
+                f"| {operation} | {count} | {ratios['wall_seconds']:.4f} | "
+                f"{ratios['user_seconds']:.4f} | {ratios['system_seconds']:.4f} | "
+                f"{ratios['max_rss_kib']:.4f} |"
+            )
+    (output / "report.md").write_text("\n".join(lines) + "\n")
+    print(output / "report.md")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

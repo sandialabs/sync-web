@@ -6,9 +6,9 @@ import { ExplorerMode } from '../types';
 interface ToolBarProps {
   sessionName: string;
   error: string | null;
-  isLoading: boolean;
   mode: ExplorerMode;
   isAdmin: boolean;
+  localOnlyDisabled?: boolean;
   theme: 'light' | 'dark';
   onModeChange: (mode: ExplorerMode) => void;
   onThemeToggle: () => void;
@@ -17,9 +17,9 @@ interface ToolBarProps {
 const ToolBar: React.FC<ToolBarProps> = ({
   sessionName,
   error,
-  isLoading,
   mode,
   isAdmin,
+  localOnlyDisabled = false,
   theme,
   onModeChange,
   onThemeToggle,
@@ -67,12 +67,22 @@ const ToolBar: React.FC<ToolBarProps> = ({
             >
               Stage
             </button>
+            <button
+              className={`tab ${mode === 'access' ? 'active' : ''}`}
+              onClick={() => onModeChange('access')}
+              disabled={localOnlyDisabled}
+              title={localOnlyDisabled ? 'Return to Self to manage access' : undefined}
+            >
+              {localOnlyDisabled ? 'Access · Self' : 'Access'}
+            </button>
             {isAdmin && (
               <button
                 className={`tab ${mode === 'admin' ? 'active' : ''}`}
                 onClick={() => onModeChange('admin')}
+                disabled={localOnlyDisabled}
+                title={localOnlyDisabled ? 'Return to Self to administer this journal' : undefined}
               >
-                Admin
+                {localOnlyDisabled ? 'Admin · Self' : 'Admin'}
               </button>
             )}
           </div>
@@ -107,9 +117,9 @@ const ToolBar: React.FC<ToolBarProps> = ({
         </div>
       </div>
 
-      {(error || isLoading) && (
-        <div className={`toolbar-status-line ${error ? 'error' : ''}`}>
-          {error ?? 'Loading...'}
+      {error && (
+        <div className="toolbar-status-line error" role="alert">
+          {error}
         </div>
       )}
 

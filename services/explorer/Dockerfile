@@ -25,9 +25,7 @@ FROM deps AS build
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine3.20 AS runtime
-
-WORKDIR /app
+FROM nginx:1.30.1-alpine3.23@sha256:c819f83c54b0361f5557601bf5eb4943d09360e7a7fdf426afc466570f45874d AS runtime
 
 ARG CUSTOM_SETUP=""
 
@@ -37,16 +35,15 @@ RUN set -eu; \
       chmod +x /tmp/custom-setup.sh; \
       /bin/sh -eu /tmp/custom-setup.sh; \
       rm -f /tmp/custom-setup.sh; \
-    fi
+    fi; \
+    rm -rf /usr/share/nginx/html/*
 
-RUN npm install -g serve
-
-COPY --from=build /app/build ./build
-
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+COPY --from=build /app/build /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.sh /sync-entrypoint.sh
+RUN chmod +x /sync-entrypoint.sh
 
 EXPOSE 80
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["serve", "-s", "build", "-l", "80"]
+ENTRYPOINT ["/sync-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]

@@ -29,14 +29,16 @@
     ;;     key (any): lookup key.
     ;;   Returns:
     ;;     sync node: value node, sync-null, or stub.
-    (let loop ((node node) (bits ((self '~key-bits) key)))
-      (cond ((sync-null? node) node)
-            ((sync-stub? node) node)
-            ((byte-vector? (sync-car node))
-             (if (equal? key (sync-car node)) (sync-cdr node) (sync-null)))
-            (else (if (zero? (car bits))
-                      (loop (sync-car node) (cdr bits))
-                      (loop (sync-cdr node) (cdr bits)))))))
+    (let ((hash (sync-hash key)))
+      (let loop ((node node) (depth 0))
+        (cond ((sync-null? node) node)
+              ((sync-stub? node) node)
+              ((byte-vector? (sync-car node))
+               (if (equal? key (sync-car node)) (sync-cdr node) (sync-null)))
+              ((zero? (logand (ash (hash (ash depth -3))
+                                   (- (modulo depth 8) 7)) 1))
+               (loop (sync-car node) (+ depth 1)))
+              (else (loop (sync-cdr node) (+ depth 1)))))))
 
   (define-method (~dir-set self node key value)
     ;; Set key to value within a directory node.
@@ -47,8 +49,12 @@
     ;;   Returns:
     ;;     sync node: updated directory node.
     (let loop-1 ((node node) (bits ((self '~key-bits) key)) (depth 0))
-      (if (or (sync-null? node) (sync-stub? node)) (sync-cons key value)
-          (let ((left (sync-car node)) (right (sync-cdr node)))
+      (cond ((sync-stub? node)
+             (error 'availability-error
+                    "Cannot insert a directory key through unavailable state"))
+            ((sync-null? node) (sync-cons key value))
+            (else
+             (let ((left (sync-car node)) (right (sync-cdr node)))
             (if (not (byte-vector? left))
                 (if (zero? (car bits))
                     (sync-cons (loop-1 left (cdr bits) (+ depth 1)) right)
@@ -63,7 +69,7 @@
                              (sync-cons (sync-cons key value) node))
                             ((and (not (zero? (car bits-new))) (zero? (car bits-old)))
                              (sync-cons node (sync-cons key value)))
-                            (else (error 'logic-error "Missing tree merge condition for key: ~S" key))))))))))
+                            (else (error 'logic-error "Missing tree merge condition for key: ~S" key)))))))))))
 
   (define-method (~dir-delete self node key)
     ;; Delete key from directory node and collapse empty branches.
@@ -73,8 +79,12 @@
     ;;   Returns:
     ;;     sync node: updated directory node.
     (let loop ((node node) (bits ((self '~key-bits) key)))
-      (if (or (sync-null? node) (sync-stub? node)) (sync-null)
-          (let ((left (sync-car node)) (right (sync-cdr node)))
+      (cond ((sync-stub? node)
+             (error 'availability-error
+                    "Cannot delete a directory key through unavailable state"))
+            ((sync-null? node) (sync-null))
+            (else
+             (let ((left (sync-car node)) (right (sync-cdr node)))
             (if (byte-vector? left)
                 (if (equal? key left) (sync-null) node)
                 (let ((left (if (zero? (car bits)) (loop left (cdr bits)) left))
@@ -82,7 +92,7 @@
                   (cond ((and (sync-null? left) (sync-null? right)) (sync-null))
                         ((and (sync-null? left) (sync-pair? right) (byte-vector? (sync-car right))) right)
                         ((and (sync-null? right) (sync-pair? left) (byte-vector? (sync-car left))) left)
-                        (else (sync-cons left right)))))))))
+                        (else (sync-cons left right))))))))))
 
   (define-method (~dir-digest self node)
     ;; Compute digest of a directory node.
@@ -327,12 +337,15 @@
 
   (define-method (set! self path value)
     ;; Set value at path, handling special directory/unknown/nothing cases.
+    ;; The empty path may clear the map with `(nothing)` but cannot store a value.
     ;;   Args:
     ;;     path (list of keys): path segments.
     ;;     value (any): value to set.
     ;;   Returns:
     ;;     boolean: #t after mutation.
-    (cond ((equal? value '(unknown))
+    (cond ((and (null? path) (not (equal? value '(nothing))))
+           (error 'path-error "Tree root must remain a directory"))
+          ((equal? value '(unknown))
            (error 'value-error "Tree values cannot use reserved value: ~S" value))
           ((and (list? value) (not (null? value)) (eq? (car value) 'directory))
            (error 'value-error "Tree values cannot use reserved directory form: ~S" value))
@@ -352,17 +365,31 @@
                   ((self '~r-write!) (map (self '~key->bytes) path) ((self 'obj->node) content))))))
 
   (define-method (set-batch! self paths values)
-    (map (lambda (path value) ((self 'set!) path value)) paths values) #t)
+    ;; Apply equal-length path/value lists atomically within this method call.
+    (if (not (and (list? paths) (list? values)
+                  (= (length paths) (length values))))
+        (error 'argument-error
+               "Tree batch paths and values must be equal-length proper lists"))
+    (map (lambda (path value) ((self 'set!) path value)) paths values)
+    #t)
 
   (define-method (copy! self source path)
-    ;; Copy raw node from source path to target path.
+    ;; Copy raw source to target; a missing source deletes the target.
+    ;; Only a directory source may replace the complete map at the empty path.
     ;;   Args:
     ;;     source (list of keys): source path.
     ;;     path (list of keys): target path.
     ;;   Returns:
     ;;     boolean: #t after copy.
-    (let ((source (map (self '~key->bytes) source)) (path (map (self '~key->bytes) path)))
-      ((self '~r-write!) path ((self '~r-read) source))))
+    (let* ((source-node ((self '~r-read) (map (self '~key->bytes) source)))
+           (target (map (self '~key->bytes) path)))
+      (cond ((sync-null? source-node)
+             ((self 'set!) path '(nothing)))
+            ((and (null? path)
+                  (let ((value ((self 'get) source)))
+                    (not (and (pair? value) (eq? (car value) 'directory)))))
+             (error 'path-error "Tree root must remain a directory"))
+            (else ((self '~r-write!) target source-node)))))
 
   (define-method (prune! self path keep-key?)
     ;; Prune subtree at path, optionally keeping the key node.
@@ -393,11 +420,18 @@
       (set! (self '(1))
             (let loop ((node (self '(1))) (path path))
               (cond ((null? path) node)
+                    ((or (sync-null? node) (sync-stub? node)) node)
                     ((byte-vector? node) node)
                     ((struct? node) node)
-                    (else (let ((key (car path)))
-                            ((self '~dir-slice) ((self '~dir-set) node key (loop ((self '~dir-get) node key) (cdr path)))
-                             key))))))))
+                    (else
+                     (let* ((key (car path))
+                            (child ((self '~dir-get) node key)))
+                       (if (or (sync-null? child) (sync-stub? child))
+                           ((self '~dir-slice) node key)
+                           ((self '~dir-slice)
+                            ((self '~dir-set) node key
+                             (loop child (cdr path)))
+                            key)))))))))
 
   (define-method (merge! self other)
     ;; Merge another equivalent tree into this one.
@@ -406,10 +440,10 @@
     ;;   Returns:
     ;;     boolean: #t on success, #f if not mergeable.
     (let* ((node-1 (self '(1)))
-           (node-2 ((sync-eval other #f) '(1)))
+           (node-2 ((sync-eval other) '(1)))
            (struct-d (sync-digest ((self '~struct-tag))))
            (struct? (lambda (x) (and (sync-pair? x) (equal? (sync-digest (sync-car x)) struct-d)))))
-      (if (or (sync-null? node-1) (not (equal? (sync-digest node-1) (sync-digest node-2)))) #f
+      (if (not (equal? (sync-digest node-1) (sync-digest node-2))) #f
           (set! (self '(1))
                 (let loop-1 ((n-1 node-1) (n-2 node-2))
                   (cond ((byte-vector? n-1) n-1)
@@ -417,7 +451,17 @@
                         ((sync-null? n-2) n-1)
                         ((sync-stub? n-1) n-2)
                         ((sync-stub? n-2) n-1)
-                        ((struct? n-1) n-1)
+                        ((struct? n-1)
+                         (let merge ((a n-1) (b n-2))
+                           (cond ((sync-stub? a) b)
+                                 ((sync-stub? b) a)
+                                 ((and (sync-pair? a) (sync-pair? b))
+                                  (sync-cons (merge (sync-car a) (sync-car b))
+                                             (merge (sync-cdr a) (sync-cdr b))))
+                                 ((equal? a b) a)
+                                 (else
+                                  (error 'structure-error
+                                         "Cannot merge incompatible structured values")))))
                         (else (let ((n-3 ((self '~dir-merge) n-1 n-2)))
                                 (let loop-2 ((n-3 n-3) (keys (car ((self '~dir-all) n-3))))
                                   (if (null? keys) n-3

@@ -81,7 +81,7 @@ For local multi-node journal plus social-agent testing, use the compose harness 
 ```bash
 cd /absolute/path/to/sync-web/tests/network/compose
 python3 generate.py
-docker compose up
+podman compose up
 ```
 
-That harness reuses the full general stack per node and is the current local path for testing bridge topology behavior without FIREWHEEL.
+The harness defaults to four nodes and a controlled `ACTIVITY=4` interval. Positive values are seconds between cycles and should be used for ordinary workflow/integration testing. `ACTIVITY=0` removes the delay for maximum-throughput saturation benchmarks; use `ACTIVITY_DISABLED=1` for setup-only runs. Optional positive `BATCH` uses unique same-route/access-group batch operations for continuous activity while leaving setup scalar. Benchmark output reports logical path operations per second separately from HTTP requests per second. Each node reuses the full general stack, so increase `NODE_COUNT` deliberately; this is the local path for testing bridge topology behavior without FIREWHEEL.

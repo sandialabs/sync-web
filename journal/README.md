@@ -12,6 +12,7 @@ Please see the following two pages to install the build dependencies:
 # Run
 
 The recommended usage strategy for most users is the Docker-based compose stack in `deploy/compose/general/`.
+Reproducible Linux musl and glibc Wasmer image builds are documented in [IMAGES.md](IMAGES.md).
 The journal binary can also be run directly for development and testing:
 
 * As a low-optimization single step for development:
@@ -67,7 +68,13 @@ Other basic modifications include:
 - Blacklisted functions found in [./evaluator.rs](./evaluator.rs)
 - Additional convenience functions found in [./evaluator.rs](./evaluator.rs)
 
-The Scheme record modules (standard, chain, ledger, interface, root) live in `records/lisp/` at the repo root.
+The Scheme record modules (`root`, `standard`, `tree`, `log-chain`, `ledger`, `federation`, `authorization`, and `interface`) live in `records/lisp/` at the repo root.
+
+Journal SDK 1.4 loads stored objects with exact one-argument `sync-eval`. Shared self-coded computation executes in fresh `sync-let` children cloned from a sealed request-local capability template; trusted host orchestration remains outside that boundary. Active-boundary and dynamic-evaluation helpers are internal rather than Scheme primitives. Staged `call!` orchestration belongs entirely to the Records Interface and is not a Journal primitive or `sync-let` capability. Journal SDK 1.4 does not expose or claim an execution meter or limit.
+
+### Optional Wasmer isolation
+
+Journal requests execute only through the bounded Wasmer evaluator and a provenance-bound, SHA-256-verified AOT kernel. Production builds require the default `wasmer-evaluator` feature and are qualified only for Linux x86_64; an unsupported target, missing feature, missing artifact, or invalid artifact fails closed rather than selecting the native host evaluator. Native s7 remains solely inside the Wasm kernel and narrowly explicit development-test internals. Build, configuration, isolation, test, and qualification details are in [`wasm-kernel/README.md`](wasm-kernel/README.md).
 
 The following commands will be helpful in getting started:
 

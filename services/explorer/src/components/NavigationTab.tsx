@@ -16,7 +16,7 @@ const buildChildPath = (parentPath: JournalPath, itemName: string): JournalPath 
   const lastSegment = parentPath[parentPath.length - 1];
 
   if (lastSegment === '*bridge*') {
-    return [...parentPath, itemName, -1];
+    return [...parentPath.slice(0, -1), itemName, -1];
   }
 
   if (parentPath.includes('*state*')) {
@@ -92,9 +92,14 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
   };
 
   const isBridgeChainNode = (path: JournalPath): boolean => {
-    if (path.length < 3) return false;
-    const lastSegment = path[path.length - 1];
-    return typeof lastSegment === 'number' && path[path.length - 3] === '*bridge*';
+    if (path.length < 2) return false;
+    const name = path[path.length - 2];
+    const index = path[path.length - 1];
+    const hasLocalNamespace = path.some(
+      segment => typeof segment === 'string' && segment.startsWith('*'),
+    );
+    return !hasLocalNamespace
+      && typeof name === 'string' && !name.startsWith('*') && typeof index === 'number';
   };
 
   const createBridgeChainChildren = (node: TreeNode): TreeNode[] => [
@@ -186,7 +191,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
   const handleAddFile = async (node: TreeNode) => {
     if (!journalService || !node.isLocal || node.type !== 'directory') return;
 
-    const fileName = prompt('Enter file name:');
+    const fileName = prompt('Enter document name:');
     if (!fileName) return;
 
     if (!node.path.includes('*state*')) {
@@ -199,7 +204,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
       await journalService.set(filePath, JournalService.textToByteVector(''));
       await loadChildren(node);
     } catch (error) {
-      alert(`Failed to add file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(`Failed to add document: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -271,7 +276,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
                   <button
                     className="tree-node-action"
                     onClick={() => handleAddFile(node)}
-                    title="New file"
+                    title="New document"
                   >
                     📝
                   </button>

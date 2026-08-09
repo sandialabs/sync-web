@@ -1,0 +1,179 @@
+[[case]]
+name = "Root Test"
+kind = "unit"
+test = "unit/test-root.scm"
+arguments = ["../lisp/root.scm"]
+
+[[case]]
+name = "Standard Test"
+kind = "unit"
+test = "unit/test-standard.scm"
+arguments = ["unit/unit-harness.scm", "../lisp/standard.scm"]
+
+[[case]]
+name = "Tree Test"
+kind = "unit"
+test = "unit/test-tree.scm"
+arguments = ["unit/unit-harness.scm", "../lisp/standard.scm", "../lisp/tree.scm"]
+
+[[case]]
+name = "Authorization Test"
+kind = "unit"
+test = "unit/test-authorization.scm"
+arguments = ["unit/unit-harness.scm", "../lisp/standard.scm", "../lisp/authorization.scm"]
+
+[[case]]
+name = "Linear Chain Test"
+kind = "unit"
+test = "unit/test-chain.scm"
+arguments = ["unit/unit-harness.scm", "../lisp/standard.scm", "../lisp/linear-chain.scm"]
+
+[[case]]
+name = "Log Chain Test"
+kind = "unit"
+test = "unit/test-chain.scm"
+arguments = ["unit/unit-harness.scm", "../lisp/standard.scm", "../lisp/log-chain.scm"]
+
+[[case]]
+name = "Deployment Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-deployment.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Basic Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-basic.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Call Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-call.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Periodic Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-periodic.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Federation Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-federation.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Network Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-network.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Sharing Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-sharing.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "History Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-history.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Retained History Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-retained-history.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]

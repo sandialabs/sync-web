@@ -1,74 +1,73 @@
 # Record Tests
 
-## Setup
+`records/tests` is the single test surface for Scheme Records, from low-level
+object behavior through deterministic multi-journal Interface workflows.
 
-First, build or otherwise obtain a version of the journal SDK from `journal/` in this repo.
-There are two options:
+## Run the suite
 
-### Binary
-
-Build the binary yourself:
+Build the cross-platform runner from the repository root:
 
 ```sh
-cd journal && cargo build --release
+CARGO_TARGET_DIR=journal/target \
+  cargo build --manifest-path records/tests/Cargo.toml
 ```
 
-The binary will be at `journal/target/release/journal`.
-
-### Docker
-
-Use the prebuilt Docker image:
+Run every Records case:
 
 ```sh
-docker pull ghcr.io/sandialabs/sync-web/journal-sdk
+journal/target/debug/records-test --suite records/tests/suite.toml
 ```
 
-## Run Tests
-
-Pass the journal SDK path or docker invocation to `test.sh`.
-
-### Binary
+Run independent cases concurrently when faster feedback is useful:
 
 ```sh
-./test.sh ../journal/target/release/journal
+journal/target/debug/records-test --suite records/tests/suite.toml --jobs 4
 ```
 
-### Docker
+`suite.toml` is the canonical top-level suite. Paths resolve relative to the
+manifest, and every case runs in a fresh `records-test` subprocess so evaluator,
+persistence, scheduler time, and deterministic randomness do not leak between
+cases. Parallel execution retains manifest-ordered output and does not change
+scheduling inside a case.
+
+## Layout
+
+```text
+records/tests/
+  suite.toml             complete declarative suite
+  unit/                  source-driven lower-level object tests
+    unit-harness.scm     shared assertions
+  interface/             deterministic Interface and federation workflows
+    interface-harness.scm
+  src/                   Rust runner and deterministic scheduler
+```
+
+Unit procedures receive the active module sources they need as quoted Scheme
+data. Interface cases run unchanged production `sync-remote` calls through the
+deterministic scheduler. See [`interface/README.md`](interface/README.md) for
+the Interface DSL and scheduling model.
+
+Run one unit case directly while iterating:
 
 ```sh
-./test.sh "docker run ghcr.io/sandialabs/sync-web/journal-sdk"
+journal/target/debug/records-test --unit \
+  records/tests/unit/test-tree.scm \
+  records/tests/unit/unit-harness.scm \
+  records/lisp/standard.scm \
+  records/lisp/tree.scm
 ```
 
-## Develop
+Run one Interface case directly:
 
-The current test suite is mostly built around direct source-driven harnesses.
-The top-level `test.sh` file loads the active module source files from `lisp/`, passes them into each `test-*.scm` lambda, and evaluates the resulting expression with the Journal SDK.
-
-Each active `test-*.scm` file is a Scheme function that accepts the source blobs it needs, instantiates local objects or journals, and returns either:
-
-- a success string of the form `"Success (N checks)"`
-- or an `(error ...)` form if an assertion fails
-
-Most tests now use a direct style:
-
-- `test-standard.scm`, `test-tree.scm`, and `test-chain.scm`
-  - instantiate the needed classes locally with `standard.scm`
-  - explicitly `(sync-eval node #f)` constructed nodes when a live object is needed
-  - run assertions directly in one evaluation
-
-- `test-ledger.scm`
-  - simulates multiple local ledgers inside one evaluation
-  - coordinates them directly without real journal transport
-
-- `test-interface.scm`
-  - creates multiple real journals with `sync-create`
-  - installs `interface.scm` into each journal
-  - monkey-patches transport details inside the test so cross-journal flows remain deterministic
-
-When adding a new test, prefer the direct lambda style used by the active suite:
-
-1. accept only the source blobs the test actually needs
-2. instantiate objects or journals locally inside the test
-3. use `standard 'make` for uninitialized shells and `standard 'init` when constructor args are required; use `(sync-eval node #f)` only when a live object is needed
-4. use a small local `assert` helper/macro
-5. return a compact success string when all checks pass
+```sh
+journal/target/debug/records-test \
+  records/tests/interface/interface-harness.scm \
+  records/tests/interface/test-network.scm \
+  records/lisp/root.scm \
+  records/lisp/standard.scm \
+  records/lisp/log-chain.scm \
+  records/lisp/tree.scm \
+  records/lisp/ledger.scm \
+  records/lisp/authorization.scm \
+  records/lisp/interface.scm
+```

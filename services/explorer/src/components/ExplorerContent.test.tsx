@@ -15,7 +15,20 @@ jest.mock('../services/JournalService', () => ({
       return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     }),
     isReservedStateSegment: jest.fn((value: string) => value.startsWith('*') && value.endsWith('*')),
-    decodePathSegment: jest.fn((value: string) => value.replace(/%20/g, ' ')),
+    isIndexError: jest.fn((error: unknown) =>
+      typeof error === 'object' && error !== null
+        && 'code' in error && (error as { code?: unknown }).code === 'index-error'),
+    isSnapshotUnavailable: jest.fn((error: unknown) => {
+      const value = error as { code?: unknown; message?: unknown };
+      const message = typeof value?.message === 'string'
+        ? value.message.replace(/^bridge-error: /, '')
+        : value?.message;
+      return value?.code === 'index-error'
+        || (value?.code === 'bridge-error' && typeof message === 'string'
+          && message.startsWith('Bridge is not committed at the selected local index:'));
+    }),
+    encodePathSegment: jest.fn((value: string) => encodeURIComponent(value)),
+    decodePathSegment: jest.fn((value: string) => decodeURIComponent(value)),
   },
 }));
 
@@ -31,9 +44,27 @@ describe('ExplorerContent', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    URL.createObjectURL = jest.fn(() => 'blob:test');
+    URL.revokeObjectURL = jest.fn();
     (JournalService.extractSchemeValue as jest.Mock).mockImplementation((value) => ({ value, schemeType: null }));
     (JournalService.parseDirectoryResponse as jest.Mock).mockReturnValue(null);
     (JournalService.parseDirectoryEntries as jest.Mock).mockReturnValue(null);
+    (JournalService.encodePathSegment as jest.Mock)
+      .mockImplementation((value: string) => encodeURIComponent(value));
+    (JournalService.decodePathSegment as jest.Mock)
+      .mockImplementation((value: string) => decodeURIComponent(value));
+    (JournalService.isIndexError as jest.Mock).mockImplementation((error: unknown) =>
+      typeof error === 'object' && error !== null
+        && 'code' in error && (error as { code?: unknown }).code === 'index-error');
+    (JournalService.isSnapshotUnavailable as jest.Mock).mockImplementation((error: unknown) => {
+      const value = error as { code?: unknown; message?: unknown };
+      const message = typeof value?.message === 'string'
+        ? value.message.replace(/^bridge-error: /, '')
+        : value?.message;
+      return value?.code === 'index-error'
+        || (value?.code === 'bridge-error' && typeof message === 'string'
+          && message.startsWith('Bridge is not committed at the selected local index:'));
+    });
   });
 
   it('shows stage directory actions', async () => {
@@ -69,10 +100,143 @@ describe('ExplorerContent', () => {
 
     expect(await screen.findByText('+ Document')).toBeInTheDocument();
     expect(screen.getByText('+ Directory')).toBeInTheDocument();
-    expect(screen.getByText('Upload File')).toBeInTheDocument();
+    expect(screen.getByText('Upload Document')).toBeInTheDocument();
   });
 
-  it('shows stage file actions', async () => {
+  it('shows exact stored text in a view-only Raw mode', async () => {
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: { '*type/byte-vector*': '3c7363726970743e616c6572742831293c2f7363726970743e' },
+      proof: {},
+    });
+
+    const { unmount } = render(
+      <ExplorerContent
+        mode="stage"
+        selection={{ path: ['*state*', 'alice', 'page.html'], type: 'file' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Raw'));
+    expect(await screen.findByText('<script>alert(1)</script>')).toBeInTheDocument();
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Rename')).not.toBeInTheDocument();
+    expect(mockJournalService.get).toHaveBeenCalledWith(
+      ['*state*', 'alice', 'page.html'],
+      { pinned: false, proof: false },
+    );
+    unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test');
+  });
+
+  it('does not present a transient snapshot race as an access denial', async () => {
+    (mockJournalService.get as jest.Mock).mockRejectedValue(
+      Object.assign(new Error('Index is out of bounds: 257'), { code: 'index-error' }),
+    );
+
+    render(
+      <ExplorerContent
+        mode="ledger"
+        selection={{ path: [257, 'journal-1', -2, '*state*', 'alice'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('selected ledger snapshot is unavailable');
+    expect(alert).not.toHaveTextContent('granted access');
+  });
+
+  it('does not present an unretained historical route as an access denial', async () => {
+    (mockJournalService.get as jest.Mock).mockRejectedValue(
+      Object.assign(
+        new Error('bridge-error: Bridge is not committed at the selected local index: journal-1 -1'),
+        { code: 'bridge-error' },
+      ),
+    );
+
+    render(
+      <ExplorerContent
+        mode="ledger"
+        selection={{ path: [257, 'journal-1', -2, '*state*', 'alice'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('selected ledger snapshot is unavailable');
+    expect(alert).not.toHaveTextContent('granted access');
+  });
+
+  it('hides mutation controls only when the selected Stage location is browsing-only', async () => {
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: ['directory', { alice: 'directory' }, false],
+      'pinned?': false,
+      proof: {},
+    });
+    (JournalService.parseDirectoryResponse as jest.Mock).mockReturnValue({
+      items: ['alice'],
+      isComplete: false,
+    });
+    (JournalService.parseDirectoryEntries as jest.Mock).mockReturnValue([
+      { name: 'alice', type: 'directory' },
+    ]);
+
+    render(
+      <ExplorerContent
+        mode="stage"
+        stageReadOnly
+        selection={{ path: ['*state*'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn().mockResolvedValue(undefined)}
+        onStageCreateDirectory={jest.fn().mockResolvedValue(undefined)}
+        onStageUploadFile={jest.fn().mockResolvedValue(undefined)}
+        onStageRename={jest.fn().mockResolvedValue(undefined)}
+        onStageDelete={jest.fn().mockResolvedValue(undefined)}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('alice')).toBeInTheDocument();
+    expect(screen.queryByText('+ Document')).not.toBeInTheDocument();
+    expect(screen.queryByText('+ Directory')).not.toBeInTheDocument();
+    expect(screen.queryByText('Upload Document')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Rename')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+  });
+
+  it('shows edit, rename, and delete for a selected remote Stage document', async () => {
     (mockJournalService.get as jest.Mock).mockResolvedValue({
       content: { '*type/byte-vector*': '68656c6c6f' },
       'pinned?': false,
@@ -86,7 +250,7 @@ describe('ExplorerContent', () => {
     render(
       <ExplorerContent
         mode="stage"
-        selection={{ path: ['*state*', 'draft.txt'], type: 'file' }}
+        selection={{ path: ['*state*', 'admin', 'data', 'public', 'draft.txt'], type: 'file' }}
         journalService={mockJournalService}
         refreshKey={0}
         ledgerView="content"
@@ -101,7 +265,38 @@ describe('ExplorerContent', () => {
     );
 
     expect(await screen.findByText('Edit')).toBeInTheDocument();
+    expect(screen.getByTitle('Rename')).toBeInTheDocument();
+    expect(screen.getByText('Delete')).toBeInTheDocument();
     expect(screen.getByText('Download')).toBeInTheDocument();
+  });
+
+  it('shows a stable access error without exposing the raw journal response', async () => {
+    (mockJournalService.get as jest.Mock).mockRejectedValue(
+      new Error('journal_error: raw authorization details'),
+    );
+
+    render(
+      <ExplorerContent
+        mode="stage"
+        selection={{ path: ['*state*', 'alice'], type: 'directory' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn().mockResolvedValue(undefined)}
+        onStageCreateDirectory={jest.fn().mockResolvedValue(undefined)}
+        onStageUploadFile={jest.fn().mockResolvedValue(undefined)}
+        onStageRename={jest.fn().mockResolvedValue(undefined)}
+        onStageDelete={jest.fn().mockResolvedValue(undefined)}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Check that the selected journal has granted access to this user and path.',
+    );
+    expect(screen.queryByText(/raw authorization details/)).not.toBeInTheDocument();
+    expect(screen.queryByText('+ Document')).not.toBeInTheDocument();
   });
 
   it('navigates when a directory entry is clicked', async () => {
@@ -147,6 +342,82 @@ describe('ExplorerContent', () => {
     });
   });
 
+  it('renders a clickable responsive path breadcrumb with a non-clickable current segment', async () => {
+    const onSelectPath = jest.fn();
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: { '*type/byte-vector*': 'hello' },
+    });
+
+    render(
+      <ExplorerContent
+        mode="ledger"
+        selection={{
+          path: [42, 'journal-1', -3, '*state*', 'alice', 'docs', 'draft%20one.txt'],
+          type: "file"
+        }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={onSelectPath}
+      />,
+    );
+
+    const breadcrumb = screen.getByRole('navigation', { name: 'Content path' });
+    expect(breadcrumb).toHaveTextContent('*state*/alice/docs/draft one.txt');
+    expect(screen.getByRole('button', { name: '*state*' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'alice' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'docs' }));
+    expect(onSelectPath).toHaveBeenCalledWith({
+      path: [42, 'journal-1', -3, '*state*', 'alice', 'docs'],
+      type: 'directory',
+    });
+    expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent('draft one.txt');
+    expect(screen.queryByRole('button', { name: 'draft one.txt' })).not.toBeInTheDocument();
+  });
+
+  it('uses encoded entry path segments so content and tree selections agree', async () => {
+    const onSelectPath = jest.fn();
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: ['directory', { 'design notes': 'value' }, true],
+    });
+    (JournalService.parseDirectoryResponse as jest.Mock).mockReturnValue({
+      items: ['design notes'],
+      isComplete: true,
+    });
+    (JournalService.parseDirectoryEntries as jest.Mock).mockReturnValue([
+      { name: 'design notes', pathSegment: 'design%20notes', type: 'value' },
+    ]);
+
+    render(
+      <ExplorerContent
+        mode="stage"
+        selection={{ path: ['*state*', 'alice'], type: "directory" }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={onSelectPath}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /design notes/i }));
+    expect(onSelectPath).toHaveBeenCalledWith({
+      path: ['*state*', 'alice', 'design%20notes'],
+      type: 'file',
+    });
+  });
+
   it('preserves in-progress stage edits during same-selection refreshes', async () => {
     (mockJournalService.get as jest.Mock)
       .mockResolvedValueOnce({
@@ -187,6 +458,41 @@ describe('ExplorerContent', () => {
     expect(screen.getByRole('textbox')).toHaveValue('manual unsaved edit');
   });
 
+  it('keeps denied document edits in place and shows a localized save error', async () => {
+    (mockJournalService.get as jest.Mock).mockResolvedValue({
+      content: 'original',
+      'pinned?': false,
+      proof: {},
+    });
+    (mockJournalService.setText as jest.Mock).mockRejectedValue(new Error('not authorized'));
+
+    const { container } = render(
+      <ExplorerContent
+        mode="stage"
+        selection={{ path: ['*state*', 'alice', 'draft.txt'], type: 'file' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="content"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn()}
+        onStageCreateDirectory={jest.fn()}
+        onStageUploadFile={jest.fn()}
+        onStageRename={jest.fn()}
+        onStageDelete={jest.fn()}
+        onSelectPath={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(container.querySelector('.loading-spinner')).toBeNull());
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'unsaved denied edit' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Save failed: not authorized');
+    expect(screen.getByRole('textbox')).toHaveValue('unsaved denied edit');
+    expect(screen.getByText('Save')).toBeInTheDocument();
+  });
+
   it('shows ledger proof toggle and unpin state from boolean pinned response', async () => {
     (mockJournalService.get as jest.Mock).mockResolvedValue({
       content: { '*type/byte-vector*': '7065657220636f6e74656e74' },
@@ -198,7 +504,7 @@ describe('ExplorerContent', () => {
       schemeType: 'string',
     });
 
-    render(
+    const { rerender } = render(
       <ExplorerContent
         mode="ledger"
         selection={{ path: [42, '*state*', 'peer.txt'], type: 'file' }}
@@ -218,6 +524,33 @@ describe('ExplorerContent', () => {
     expect(await screen.findByText('Proof')).toBeInTheDocument();
     expect(screen.getByText('Download')).toBeInTheDocument();
     expect(await screen.findByText('Unpin')).toBeInTheDocument();
+    expect(mockJournalService.get).toHaveBeenCalledWith(
+      [42, '*state*', 'peer.txt'],
+      { pinned: true, proof: false },
+    );
+
+    rerender(
+      <ExplorerContent
+        mode="ledger"
+        selection={{ path: [42, '*state*', 'peer.txt'], type: 'file' }}
+        journalService={mockJournalService}
+        refreshKey={0}
+        ledgerView="proof"
+        onLedgerViewToggle={jest.fn()}
+        onStageCreateFile={jest.fn().mockResolvedValue(undefined)}
+        onStageCreateDirectory={jest.fn().mockResolvedValue(undefined)}
+        onStageUploadFile={jest.fn().mockResolvedValue(undefined)}
+        onStageRename={jest.fn().mockResolvedValue(undefined)}
+        onStageDelete={jest.fn().mockResolvedValue(undefined)}
+        onSelectPath={jest.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(mockJournalService.get).toHaveBeenCalledWith(
+        [42, '*state*', 'peer.txt'],
+        { pinned: true, proof: true },
+      ),
+    );
   });
 
   it('shows bridged file as unpinned or pinned based on resolve response', async () => {
@@ -230,7 +563,7 @@ describe('ExplorerContent', () => {
     render(
       <ExplorerContent
         mode="ledger"
-        selection={{ path: [-1, '*bridge*', 'journal-5', -1, '*state*', 'admin', 'data', 'key-0'], type: 'file' }}
+        selection={{ path: [-1, 'journal-5', -1, '*state*', 'admin', 'data', 'key-0'], type: 'file' }}
         journalService={mockJournalService}
         refreshKey={0}
         ledgerView="content"

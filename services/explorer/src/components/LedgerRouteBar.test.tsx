@@ -29,6 +29,24 @@ describe('LedgerRouteBar', () => {
     expect(screen.getByDisplayValue('42')).toBeInTheDocument();
   });
 
+  it('spins the same sync button without inserting a loading row', () => {
+    render(
+      <LedgerRouteBar
+        hops={hops}
+        rootIndex={42}
+        onSynchronize={jest.fn()}
+        isSynchronizing
+        onSnapshotChange={jest.fn()}
+        onStepSnapshot={jest.fn()}
+        readOnlyRoute
+      />,
+    );
+
+    const button = screen.getByTitle('Synchronize latest committed root');
+    expect(button).toBeDisabled();
+    expect(button).toHaveClass('synchronizing');
+  });
+
   it('normalizes peer snapshot input on blur', () => {
     const onSnapshotChange = jest.fn();
 

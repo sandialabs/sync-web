@@ -1,0 +1,73 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{eso-pic}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,matrix,positioning,shapes.multipart}
+\usepackage[underline=false,rounded corners=true]{pgf-umlsd}
+\input{figures/styles}
+\hypersetup{colorlinks=true,linkcolor=swblue,citecolor=swblue,urlcolor=swblue}
+
+\AddToShipoutPictureBG{%
+  \AtPageCenter{%
+    \makebox[0pt]{\rotatebox{45}{%
+      \textcolor{black!7}{\fontsize{92}{92}\selectfont\bfseries DRAFT}}}}%
+}
+
+\title{The Synchronic Web}
+\author{%
+  Thien-Nam Dinh\\
+  \textit{Sandia National Labs}\\
+  \href{mailto:thidinh@sandia.gov}{\texttt{thidinh@sandia.gov}}
+  \and
+  Nicholas Pattengale\\
+  \textit{Sandia National Labs}\\
+  \href{mailto:ndpatte@sandia.gov}{\texttt{ndpatte@sandia.gov}}
+  \and
+  Mitch Negus\\
+  \textit{Sandia National Labs}\\
+  \href{mailto:mnegus@sandia.gov}{\texttt{mnegus@sandia.gov}}%
+}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\clearpage
+\tableofcontents
+\listoffigures
+\listoftables
+\listofalgorithms
+\clearpage
+
+\input{sections/01-introduction}
+\input{sections/02-integrity-state}
+\input{sections/03-history-entanglement}
+\input{sections/04-self-encoding}
+\input{sections/05-journal-web}
+\input{sections/06-applications}
+\input{sections/07-related-work}
+\input{sections/08-assessment}
+\input{sections/glossary}
+
+\phantomsection
+\addcontentsline{toc}{section}{References}
+\bibliographystyle{plain}
+\bibliography{references}
+\end{document}

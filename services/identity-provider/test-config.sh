@@ -6,7 +6,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 cp "$(dirname "$0")/identity.schema.json" "$tmp_dir/identity.schema.json"
 
-DOMAIN=localhost:8192 \
+ORIGIN=http://localhost:8192 \
 KRATOS_CONFIG_DIR="$tmp_dir" \
 KRATOS_DATA_DIR="$tmp_dir" \
 KRATOS_CONFIG_DRY_RUN=1 \
@@ -37,6 +37,7 @@ assert_not_contains() {
 assert_contains "base_url: http://localhost:8192/auth/.ory/"
 assert_contains "ui_url: http://localhost:8192/auth/recovery"
 assert_contains "enabled: false"
+assert_contains "min_password_length: 8"
 assert_not_contains "courier:"
 assert_not_contains "connection_uri:"
 

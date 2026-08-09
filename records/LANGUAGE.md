@@ -35,9 +35,19 @@
 ### Execution Flow
 
 - External calls enter through the user-facing interface and eventually evaluate record code inside the journal runtime.
-- Interface code is responsible for authentication, authorization, batching, root-object persistence, and orchestration of network fetches.
+- Interface code is responsible for authentication, authorization, stored-program execution, batching, root-object persistence, and orchestration of network fetches.
+- `set!` and `set-batch!` accept optional expected staged leaf values (byte content or `(nothing)`, interpreted through `expression?` at Interface). Omitted expectations preserve unconditional writes; supplied expectations are checked together against one pre-write snapshot, return `#f` without writing on mismatch, and require both read and write authorization. Duplicate batch paths are compared against that same snapshot and successful replacements retain input order.
+- `get-batch` returns ordered staged path/content entries. `get-batch` and `set-batch!` may use one nonempty signed working route: the signature binds the complete ordered paths, values, expression codec flag, and exact presence/content of optional expectations; terminal Interface authenticates the invocation and authorizes every member before one snapshot-consistent batch execution. `resolve-batch` accepts complete Self-relative committed paths, preserves order and duplicates across heterogeneous route/history groups, and keeps verified multiproofs internal; optional pin status is evaluated per origin path.
+- `pin-batch!` prepares and verifies every remote proof group before one atomic local retention mutation. `unpin-batch!` applies its local digest-preserving cuts atomically. Peer-facing `trace-batch` serializes the union of authorized same-head path accesses once.
+- `call!` is implemented entirely by Interface: it loads the current staged Scheme procedure once for that dispatch, evaluates it outside `sync-let` in an Interface-owned masked environment, and applies it to an opaque authenticated journal capability followed by one explicit argument list.
+- Invoking a staged program is limited to the root caller and configured local Interface administrators, whose existing authority includes staged `get`. Namespace ownership and Authorization rules cannot grant `call!`, and remote/federated principals are always denied. Every nested `call!` target revalidates the hidden credentials and current administrator list before loading or executing it.
+- Stored programs call ordinary Interface methods as `((journal 'method) arguments ...)`; each call is an independent blocking Journal call, so `call!` does not promise atomicity.
+- The journal capability fixes the original authentication context without exposing credentials, and Interface rejects any result containing procedures or other capability-bearing evaluator objects.
+- `call!` is an ergonomic Scheme-native orchestration convenience, not a provenance boundary; durable provenance is expressed by the staged operations and committed transitions it invokes.
+- `(*state* *periodic*)` is the one reserved periodic-program path. Only Root or a configured local Interface administrator may write/delete it; Authorization rules cannot grant that write.
+- When a non-mutating outer Interface step completes a blocking Ledger commit that created a new index, it launches the current periodic program exactly once through detached `call!`, passing that zero-based index. Unchanged steps and internal step continuations never launch it. Launches from different indexes may overlap and complete out of order; no coalescing or single-flight semantics are implied. Dispatch is not a durable outbox: process failure after commit but before detached launch can lose that launch.
 - Object classes should expose ordinary methods and avoid depending on a particular external call shape.
-- `(sync-eval object-node #f)` creates a live callable object from stored node state.
+- `(sync-eval object-node)` creates a live callable object from stored node state.
 - Mutating a live object changes that live object's current state, but it does not automatically update parent objects or root storage.
 - Interface and ledger code must persist mutated objects explicitly by storing their returned `(object)` node back into the containing object or root path.
 - When a workflow combines remote data and mutation, fetch or compute the remote data first, then call mutation methods with that data, then persist the mutated object node.
@@ -48,7 +58,7 @@
 
 - The core portable unit of data in the Synchronic Web is a self-describing structure called an object.
 - Objects are representable as a sync node that contains executable code on the left and durable state on the right.
-- `(sync-eval object-node #f)` returns the callable object.
+- `(sync-eval object-node)` returns the callable object.
 - Calling that object with no argument returns its current node representation.
 - Objects may also accept arguments, but argument behavior is object-specific.
 - The no-argument call is the only portable behavior code should assume when invoking an arbitrary object without a documented protocol.
@@ -67,8 +77,10 @@
 - Mutating methods use a `!` suffix when they update durable object state.
 - Standard objects dispatch symbol arguments to methods or built-in object operations.
 - Standard objects read internal state when called with a list argument.
-- Standard method dispatch packages the current object state and explicit arguments into a strict `sync-eval` call.
-- Standard method calls are deterministic, including nested standard method calls, because `standard.scm` routes method execution through strict object evaluation.
+- Standard objects dispatch methods directly and restore their prior state if a method raises an error.
+- Direct `(sync-eval node)` is only object loading; it does not by itself authorize host code to execute shared or transferred behavior.
+- Shared Tree, Chain, Standard traversal, and custom behavior must run inside a coarse `sync-let` boundary. Nested calls then remain in the same boundary.
+- `sync-let` freshly parses its body, exposes only the shared capability manifest through a fresh child of a closed request-local template, copies inert inputs/results, and rejects procedures or environments crossing the boundary. Its active-boundary and dynamic-evaluation machinery is internal and has no Scheme-visible helper primitive.
 - Time, random data, remote responses, and other external inputs should be prepared outside object mutation methods and passed as explicit arguments.
 - `self` inside a method is the callable object itself.
 - `(self)` returns the current object node.
@@ -84,7 +96,10 @@
 
 - `((standard 'make) class)` creates an uninitialized object shell.
 - `((standard 'init) class . args)` creates an object shell and calls `*init*` when present.
-- Use `(sync-eval object-node #f)` when a live object closure is needed.
+- Use `(sync-eval object-node)` to obtain the object's raw live closure only where the caller already owns the execution boundary.
+- Trusted Interface orchestration wraps only code-digest-matched Standard, Authorization, and Ledger nodes with Standard's internal local runtime. This does not change the stored node.
+- Local wrappers retain the ordinary object/state protocol and roll back method state on errors. Methods designated as shared enter `sync-let` and return only copied inert values or sync nodes.
+- Transferred and custom child objects are never promoted to the host-local runtime; they execute through shared Standard operations inside `sync-let`.
 - Invoke a method by first dispatching on its symbol: `((object 'method) arg ...)`.
 - A live object and the node that produced it can diverge after mutation.
 - Persist `(object)` when the mutated object state should survive outside the current call.
@@ -113,6 +128,8 @@
   - `deep-call` evaluates a callback against an object at a path without rebuilding parent state.
   - `deep-call!` evaluates a callback and rebuilds parent state with the mutated child.
   - `deep-merge!` merges sync-node structures only when digests match.
+  - `serialize` runs an optional traversal query in the masked shared-code environment; Journal primitive tracing and Rust structural encoding emit the compact `c`/`s`/`p` proof format.
+  - `deserialize` reconstructs that format structurally without evaluating serialized input.
 - Classes that participate in deep operations should implement the relevant public
   methods with compatible semantics.
 - Digest-preserving operations must verify that the digest is unchanged before replacing proof or stub state.
@@ -123,6 +140,7 @@
 
 - Keep path conventions class-specific unless they are documented as a shared object protocol.
 - Validate path shape before mutation when a class accepts paths.
+- Tree and root path stores remain directory maps at the empty path. `(nothing)` may clear the complete map, and copying a directory may replace it, but scalar or object values must be stored beneath a nonempty path.
 - Do not encode durable semantic state only in path conventions when it belongs in object state.
 - Do not use sync-node values as keys unless the class explicitly supports that.
 - Keep class code in active files under `records/lisp`; use `records/lisp/archive` only as reference material.

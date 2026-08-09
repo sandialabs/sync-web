@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.5.0
+
+### Added
+
+- **Reciprocal federation** — Added exact committed-object routing, direct terminal invocation limited to `get`, `set!`, `get-batch`, `set-batch!`, and `resolve`, terminal-local authorization, and one-round-trip reciprocal bridge synchronization.
+- **Federated service context** — Gateway uses explicit working-route context for staged scalar `get`/`set!` and dedicated `get-batch`/`set-batch!`; Explorer currently uses it for scalar `get`/`set!`. Committed resolution and retention use canonical full paths while Interface keeps proof retention local to Self.
+- **Bridge acceptance configuration** — Added Explorer controls for automatic or preapproved incoming bridge establishment through the generic configuration API.
+- **Raw value view** — Added view-only exact-byte inspection in Stage and Ledger with inert text/source, signature-checked browser media previews, hex fallback, and exact-byte download.
+- **Deterministic Records scenarios** — Added an isolated-process suite and discrete-event multi-journal scheduler with fixed time/randomness, stable message ordering, latency/drop schedules, trace capture, and parallel case execution.
+- **Journal key rotation** — Added root-authorized journal signing-key transitions, retained key epochs, and exact historical authentication indexes for reciprocal federation.
+- **Release diagnostics** — Added compact changed-component checks, exact-image release QA, a fresh single-node administrator/nonadministrator journey, and project-scoped network readiness/probe/snapshot tooling with semantic activity counters and redacted artifacts.
+- **Administrator staged programs** — Added local-only `call!` for staged Scheme procedures under the root caller or configured local Interface administrators. Namespace owners and Authorization-policy grantees cannot gain execution authority, rules naming the removed `call!` field fail closed, and every remote/federated principal is denied. Version 1.5 defines no execution meter, limit, budget, timeout, or meter configuration because those controls cannot yet be enforced reliably. Nested calls re-enter current authentication and administrator checks, capabilities cannot escape, and completed nested effects remain non-atomic when a later program operation fails.
+- **Periodic staged program** — When an outer Interface step creates a new Ledger index, launch the optional admin-managed `(*state* *periodic*)` program once through detached `call!` with that committed index. Launches may overlap and complete out of order; unchanged steps, internal optimistic retries, and step continuations do not create duplicate launches.
+
+### Changed
+
+- **Separated Root and Interface credentials** — Root remains Journal-only and host-managed, while the independently rotatable Interface bearer is persisted in private Root state and shared only with Gateway. Installation and both rotation directions reject equivalent credentials. Journal/Gateway diagnostics omit request and response bodies. Backups therefore contain a live Interface credential but never Root or private signing keys.
+- **Journal SDK 1.4.0** — Bumped the crate for exact one-argument `sync-eval`, shared-code isolation, request-local proof serialization, deterministic scenario support, and related evaluator/persistence changes.
+- **Tree-native values** — Removed the durable Document wrapper and general metadata API; user payloads are byte vectors stored directly by Tree, while `expression?` remains an Interface boundary codec and preview types are inferred safely at read time. Transition audit values now record the encoded bytes received by Ledger rather than the caller-side expression.
+- **Bridge model** — Replaced publishers, subscribers, and Push/Pull/None negotiation with one reciprocal bridge relationship and one synchronization initiator.
+- **Explorer navigation** — Stage and Ledger share a working-journal breadcrumb; Ledger adds a mirrored historical breadcrumb and an in-place synchronization spinner, while Access and Admin remain Self-local.
+- **Bridge administration** — Presents a spacious bridge list and explicit incoming preapproval allow/remove controls without legacy reciprocal/publisher/subscriber terminology.
+- **Federation routes** — Finite routes may revisit their origin; terminal policy, rather than routing mechanics, decides whether a self-targeted request is allowed.
+- **Ledger path syntax** — Uses directional bridge names directly as one flat traversal prefix, with optional interleaved indexes, instead of repeating `*bridge*` before every hop. Public committed `resolve`, `pin!`, and `unpin!` now accept this same full path without separate federation cursors or client-managed proof responses.
+- **Social-agent model** — Creates configurable deterministic users on every journal, splits each user's fixed keys between public and private state, grants same-user private access over exact SEGMENTS-bounded walks including finite journal revisits, runs independent per-user activity/accounting, and exercises path-only `pin!`/`unpin!` without a redundant client-side proof resolve.
+- **Execution isolation** — Made `sync-eval` an exact one-argument object loader, introduced explicit shared-code `sync-let` boundaries, moved proof serialization to request-local primitive tracing over the authoritative Journal session, and retained rollback for trusted host dispatch. Each request builds one sealed capability template and clones fresh direct slots for every boundary without sharing state, results, proofs, or mutable child environments.
+- **Records composition** — Split networking, routing, invocation authentication, and peer operational state into a trusted Federation class while Ledger remains authoritative for data, history, proofs, retention, and peer evidence and Authorization remains policy-only.
+- **Ephemeral interface signing** — Derives journal-bound interface and continuation signing keys only for the authenticated request, persists public keys alone, and accepts a temporary stale-route gap during explicit interface-secret rotation instead of retaining old private keys.
+- **Fresh installation policy** — Removed in-place record recoding and legacy peer/key migration machinery. The 1.5 installer atomically rejects every nonfresh database; Compose records the platform version in fresh volumes and rejects missing/mismatched markers before server startup. Preserve 1.4.x databases with their exact runtime for read-only historical access and start 1.5 on a new volume.
+- **Records performance** — Reduced repeated contained Ledger head traversal and eliminated per-read 256-bit Tree lookup lists while preserving proof, wire, history, and mixed-code state behavior.
+
+### Fixed
+
+- **Deployment admin seeding** — Renders `INTERFACE_ADMINS` as literal local principal data so configured administrators are authorized immediately on a fresh Compose installation and can replace the admin list.
+- **Metrics boundary** — Keeps Prometheus metrics on the private Gateway service, returns `404` for public router `/metrics` requests in HTTP and TLS modes, and bounds unmatched Gateway request labels to one constant series.
+- **Social benchmark saturation** — Restores `ACTIVITY=0` as continuous no-delay federation traffic for concurrency and throughput benchmarks, with `ACTIVITY_DISABLED=1` as the explicit setup-only mode.
+- **Bridge head exchange** — Returns the receiver-known historical digest and merges retained temporary structure into locally pruned signed-head proofs, preserving synchronization under concurrent pin/unpin activity.
+- **Remote proof retention** — Deserializes proof node maps independently of JSON object key order so real Gateway resolve responses can be pinned locally at the origin.
+- **Scoped Explorer routes** — Roots Stage and Ledger trees at the shared `*state*` namespace with the signed-in user's real folder sorted first and emphasized, refreshes latest origin snapshots before extending a route, traverses ordinary ancestor names without exposing reserved state or unauthorized child content, hides mutation controls outside the exact writable remote bucket, presents authorization failures as stable errors, keeps mobile global controls and Access scroll position stable during refresh, and visibly marks remote-disabled Access/Admin controls as Self-local.
+- **Strict evaluation isolation** — Re-evaluates object state in its current proof/materialization context because content words alone do not identify available descendants, while retaining only immutable-code loader caching and rejecting missing graph dependencies before durable commit.
+- **Federation startup** — Reports uncommitted bridge routes explicitly and waits for complete signed route reads before social-agent activity metrics begin.
+- **Sticky route readiness** — Carries an already-hydrated reverse interface key through terminal route serialization with an exact bounded trace, preventing a ready route from reverting to “reverse interface key is unavailable” across process boundaries or unchanged Journal restart while preserving roots and proof digests.
+- **Bridge re-establishment** — Retains alias/root identity tombstones across deletion, allows the same relationship to be restored (including under preapproval policy), and cleanly rejects alias or root substitution.
+- **Localized Explorer denial** — Keeps the tree mounted and places access failures beneath the denied expanded row so allowed siblings, collapse, and upward navigation remain usable.
+- **Historical retention** — Preserves Log Chain branch boundaries and pinned proof paths across pruning, truncation, explicit window shrink/widen, retained-history boundaries, and separate-process reopen.
+- **Tree and batch invariants** — Prevents writes through unavailable stubs, preserves absent-path/non-membership proof digests, validates full batch shape before mutation, and removes missing-copy ghosts.
+- **Federated WebDAV** — Forwards latest and explicit multi-hop ledger paths in canonical full form and correctly lists, copies, moves, and deletes percent-escaped filenames.
+- **Workbench errors and mobile layout** — Treats canonical journal `(error ...)` values returned over HTTP 200 as failures while preserving raw request/response text, and keeps query, output, and history controls usable at narrow widths.
+
 ## 1.4.3
 
 ### Changed

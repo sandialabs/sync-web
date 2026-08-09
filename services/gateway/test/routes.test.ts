@@ -229,6 +229,371 @@ test("POST /api/v1/general/get accepts JSON keyword-object payload with Kratos s
   });
 });
 
+test("POST /api/v1/general/get forwards authenticated bridge discovery", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const args = { path: ["*bridge*"] };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/get",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: args,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "get",
+    args,
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  });
+});
+
+test("POST /api/v1/general/resolve forwards one canonical committed path", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/resolve",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: { path: [-1, "carol", 3, "bob", 7, "*state*", "docs"] },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(mock.jsonCalls[0], {
+    functionName: "resolve",
+    args: { path: [-1, "carol", 3, "bob", 7, "*state*", "docs"] },
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  });
+});
+
+test("batch data operations forward canonical paths and method names", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const paths = [
+    [-1, "peer-a", -1, "*state*", "a"],
+    [-1, "*state*", "local"],
+  ];
+  const cases = [
+    { operation: "get-batch", functionName: "get-batch" },
+    { operation: "resolve-batch", functionName: "resolve-batch" },
+    { operation: "pin-batch", functionName: "pin-batch!" },
+    { operation: "unpin-batch", functionName: "unpin-batch!" },
+  ];
+  for (const entry of cases) {
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${entry.operation}`,
+      headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+      payload: { paths },
+    });
+    assert.equal(result.statusCode, 200, entry.operation);
+  }
+  assert.deepEqual(mock.jsonCalls, cases.map((entry) => ({
+    functionName: entry.functionName,
+    args: { paths },
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  })));
+
+  const tracePaths = [["*state*", "a"], ["*state*", "b"]];
+  const traced = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/trace-batch",
+    headers: { "content-type": "application/json" },
+    payload: { index: 3, paths: tracePaths },
+  });
+  assert.equal(traced.statusCode, 200);
+  assert.deepEqual(mock.jsonCalls[4], {
+    functionName: "trace-batch",
+    args: { index: 3, paths: tracePaths },
+    authentication: undefined,
+    identityId: undefined,
+  });
+
+  const stagedPaths = [["*state*", "a"], ["*state*", "b"]];
+  const setBatchArgs = {
+    paths: stagedPaths,
+    values: ["new-a", "new-b"],
+    expected: ["old-a", "old-b"],
+  };
+  const setBatch = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/set-batch",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: setBatchArgs,
+  });
+  assert.equal(setBatch.statusCode, 200);
+  assert.deepEqual(mock.jsonCalls[5], {
+    functionName: "set-batch!",
+    args: setBatchArgs,
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  });
+  assert.deepEqual(setBatch.json(), { ok: true, mode: "json", function: "set-batch!" });
+});
+
+test("every batch operation accepts canonical Scheme payloads", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const cases = [
+    ["get-batch", "get-batch", "((paths ((*state* alice a) (*state* alice missing))) (expression? #t))", true],
+    ["set-batch", "set-batch!", "((paths ((*state* alice a))) (values (new)) (expected (old)) (expression? #t))", true],
+    ["resolve-batch", "resolve-batch", "((paths ((-1 *state* alice a))) (pinned? #t) (expression? #t))", true],
+    ["pin-batch", "pin-batch!", "((paths ((-1 *state* alice a))))", true],
+    ["unpin-batch", "unpin-batch!", "((paths ((-1 *state* alice a))))", true],
+    ["trace-batch", "trace-batch", "((index -1) (paths ((*state* alice a))))", false],
+  ] as const;
+  for (const [operation, functionName, payload, authenticated] of cases) {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${operation}`,
+      headers: {
+        ...(authenticated ? { cookie: SESSION_COOKIE } : {}),
+        "content-type": "text/plain",
+      },
+      payload,
+    });
+    assert.equal(response.statusCode, 200, operation);
+    assert.deepEqual(response.json(), { ok: true, mode: "scheme", function: functionName });
+  }
+  assert.deepEqual(mock.schemeCalls.map((call) => call.functionName),
+    cases.map((entry) => entry[1]));
+  for (const [index, entry] of cases.entries()) {
+    assert.match(mock.schemeCalls[index].expression,
+      new RegExp(`^\\(\\(function ${entry[1].replace("!", "\\!")}\\)`));
+  }
+});
+
+test("batch JSON preserves the 1,024 boundary and relays Journal limit errors", async (t) => {
+  const paths = Array.from({ length: 1024 }, (_, index) => ["*state*", "alice", index]);
+  const committed = paths.map((path) => [-1, ...path]);
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const cases = [
+    ["get-batch", { paths }],
+    ["set-batch", { paths, values: paths, expected: paths, "expression?": true }],
+    ["resolve-batch", { paths: committed }],
+    ["pin-batch", { paths: committed }],
+    ["unpin-batch", { paths: committed }],
+    ["trace-batch", { index: -1, paths }],
+  ] as const;
+  for (const [operation, payload] of cases) {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${operation}`,
+      headers: {
+        ...(operation === "trace-batch" ? {} : { cookie: SESSION_COOKIE }),
+        "content-type": "application/json",
+      },
+      payload,
+    });
+    assert.equal(response.statusCode, 200, operation);
+  }
+  assert.equal(mock.jsonCalls.length, cases.length);
+  for (const call of mock.jsonCalls) {
+    assert.equal((call.args as { paths: unknown[] }).paths.length, 1024);
+  }
+
+  const semantic: JournalClient = {
+    ...mock.client,
+    async callJson(): Promise<unknown> {
+      throw new JournalSemanticError({
+        code: "argument-error",
+        message: "Batch path count exceeds 1024",
+        details: ["error", "argument-error", "Batch path count exceeds 1024"],
+      });
+    },
+  };
+  const rejecting = await createApp({ allowAdminRoutes: false, journal: semantic });
+  t.after(async () => rejecting.close());
+  const response = await rejecting.inject({
+    method: "POST",
+    url: "/api/v1/general/get-batch",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: { paths: [...paths, ["*state*", "alice", 1024]] },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(response.json(), {
+    error: "argument-error",
+    message: "Batch path count exceeds 1024",
+    details: ["error", "argument-error", "Batch path count exceeds 1024"],
+    source: "journal",
+  });
+});
+
+test("removed general batch and copy routes remain absent", async (t) => {
+  const app = await createApp({ allowAdminRoutes: false });
+  t.after(async () => app.close());
+  for (const operation of ["batch", "copy"]) {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${operation}`,
+      headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+      payload: {},
+    });
+    assert.equal(response.statusCode, 404, operation);
+  }
+});
+
+test("Gateway restricts federation context to staged scalar and dedicated batch access", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const setResult = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/set",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: {
+      path: ["*state*", "docs"], value: "hello",
+      "$federation": { route: ["bob"] },
+    },
+  });
+  assert.equal(setResult.statusCode, 200);
+  assert.deepEqual(mock.jsonCalls[0]?.routeTarget, ["bob"]);
+
+  const getBatchResult = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/get-batch",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: {
+      paths: [["*state*", "docs"], ["*state*", "docs"]],
+      "$federation": { route: ["bob"] },
+    },
+  });
+  assert.equal(getBatchResult.statusCode, 200);
+  assert.equal(mock.jsonCalls[1]?.functionName, "get-batch");
+  assert.deepEqual(mock.jsonCalls[1]?.routeTarget, ["bob"]);
+  assert.deepEqual(mock.jsonCalls[1]?.args, {
+    paths: [["*state*", "docs"], ["*state*", "docs"]],
+  });
+
+  const setBatchResult = await app.inject({
+    method: "POST",
+    url: "/api/v1/general/set-batch",
+    headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+    payload: {
+      paths: [["*state*", "docs"], ["*state*", "docs"]],
+      values: ["hello", "world"], expected: [false, ["nothing"]],
+      "$federation": { route: ["bob"] },
+    },
+  });
+  assert.equal(setBatchResult.statusCode, 200);
+  assert.equal(mock.jsonCalls[2]?.functionName, "set-batch!");
+  assert.deepEqual(mock.jsonCalls[2]?.routeTarget, ["bob"]);
+  assert.deepEqual(mock.jsonCalls[2]?.args, {
+    paths: [["*state*", "docs"], ["*state*", "docs"]],
+    values: ["hello", "world"], expected: [false, ["nothing"]],
+  });
+
+  for (const operation of [
+    "resolve", "resolve-batch", "trace-batch",
+    "pin", "pin-batch", "unpin-batch", "call", "bridge", "config", "admins", "route",
+    "authorizations", "authorize", "deauthorize",
+  ]) {
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${operation}`,
+      headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+      payload: { "$federation": { route: ["bob"] } },
+    });
+    assert.equal(result.statusCode, 400, operation);
+    assert.match(result.json().message, /Federation context is not allowed/);
+  }
+});
+
+test("Gateway rejects outward federation history", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+
+  const cases = [
+    { operation: "get", context: { route: ["bob"], history: [-1, -1] } },
+    { operation: "resolve", context: { route: [], history: [-1] } },
+    { operation: "resolve", context: { route: ["bob"], history: [-1] } },
+  ];
+  for (const entry of cases) {
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${entry.operation}`,
+      headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+      payload: { path: [-1, "*state*", "docs"], "$federation": entry.context },
+    });
+    assert.equal(result.statusCode, 400);
+  }
+});
+
+test("authorization JSON routes preserve key-index and Resolve as distinct exact fields", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+  const rule = {
+    principal: ["peer-a", "*state*", "bob"],
+    "key-index": [-32, -1],
+    path: ["docs"], get: true, "set!": false, resolve: [0, -1],
+  };
+  const cases = [
+    { operation: "authorizations", functionName: "authorizations", args: { user: ["*state*", "alice"] } },
+    { operation: "authorize", functionName: "authorize!", args: { user: ["*state*", "alice"], rule } },
+    { operation: "deauthorize", functionName: "deauthorize!", args: { user: ["*state*", "alice"], rule } },
+  ];
+
+  for (const entry of cases) {
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${entry.operation}`,
+      headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+      payload: entry.args,
+    });
+    assert.equal(result.statusCode, 200, entry.operation);
+  }
+  assert.deepEqual(mock.jsonCalls, cases.map((entry) => ({
+    functionName: entry.functionName,
+    args: entry.args,
+    authentication: JOURNAL_SECRET,
+    identityId: IDENTITY_ID,
+  })));
+});
+
+test("authorization Scheme routes preserve exact key-index and Resolve expressions", async (t) => {
+  const mock = createMockJournal();
+  const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
+  t.after(async () => app.close());
+  const rule = "((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (get #t) (set! #f) (resolve (0 -1)))";
+  const cases = [
+    { operation: "authorizations", functionName: "authorizations", args: "((user (*state* alice)))" },
+    { operation: "authorize", functionName: "authorize!", args: `((user (*state* alice)) (rule ${rule}))` },
+    { operation: "deauthorize", functionName: "deauthorize!", args: `((user (*state* alice)) (rule ${rule}))` },
+  ];
+
+  for (const entry of cases) {
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/v1/general/${entry.operation}`,
+      headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
+      payload: entry.args,
+    });
+    assert.equal(result.statusCode, 200, entry.operation);
+  }
+  assert.deepEqual(mock.schemeCalls.map((call) => call.functionName), cases.map((entry) => entry.functionName));
+  cases.forEach((entry, index) => {
+    assert.ok(mock.schemeCalls[index].expression.includes(`(arguments ${entry.args})`));
+    assert.match(mock.schemeCalls[index].expression, /\(authentication \(\(identity \(\*state\* test-user-id\)\)/);
+  });
+});
+
 test("POST /api/v1/general/admins forwards to interface admin operation", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
@@ -319,96 +684,76 @@ test("POST /api/v1/general/get accepts Lisp payload and injects identity into ex
   );
   assert.match(
     mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity test-user-id\) \(credentials "test-journal-secret"\)\)\)/
+    /\(authentication \(\(identity \(\*state\* test-user-id\)\) \(credentials "test-journal-secret"\)\)\)/
   );
 });
 
-test("POST /api/v1/general/batch accepts JSON payload", async (t) => {
+test("POST /api/v1/general/call forwards a staged program path and arguments", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const args = {
-    queries: [
-      { function: "get", arguments: { path: ["*state*", "docs"] } },
-      { function: "config" },
-    ],
-  };
-
   const res = await app.inject({
     method: "POST",
-    url: "/api/v1/general/batch",
+    url: "/api/v1/general/call",
     headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
-    payload: args,
+    payload: {
+      path: ["*state*", "test-user-id", "programs", "echo"],
+      arguments: [1, "two"],
+    },
   });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(mock.schemeCalls.length, 1);
-  assert.equal(mock.schemeCalls[0].functionName, "batch!");
-  assert.match(mock.schemeCalls[0].expression, /^\(\(function batch!\) /);
-  assert.ok(mock.schemeCalls[0].expression.includes("(queries "));
-  assert.ok(mock.schemeCalls[0].expression.includes("((function get) (arguments ((path (*state* docs))))"));
-  assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
-  assert.match(
-    mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity test-user-id\) \(credentials "test-journal-secret"\)\)\)/
-  );
+  assert.equal(mock.jsonCalls.length, 1);
+  assert.equal(mock.jsonCalls[0].functionName, "call!");
+  assert.deepEqual(mock.jsonCalls[0].args, {
+    path: ["*state*", "test-user-id", "programs", "echo"],
+    arguments: [1, "two"],
+  });
+  assert.equal(mock.jsonCalls[0].authentication, "test-journal-secret");
+  assert.equal(mock.jsonCalls[0].identityId, "test-user-id");
 });
 
-test("POST /api/v1/general/batch decodes Scheme batch results for JSON callers", async (t) => {
+test("POST /api/v1/general/call rejects a nested arguments wrapper", async (t) => {
   const mock = createMockJournal();
-  mock.client.callScheme = async (input: { expression: string; functionName: string }) => {
-    mock.schemeCalls.push(input);
-    return '(#t round3 (directory ((data directory)) #t) ((public ((window 1024)))) #u(1 2 255))';
-  };
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
   const res = await app.inject({
     method: "POST",
-    url: "/api/v1/general/batch",
+    url: "/api/v1/general/call",
     headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
-    payload: { queries: [{ function: "set!", arguments: { path: ["*state*", "admin", "x"], value: "round3", "expression?": true } }] },
+    payload: {
+      path: ["*state*", "test-user-id", "programs", "echo"],
+      arguments: { arguments: [] },
+    },
   });
 
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json(), [
-    true,
-    "round3",
-    ["directory", { data: "directory" }, true],
-    { public: { window: 1024 } },
-    { "*type/byte-vector*": "0102ff" },
-  ]);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error, "invalid_request");
+  assert.equal(mock.jsonCalls.length, 0);
 });
 
-test("POST /api/v1/general/batch accepts Lisp payload and injects identity into expression", async (t) => {
+test("POST /api/v1/general/call rejects transport authority fields", async (t) => {
   const mock = createMockJournal();
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/v1/general/batch",
-    headers: { cookie: SESSION_COOKIE, "content-type": "text/plain" },
-    payload:
-      "(((queries (((function get) (arguments ((path (*state* docs)))) ((function config))))))",
-  });
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(mock.schemeCalls.length, 1);
-  assert.equal(mock.schemeCalls[0].functionName, "batch!");
-  assert.match(mock.schemeCalls[0].expression, /^\(\(function batch!\) /);
-  assert.ok(mock.schemeCalls[0].expression.includes("(queries "));
-  assert.ok(
-    mock.schemeCalls[0].expression.includes(
-      "((function get) (arguments ((path (*state* docs))))"
-    )
-  );
-  assert.ok(mock.schemeCalls[0].expression.includes("((function config))"));
-  assert.match(
-    mock.schemeCalls[0].expression,
-    /\(authentication \(\(identity test-user-id\) \(credentials "test-journal-secret"\)\)\)/
-  );
+  for (const reserved of ["function", "authentication"] as const) {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/general/call",
+      headers: { cookie: SESSION_COOKIE, "content-type": "application/json" },
+      payload: {
+        path: ["*state*", "test-user-id", "programs", "echo"],
+        arguments: [],
+        [reserved]: "forged",
+      },
+    });
+    assert.equal(res.statusCode, 400, reserved);
+    assert.equal(res.json().error, "invalid_request", reserved);
+  }
+  assert.equal(mock.jsonCalls.length, 0);
 });
 
 test("returns 415 for unsupported content type", async (t) => {
@@ -538,14 +883,14 @@ test("POST /api/v1/journal/interface forwards Scheme body to journal", async (t)
     method: "POST",
     url: "/api/v1/journal/interface",
     headers: { "content-type": "text/plain" },
-    payload: "((function synchronize) (arguments ((index 0))))",
+    payload: "((function info))",
   });
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.headers["content-type"], "text/plain; charset=utf-8");
   assert.equal(res.body, "((public-key #u(1 2 3)))");
   assert.equal(mock.proxiedSchemeExpressions.length, 1);
-  assert.equal(mock.proxiedSchemeExpressions[0], "((function synchronize) (arguments ((index 0))))");
+  assert.equal(mock.proxiedSchemeExpressions[0], "((function info))");
 });
 
 test("POST /api/v1/journal/interface forwards JSON body to journal", async (t) => {
@@ -689,7 +1034,7 @@ test("POST /api/v1/general/set forwards with auth in JSON mode", async (t) => {
   const app = await createApp({ allowAdminRoutes: false, journal: mock.client });
   t.after(async () => app.close());
 
-  const args = { path: ["*state*", "mykey"], value: "myvalue" };
+  const args = { path: ["*state*", "mykey"], value: "myvalue", expected: false };
   const res = await app.inject({
     method: "POST",
     url: "/api/v1/general/set",
@@ -732,9 +1077,9 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
   await app.ready();
   t.after(async () => app.close());
 
-  type SchemaWithExample = { example?: unknown };
+  type SchemaWithExample = { example?: unknown; description?: string; type?: unknown };
   type MediaType = { schema?: SchemaWithExample };
-  type Operation = { requestBody?: { content?: Record<string, MediaType> } };
+  type Operation = { description?: string; requestBody?: { content?: Record<string, MediaType> } };
   type PathItem = Record<string, Operation>;
   const paths = (app.swagger() as { paths: Record<string, PathItem> }).paths;
 
@@ -742,21 +1087,58 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
     paths[path]?.post?.requestBody?.content?.["application/json"]?.schema?.example;
 
   assert.deepEqual(schemaExample("/api/v1/general/get"), { path: ["*state*", "mykey"], "expression?": true });
+  assert.deepEqual(schemaExample("/api/v1/general/get-batch"), {
+    paths: [["*state*", "a"], ["*state*", "b"]], "expression?": true,
+  });
+  assert.deepEqual(schemaExample("/api/v1/general/set-batch"), {
+    paths: [["*state*", "mykey"]], values: ["myvalue"], expected: ["oldvalue"], "expression?": true,
+  });
+  assert.deepEqual(schemaExample("/api/v1/general/trace"), {
+    index: 0, path: ["*state*", "mykey"],
+  });
+  assert.deepEqual(schemaExample("/api/v1/general/resolve-batch"), {
+    paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]],
+    "pinned?": true, "expression?": true,
+  });
+  assert.deepEqual(schemaExample("/api/v1/general/trace-batch"), {
+    index: 0, paths: [["*state*", "a"], ["*state*", "b"]],
+  });
+  assert.deepEqual(schemaExample("/api/v1/general/pin-batch"), {
+    paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]],
+  });
+  assert.deepEqual(schemaExample("/api/v1/general/unpin-batch"), {
+    paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]],
+  });
   assert.deepEqual(schemaExample("/api/v1/general/bridge"), {
     name: "peer-a",
-    "info-local": {
-      interface: "http://peer-a/interface",
-      policy: { publish: "push", subscribe: "pull" },
-      role: false,
-      "remote-name": "my-journal",
-    },
+    interface: "http://peer-a/interface",
+    "remote-name": "my-journal",
   });
   assert.deepEqual(schemaExample("/api/v1/general/admins"), {});
-  assert.deepEqual(schemaExample("/api/v1/general/set-admins"), { admins: ["admin", "alice"] });
+  assert.deepEqual(schemaExample("/api/v1/general/set-admins"), { admins: [["*state*", "admin"], ["*state*", "alice"]] });
   assert.deepEqual(schemaExample("/api/v1/general/set-window"), { value: 128 });
-  assert.deepEqual(schemaExample("/api/v1/general/batch"), {
-    queries: [{ function: "get", arguments: { path: ["*state*", "mykey"] } }, { function: "config" }],
+  assert.deepEqual(schemaExample("/api/v1/general/call"), {
+    path: ["*state*", "alice", "programs", "example"], arguments: [],
   });
+  const exactAuthorization = {
+    user: ["*state*", "alice"],
+    rule: {
+      principal: ["peer-a", "*state*", "bob"],
+      "key-index": [-32, -1], path: ["docs"], get: true, "set!": false, resolve: [0, -1],
+    },
+  };
+  assert.deepEqual(schemaExample("/api/v1/general/authorize"), exactAuthorization);
+  assert.deepEqual(schemaExample("/api/v1/general/deauthorize"), exactAuthorization);
+  const setBatchOperation = paths["/api/v1/general/set-batch"]?.post;
+  assert.match(setBatchOperation?.description ?? "", /one staged snapshot/);
+  assert.match(setBatchOperation?.description ?? "", /atomically in request order/);
+  const authorizationOperation = paths["/api/v1/general/authorize"]?.post;
+  assert.match(authorizationOperation?.description ?? "", /Self-local/);
+  assert.match(authorizationOperation?.description ?? "", /terminal-local committed bridge-state authentication window/);
+  assert.match(authorizationOperation?.description ?? "", /document-history indexes/);
+  const authorizationSchema = authorizationOperation?.requestBody?.content?.["application/json"]?.schema;
+  assert.deepEqual(authorizationSchema?.type, ["array", "object"]);
+  assert.match(authorizationSchema?.description ?? "", /schema stays permissive/);
   assert.deepEqual(schemaExample("/api/v1/root/step"), []);
   assert.deepEqual(schemaExample("/api/v1/root/eval"), [["+", 1, 2]]);
 
@@ -764,10 +1146,28 @@ test("OpenAPI spec includes per-operation body examples", async (t) => {
     paths[path]?.post?.requestBody?.content?.["text/plain"]?.schema?.example;
 
   assert.equal(schemeExample("/api/v1/general/get"), "((path (*state* mykey)))");
-  assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (info-local ((interface "http://peer-a/interface") (policy ((publish push) (subscribe pull))) (role #f) (remote-name my-journal))))');
+  assert.equal(schemeExample("/api/v1/general/get-batch"),
+    "((paths ((*state* a) (*state* b))))");
+  assert.equal(schemeExample("/api/v1/general/set-batch"),
+    "((paths ((*state* mykey))) (values (myvalue)) (expected (oldvalue)) (expression? #t))");
+  assert.equal(schemeExample("/api/v1/general/trace"),
+    "((index 0) (path (*state* mykey)))");
+  assert.equal(schemeExample("/api/v1/general/resolve-batch"),
+    "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))) (pinned? #t))");
+  assert.equal(schemeExample("/api/v1/general/trace-batch"),
+    "((index 0) (paths ((*state* a) (*state* b))))");
+  assert.equal(schemeExample("/api/v1/general/pin-batch"),
+    "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))");
+  assert.equal(schemeExample("/api/v1/general/unpin-batch"),
+    "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))");
+  assert.equal(schemeExample("/api/v1/general/bridge"), '((name peer-a) (interface "http://peer-a/interface") (remote-name my-journal))');
   assert.equal(schemeExample("/api/v1/general/admins"), "()");
-  assert.equal(schemeExample("/api/v1/general/set-admins"), "((admins (admin alice)))");
+  assert.equal(schemeExample("/api/v1/general/set-admins"), "((admins ((*state* admin) (*state* alice))))");
   assert.equal(schemeExample("/api/v1/general/set-window"), "((value 128))");
+  assert.equal(schemeExample("/api/v1/general/call"), "((path (*state* alice programs example)) (arguments ()))");
+  const exactSchemeAuthorization = "((user (*state* alice)) (rule ((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (get #t) (set! #f) (resolve (0 -1)))))";
+  assert.equal(schemeExample("/api/v1/general/authorize"), exactSchemeAuthorization);
+  assert.equal(schemeExample("/api/v1/general/deauthorize"), exactSchemeAuthorization);
   assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");
   assert.equal(schemeExample("/api/v1/root/set-secret"), '"new-admin-secret"');
   assert.equal(schemeExample("/api/v1/root/eval"), "(+ 1 2)");

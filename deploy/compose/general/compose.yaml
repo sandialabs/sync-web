@@ -4,7 +4,7 @@ networks:
 
 services:
   journal:
-    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-journal
     working_dir: /srv
     entrypoint: ["/bin/sh", "/srv/run.sh"]
@@ -12,6 +12,8 @@ services:
       - sync-net
     environment:
       SECRET: ${SECRET:-}
+      INTERFACE_SECRET: ${INTERFACE_SECRET:-}
+      SYNC_WEB_VERSION: ${SYNC_WEB_VERSION:-1.5.0}
       PERIOD: ${PERIOD:-2}
       WINDOW: ${WINDOW:-1024}
       RUST_LOG: ${RUST_LOG:-INFO}
@@ -33,35 +35,35 @@ services:
       start_period: 20s
 
   explorer:
-    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-explorer
     networks:
       - sync-net
     environment:
       SYNC_EXPLORER_ENDPOINT: /api/v1
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 10s
 
   workbench:
-    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-workbench
     networks:
       - sync-net
     environment:
       SYNC_WORKBENCH_ENDPOINT: /interface
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 10s
 
   gateway:
-    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-gateway
     networks:
       - sync-net
@@ -73,11 +75,11 @@ services:
       JOURNAL_ENDPOINT: http://journal/interface
       ROOT_ENDPOINT: http://journal/interface
       REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-30000}
-      ALLOW_ADMIN_ROUTES: "1"
-      JOURNAL_SECRET: ${SECRET:-}
+      ALLOW_ADMIN_ROUTES: "0"
+      JOURNAL_SECRET: ${INTERFACE_SECRET:-}
       KRATOS_PUBLIC_URL: http://identity-provider:4433
       # Peer bridges should target the gateway interface proxy, not /interface directly:
-      # bridge! name=<peer> info-local.interface=http://<peer-gateway>/api/v1/journal/interface
+      # bridge! name=<peer> interface=http://<peer-gateway>/api/v1/journal/interface remote-name=<local-name>
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
@@ -86,7 +88,7 @@ services:
       start_period: 10s
 
   identity-provider:
-    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-identity-provider
     networks:
       - sync-net
@@ -97,7 +99,6 @@ services:
       KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-changeme-32-chars-minimum-here}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      SECRET: ${SECRET:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:4433/health/ready >/dev/null"]
@@ -107,7 +108,7 @@ services:
       start_period: 20s
 
   router:
-    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.4.3}
+    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-router
     environment:
       TLS_CERT_FILE: ${TLS_CERT_FILE:-/etc/nginx/certs/tls.crt}
@@ -129,14 +130,14 @@ services:
       - "${HTTP_PORT:-8192}:80"
       - "${HTTPS_PORT:-8193}:443"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O- https://127.0.0.1/healthz >/dev/null 2>&1 || wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 20s
 
   file-system:
-    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.4.3}
+    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.5.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-file-system
     depends_on:
       - gateway

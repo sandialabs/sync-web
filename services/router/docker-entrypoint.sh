@@ -8,8 +8,39 @@ GATEWAY_HOST="${ROUTER_GATEWAY_HOST:-gateway}"
 EXPLORER_HOST="${ROUTER_EXPLORER_HOST:-explorer}"
 WORKBENCH_HOST="${ROUTER_WORKBENCH_HOST:-workbench}"
 FILE_SYSTEM_HOST="${ROUTER_FILE_SYSTEM_HOST:-file-system:8080}"
+DNS_RESOLVERS=$(awk '
+    $1 == "nameserver" {
+        address = $2
+        if (index(address, ":")) address = "[" address "]"
+        resolvers = resolvers (resolvers ? " " : "") address
+    }
+    END { print resolvers }
+' /etc/resolv.conf)
+if [ -z "$DNS_RESOLVERS" ]; then
+    echo "Router requires a container DNS resolver" >&2
+    exit 1
+fi
+
+cat > /etc/nginx/conf.d/sync-ui-upstreams.conf <<EOF
+resolver ${DNS_RESOLVERS} valid=1s ipv6=off;
+resolver_timeout 1s;
+
+upstream sync_explorer_upstream {
+    zone sync_explorer_upstream 64k;
+    server ${EXPLORER_HOST}:80 resolve max_fails=0;
+}
+
+upstream sync_workbench_upstream {
+    zone sync_workbench_upstream 64k;
+    server ${WORKBENCH_HOST}:80 resolve max_fails=0;
+}
+EOF
 
 cat > /etc/nginx/includes/nginx.routes.inc <<EOF
+resolver ${DNS_RESOLVERS} valid=5s ipv6=off;
+resolver_timeout 2s;
+set \$gateway_upstream "${GATEWAY_HOST}";
+
 location = / {
     try_files /index.html =404;
 }
@@ -23,43 +54,43 @@ location /interface {
 }
 
 location /api/ {
-    proxy_pass http://${GATEWAY_HOST};
+    proxy_pass http://\$gateway_upstream;
 }
 
 location /auth/ {
-    proxy_pass http://${GATEWAY_HOST};
+    proxy_pass http://\$gateway_upstream;
 }
 
 location = /gateway {
-    proxy_pass http://${GATEWAY_HOST}/;
+    proxy_pass http://\$gateway_upstream/\$is_args\$args;
 }
 
 location = /gateway-logo.png {
-    proxy_pass http://${GATEWAY_HOST}/gateway-logo.png;
+    proxy_pass http://\$gateway_upstream/gateway-logo.png\$is_args\$args;
 }
 
 location = /docs {
-    proxy_pass http://${GATEWAY_HOST}/docs;
+    proxy_pass http://\$gateway_upstream/docs\$is_args\$args;
 }
 
 location = /healthz {
-    proxy_pass http://${GATEWAY_HOST}/healthz;
+    proxy_pass http://\$gateway_upstream/healthz\$is_args\$args;
 }
 
 location = /readyz {
-    proxy_pass http://${GATEWAY_HOST}/readyz;
+    proxy_pass http://\$gateway_upstream/readyz\$is_args\$args;
 }
 
 location = /metrics {
-    proxy_pass http://${GATEWAY_HOST}/metrics;
+    return 404;
 }
 
 location /explorer {
-    proxy_pass http://${EXPLORER_HOST}/;
+    proxy_pass http://sync_explorer_upstream/;
 }
 
 location /workbench {
-    proxy_pass http://${WORKBENCH_HOST}/;
+    proxy_pass http://sync_workbench_upstream/;
 }
 
 location = /webdav {

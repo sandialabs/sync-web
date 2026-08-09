@@ -8,7 +8,9 @@ on:
       - ".github/workflows/docs.yml"
   pull_request:
     branches: ["main"]
-    paths: ["docs/**"]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 concurrency:
@@ -18,7 +20,10 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    permissions: write-all
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,9 +33,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Install PDF dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cm-super \
+            latexmk \
+            texlive-fonts-recommended \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-pictures \
+            texlive-plain-generic \
+            texlive-science
+      - name: Build whitepaper PDF
+        run: |
+          make -C docs/whitepaper
+          test -s docs/whitepaper/whitepaper.pdf
+          install -m 0644 docs/whitepaper/whitepaper.pdf docs/info/public/whitepaper.pdf
+          test -s docs/info/public/whitepaper.pdf
       - name: Install packages
         working-directory: docs/info
-        run: npm install
+        run: npm ci
       - name: Create documents
         working-directory: docs/info
         run: npm run build
@@ -39,5 +62,6 @@ jobs:
         with:
           path: './docs/info/dist/'
       - name: Deploy to GitHub Pages
+        if: github.event_name != 'pull_request'
         id: deployment
         uses: actions/deploy-pages@v4

@@ -1,11 +1,19 @@
 [package]
 name = "journal-sdk"
-version = "1.3.1"
+version = "1.4.0"
 edition = "2024"
 
 [[bin]]
 name = "ledger"
 path = "../deploy/bin/ledger/src/main.rs"
+
+[features]
+default = ["wasmer-evaluator"]
+test-support = []
+wasmer-evaluator = ["dep:wasmer", "dep:wasmer-vm"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("wasm-kernel"))'] }
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,8 +25,8 @@ version = "0.5.0"
 features = ["json"]
 
 [build-dependencies]
-bindgen = "0.72.1"
 cc = "1.0.83"
+sha2 = "0.10.8"
 
 [dependencies]
 clap = { version = "4.4.18", features = ["derive"] }
@@ -26,17 +34,29 @@ hex = "0.4.3"
 once_cell = "1.19.0"
 rand = "0.8.5"
 reqwest = { version= "0.11.24", features = ["blocking"] }
-rocksdb = "0.24.0"
 sha2 = "0.10.8"
 libc = "0.2"
 log = "0.4.21"
 env_logger = "0.10"
-lru = "0.12.5"
 crystals-dilithium = "1.0.0"
 pqcrypto = { version = "0.17.0", default-features = false }
 tokio = { version = "1.0", features = ["time", "rt", "rt-multi-thread", "macros"] }
 serde_json = "1.0.149"
 time = { version = "=0.3.44", features = ["formatting"] }
+wasmer = { version = "=7.2.1", optional = true, default-features = false, features = ["sys", "headless", "experimental-host-interrupt"] }
+wasmer-vm = { version = "=7.2.1", optional = true }
+
+[target.'cfg(not(target_env = "musl"))'.build-dependencies]
+bindgen = "0.72.1"
+
+[target.'cfg(target_env = "musl")'.build-dependencies]
+bindgen = { version = "0.72.1", default-features = false, features = ["logging", "prettyplease", "static"] }
+
+[target.'cfg(not(target_env = "musl"))'.dependencies]
+rocksdb = "0.24.0"
+
+[target.'cfg(target_env = "musl")'.dependencies]
+rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", "lz4", "zstd", "zlib", "bzip2", "bindgen-static"] }
 
 [dev-dependencies]
 mockito = "1.4.0"

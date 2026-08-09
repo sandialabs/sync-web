@@ -1,0 +1,76 @@
+name: Deployment configuration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "deploy/**"
+      - "tests/network/compose/**"
+      - "tests/release-qa/**"
+      - "tests/api/local-compose.sh"
+      - "services/identity-provider/**"
+      - "services/router/**"
+      - "VERSION"
+      - "scripts/sync-platform-package-versions.js"
+      - ".github/workflows/deploy.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "deploy/**"
+      - "tests/network/compose/**"
+      - "tests/release-qa/**"
+      - "tests/api/local-compose.sh"
+      - "services/identity-provider/**"
+      - "services/router/**"
+      - "VERSION"
+      - "scripts/sync-platform-package-versions.js"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: "deployment-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check synchronized platform versions
+        run: node scripts/sync-platform-package-versions.js
+      - name: Check scripts and generated topology
+        run: |
+          bash -n deploy/compose/general/run.sh deploy/compose/ledger/run.sh tests/network/compose/local-compose.sh
+          python3 -m py_compile tests/network/compose/generate.py tests/release-qa/image_manifest.py tests/release-qa/single_node_journey.py tests/release-qa/sticky_readiness.py
+          python3 tests/network/compose/test_generate.py
+          python3 -m unittest discover -s tests/release-qa -p 'test_*.py' -v
+          sh -n tests/release-qa/run_sticky_readiness.sh tests/api/local-compose.sh
+          sh deploy/compose/test-admins.sh
+          sh deploy/compose/test-fresh-only.sh
+          sh services/identity-provider/test-config.sh
+          sh services/router/test-router.sh
+      - name: Validate Compose configuration
+        env:
+          SECRET: ci-placeholder
+        run: |
+          docker compose -f deploy/compose/general/compose.yaml config --quiet
+          docker compose -f deploy/compose/ledger/compose.yaml config --quiet
+          python3 - <<'PY'
+          import pathlib, re
+          version = pathlib.Path("VERSION").read_text().strip()
+          files = [
+              pathlib.Path("deploy/compose/general/compose.yaml"),
+              pathlib.Path("deploy/compose/ledger/compose.yaml"),
+          ]
+          defaults = []
+          for path in files:
+              defaults.extend(re.findall(r"sync-web/[^:}]+:(?:\$\{[^:}]+:-)?([^}\n]+)", path.read_text()))
+          if not defaults or any(value != version for value in defaults):
+              raise SystemExit(f"Compose image defaults {defaults!r} do not match VERSION {version}")
+          PY

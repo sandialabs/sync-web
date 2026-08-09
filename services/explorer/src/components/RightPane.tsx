@@ -94,10 +94,12 @@ const RightPane: React.FC<RightPaneProps> = ({
     // Extract journal names from the path
     const tabs: string[] = ['Self'];
     
-    for (let i = 0; i < selectedPath.length - 1; i++) {
-      if (selectedPath[i] === '*bridge*' && typeof selectedPath[i + 1] === 'string') {
-        tabs.push(String(selectedPath[i + 1]));
-      }
+    let cursor = typeof selectedPath[0] === 'number' ? 1 : 0;
+    while (cursor < selectedPath.length) {
+      const segment = selectedPath[cursor];
+      if (typeof segment !== 'string' || segment.startsWith('*')) break;
+      tabs.push(segment);
+      cursor += typeof selectedPath[cursor + 1] === 'number' ? 2 : 1;
     }
 
     setHistoryTabs(tabs);

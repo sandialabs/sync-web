@@ -1,0 +1,26 @@
+\begin{algorithm}[htbp]
+\caption{Deep Slice Along Object Path}
+\label{alg:deep-slice}
+\begin{algorithmic}[1]
+\Require Object node $x$ and nonempty path $p$
+\Ensure The selected path remains available and the logical digest is unchanged
+\Function{DeepSlice}{$x,p$}
+  \State $o \gets \Call{EvaluateObject}{x}$
+  \State $k \gets \Call{First}{p}$
+  \If{$|p| = 1$}
+    \State $o.\Call{Slice}{k}$
+    \State \Return $\Call{Node}{o}$
+  \EndIf
+  \State $c \gets o.\Call{Get}{k}$
+  \State $d \gets \Call{Digest}{c}$
+  \State $q \gets \Call{Rest}{p}$
+  \State $c' \gets \Call{DeepSlice}{c,q}$
+  \If{$\Call{Digest}{c'} \ne d$}
+    \State \Call{Fail}{``slice changed child digest''}
+  \EndIf
+  \State $o.\Call{Set}{k,c'}$
+  \State $o.\Call{Slice}{k}$ \Comment{discard siblings not needed for $k$}
+  \State \Return $\Call{Node}{o}$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}

@@ -41,6 +41,7 @@ if [ ! -f "$GENERAL_COMPOSE_FILE" ]; then
 fi
 
 VERSION="$(cat "$ROOT_DIR/VERSION")"
+export SYNC_WEB_VERSION="${SYNC_WEB_VERSION:-$VERSION}"
 SOCIAL_AGENT_LOCAL_TAG="sync-web/local-social-agent:$VERSION"
 
 CUSTOM_SETUP="${CUSTOM_SETUP:-}"

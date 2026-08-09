@@ -1,5 +1,3 @@
-Dockerfile
-.dockerignore
 .git
 .gitignore
 .gitlab-ci.yml

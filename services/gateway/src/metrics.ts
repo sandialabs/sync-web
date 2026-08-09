@@ -53,13 +53,7 @@ const getRouteLabel = (request: FastifyRequest): string => {
     return route;
   }
 
-  const rawUrl = typeof request.url === "string" ? request.url : "";
-  if (!rawUrl) {
-    return "unknown";
-  }
-
-  const queryIndex = rawUrl.indexOf("?");
-  return queryIndex >= 0 ? rawUrl.slice(0, queryIndex) : rawUrl;
+  return "unmatched";
 };
 
 export const instrumentGatewayRequests = (app: FastifyInstance): void => {

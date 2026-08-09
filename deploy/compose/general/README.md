@@ -8,7 +8,11 @@ The journal service uses the generic `journal-sdk` image directly. The general i
 - `deploy/compose/general/run.sh`
 - the persistent `database` volume
 
-For a fresh database, `run.sh` installs the general interface from the mounted Lisp files. For an existing database, mounted Lisp files are only applied when `JOURNAL_UPDATE=1`; otherwise the durable journal state continues from the database.
+For a fresh database, `run.sh` installs the general interface from the mounted Lisp files. Installation is fail-closed: only the exact successful installer result is accepted. A process error, Scheme error value, or malformed result exits nonzero; the version marker is not written, the server is not started, and result or credential content is omitted from diagnostics. With `JOURNAL_UPDATE=0`, a correctly version-marked database reopens normally without reinstalling or interpreting mounted record source during startup.
+
+The 1.5 Interface is fresh-install-only: `JOURNAL_UPDATE=1` against any existing database fails atomically. Before replacing a 1.4.x deployment, preserve its database, exact runtime image, configuration, and secrets as a restorable read-only historical archive; start 1.5 with a new database volume. There is no in-repository migration or conversion path.
+
+Before release or deployment, bind every mutable image tag to a clean source commit/tree using the image manifest and run the fresh single-node plus sticky federation journeys in [`tests/release-qa/README.md`](../../../tests/release-qa/README.md). A no-build repeat rejects changed image IDs/digests before startup.
 
 ## Requirements
 
@@ -29,55 +33,66 @@ Default local ports are adjacent and non-privileged:
 Example local stack:
 
 ```bash
-COMPOSE_PROJECT_NAME=sync-dev SECRET=password \
-HTTP_PORT=8192 HTTPS_PORT=8193 \
+COMPOSE_PROJECT_NAME=sync-dev SECRET=root-password INTERFACE_SECRET=interface-password \
+ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 HTTPS_PORT=8193 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 Example public stack using standard ports:
 
 ```bash
-COMPOSE_PROJECT_NAME=sync-prod SECRET=password \
-ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
+COMPOSE_PROJECT_NAME=sync-prod SECRET=root-password INTERFACE_SECRET=interface-password \
+ADMIN_PASSWORD='<independent-password>' ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 With Podman Compose:
 
 ```bash
-COMPOSE_PROJECT_NAME=sync-dev SECRET=password \
-HTTP_PORT=8192 HTTPS_PORT=8193 \
+COMPOSE_PROJECT_NAME=sync-dev SECRET=root-password INTERFACE_SECRET=interface-password \
+ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 HTTPS_PORT=8193 \
 podman-compose -f deploy/compose/general/compose.yaml up -d
 ```
 
 ## Configuration
 
 - `COMPOSE_PROJECT_NAME` (recommended): stack/project identity used for generated volumes and parameterized container/network names
-- `SECRET` (required): authentication secret for restricted journal/gateway operations
+- `SYNC_WEB_VERSION` (default `1.5.0`): platform image version; fresh databases record this value and later starts reject missing or mismatched volume markers
+- `SECRET` (required): Root secret supplied only to Journal
+- `INTERFACE_SECRET` (required): independently rotatable Interface bearer supplied to Journal and Gateway and persisted in private Root state; it must differ from `SECRET` at installation and after rotation in either direction
+- `INTERFACE_ADMINS` (default `admin`): comma-separated local usernames seeded as `(*state* <name>)` interface administrators on fresh installation
+- `ADMIN_USERNAME` (default `admin`): identity-provider bootstrap username
+- `ADMIN_PASSWORD` (default empty): independent identity-provider bootstrap password
 - `HTTP_PORT` (default `8192`): host HTTP port exposed by router
 - `HTTPS_PORT` (default `8193`): host TLS port exposed by router
 - `ORIGIN` (default `http://localhost:8192`): public origin used by the identity provider and as the default base for the raw journal interface URL; set this explicitly when using non-default/public ports or hostnames
 - `INTERFACE` (default `${ORIGIN}/api/v1/journal/interface`): public raw journal interface endpoint advertised to bridge peers
 - `JOURNAL_NAME` (default `INTERFACE`): public journal display/peer name advertised to bridge peers
-- `PERIOD` (default `2`): journal periodicity exponent
+- `PERIOD` (default `2`): seconds between outer Interface steps; each newly committed Ledger index launches the optional `(*state* *periodic*)` program once
 - `WINDOW` (default `1024`): retained historical state window
-- `JOURNAL_UPDATE` (default empty): set to `1` to update an existing journal database from the mounted Lisp files before serving
+- `JOURNAL_UPDATE` (default empty): startup update switch; unsupported for existing databases by this fresh-install-only 1.5 Interface
 - `TLS_CERT_HOST_PATH` (default `./tls/tls.crt`): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (default `./tls/tls.key`): host key file mounted into router
 - `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
-- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.4.3`): image used by the `file-system` service
+- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.5.0`): image used by the `file-system` service
 - `SYNC_FS_MAX_OBJECT_BYTES` (default `1048576`): maximum WebDAV object size
 
 Gateway note:
 
-- `ALLOW_ADMIN_ROUTES` is enabled by default in `deploy/compose/general/compose.yaml`.
+- `ALLOW_ADMIN_ROUTES` is disabled in the standard stack. Gateway receives only `INTERFACE_SECRET`, never Root, so Root-plane administration remains Journal-local.
 - Gateway landing page is exposed through the router at `/gateway`.
 - Public/client-facing API traffic should go to `gateway` under `/api/v1/general/*` and `/api/v1/root/*`.
 - WebDAV traffic is exposed through the router under `/webdav/`.
 - The raw `/interface` endpoint is still present for direct journal transport use and bridge-oriented internals.
-- The journal's periodic scheduler uses the raw root-step call `(*step* "<secret>")`, which depends on the merged `records/` root-step pipeline.
+- The journal's periodic scheduler uses the raw Root call `(*step* "<root-secret>")`. The non-mutating outer step commits through its internal continuation, then launches the optional `(*state* *periodic*)` procedure once via detached `call!` only when that commit created a new index.
+
+Monitoring note:
+
+- Prometheus metrics remain available inside `sync-net` at `http://gateway/metrics`.
+- Gateway does not publish a host port, and exact router `/metrics` requests return `404` over HTTP and TLS.
+- Existing monitors that scraped the router must move to an internal Compose-network scraper or another explicitly private collector.
 
 ## TLS behavior
 
@@ -103,7 +118,8 @@ Example TLS-backed public stack:
 COMPOSE_PROJECT_NAME=sync-prod \
 TLS_CERT_HOST_PATH=/absolute/path/to/fullchain.pem \
 TLS_KEY_HOST_PATH=/absolute/path/to/privkey.pem \
-SECRET=password ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
+SECRET=root-password INTERFACE_SECRET=interface-password \
+ADMIN_PASSWORD='<independent-password>' ORIGIN=https://example.com HTTP_PORT=80 HTTPS_PORT=443 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
 

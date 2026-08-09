@@ -105,11 +105,11 @@
         (set! (self '(1 1)) chain))))
 
   (define-method (truncate! self index)
-    ;; Truncate chain after index and return cut tail.
+    ;; Hide every entry through index while preserving the chain digest.
     ;;   Args:
-    ;;     index (integer): index to keep as last.
+    ;;     index (integer): oldest range endpoint to hide, inclusive.
     ;;   Returns:
-    ;;     sync node: cut tail starting after index.
+    ;;     sync node: detached proof material for the hidden range.
     (let ((index ((self '~adjust) index))
           (garbage (sync-null)))
       (let ((chain (let loop ((node (self '(1 1))) (i (- ((self 'size)) 1)))

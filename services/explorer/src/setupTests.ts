@@ -5,6 +5,40 @@
 import '@testing-library/jest-dom';
 import { configure } from '@testing-library/react';
 import React from 'react';
+import { TextDecoder, TextEncoder } from 'util';
+
+Object.assign(global, { TextDecoder, TextEncoder });
+
+class MockEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSED = 2;
+  readonly url: string;
+  readonly withCredentials: boolean;
+  readyState = MockEventSource.CONNECTING;
+  onopen = null;
+  onmessage = null;
+  onerror = null;
+
+  constructor(url: string | URL, init?: EventSourceInit) {
+    this.url = String(url);
+    this.withCredentials = init?.withCredentials ?? false;
+  }
+
+  addEventListener() {}
+  removeEventListener() {}
+  dispatchEvent() { return false; }
+  close() { this.readyState = MockEventSource.CLOSED; }
+}
+
+Object.defineProperty(global, 'EventSource', {
+  writable: true,
+  configurable: true,
+  value: MockEventSource,
+});
 
 // Configure @testing-library/react to use React.act
 configure({

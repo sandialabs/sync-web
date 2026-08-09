@@ -31,12 +31,14 @@ export interface FunctionEntry {
 /**
  * API entry from help-api.json
  */
+export type ApiPermission = 'any' | 'user' | 'admin' | 'root';
+
 export interface ApiEntry {
   name: string;
   description: string;
   template: string;
   example: string;
-  permission: 'any' | 'user' | 'root';
+  permission: ApiPermission;
 }
 
 /**

@@ -102,6 +102,10 @@ pub fn primitive_s7_crypto_sign() -> Primitive {
                 }
             }
 
+            #[cfg(feature = "wasm-kernel")]
+            if s7::s7_vector_length(private_key) as usize != SECRETKEYBYTES {
+                return crypto_error(sc);
+            }
             let message_vec = bv2vec(message);
             let private_key_vec = bv2vec(private_key);
             let digest_vec = Sha256::digest(&message_vec).to_vec();

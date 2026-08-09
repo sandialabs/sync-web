@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+KERNEL="$ROOT/journal/wasm-kernel"
+OUT=${1:-"$ROOT/target/wasmer-kernel"}
+TOOLS=${SYNC_WEB_WASMER_TOOLS:-"$OUT/tools"}
+BUILD="$OUT/build"
+SDK_ARCHIVE="$TOOLS/wasi-sdk-33.0-x86_64-linux.tar.gz"
+SDK="$TOOLS/wasi-sdk-33.0-x86_64-linux"
+SDK_URL=https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz
+SDK_SHA=0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce
+MEMORY_BYTES=536870912
+
+[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
+  echo "Journal request evaluation is supported only on qualified Linux x86_64 Wasmer AOT" >&2
+  exit 2
+}
+for name in RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CFLAGS CXXFLAGS CPPFLAGS LDFLAGS \
+  RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER AOT_RUSTFLAGS CC CXX AR RANLIB; do
+  [[ -z ${!name-} ]] || { echo "$name must be unset for a qualified build" >&2; exit 2; }
+done
+DIRTY=false
+if [[ -n $(git -C "$ROOT" status --porcelain --untracked-files=all) ]]; then
+  DIRTY=true
+  [[ ${SYNC_WEB_ALLOW_DIRTY_BUILD:-0} == 1 ]] || {
+    echo "qualified Wasmer build requires a clean worktree" >&2
+    exit 2
+  }
+fi
+mkdir -p "$OUT" "$TOOLS"
+rm -rf "$BUILD"
+mkdir -p "$BUILD"
+rustup target add wasm32-wasip1 >/dev/null
+if [[ ! -f "$SDK_ARCHIVE" ]]; then
+  curl --fail --location --retry 3 "$SDK_URL" --output "$SDK_ARCHIVE"
+fi
+echo "$SDK_SHA  $SDK_ARCHIVE" | sha256sum --check
+rm -rf "$SDK"
+tar -C "$TOOLS" -xzf "$SDK_ARCHIVE"
+[[ $(rustc -V) == rustc\ 1.96.0\ * ]] || { echo "rustc 1.96.0 required" >&2; exit 2; }
+[[ $(cargo -V) == cargo\ 1.96.0\ * ]] || { echo "cargo 1.96.0 required" >&2; exit 2; }
+[[ $(llvm-config --version) == 22.1.8 ]] || { echo "LLVM 22.1.8 required" >&2; exit 2; }
+"$SDK/bin/clang" --version > "$OUT/wasi-clang.txt"
+rustc -Vv > "$OUT/rustc.txt"
+cargo -V > "$OUT/cargo.txt"
+llvm-config --version > "$OUT/llvm.txt"
+{ uname -a; test ! -r /etc/os-release || cat /etc/os-release; } > "$OUT/builder.txt"
+
+NATIVE_LIBS="$BUILD/native-libs"
+mkdir -p "$NATIVE_LIBS"
+for library in ffi xml2; do
+  path=$(ldconfig -p | awk -v name="lib${library}.so" '$1 ~ ("^" name "\\.") && !found {print $NF; found=1}')
+  [[ -n $path && -r $path ]] || { echo "unable to resolve lib$library" >&2; exit 2; }
+  ln -s "$path" "$NATIVE_LIBS/lib${library}.so"
+  sha256sum "$path"
+done > "$OUT/native-link-libs.sha256"
+
+export CC_wasm32_wasip1="$SDK/bin/clang"
+export AR_wasm32_wasip1="$SDK/bin/llvm-ar"
+export RANLIB_wasm32_wasip1="$SDK/bin/llvm-ranlib"
+
+build_one() {
+  local label=$1
+  local pair="$BUILD/pair-$label"
+  local kernel_target="$pair/kernel-target"
+  local aot_target="$pair/aot-target"
+  local wasm="$pair/kernel.wasm"
+  local artifact="$pair/kernel.wasmer"
+  mkdir -p "$pair"
+  CARGO_TARGET_DIR="$kernel_target" \
+  RUSTFLAGS="--remap-path-prefix=$ROOT=/sync-web --remap-path-prefix=$kernel_target=/build" \
+  CFLAGS_wasm32_wasip1="-ffile-prefix-map=$ROOT=/sync-web -ffile-prefix-map=$kernel_target=/build" \
+    cargo build --locked --release --target wasm32-wasip1 --manifest-path "$KERNEL/Cargo.toml"
+  local archive="$kernel_target/wasm32-wasip1/release/libsync_web_evaluator_kernel.a"
+  "$SDK/bin/clang" --target=wasm32-wasip1 -mexec-model=reactor \
+    -Wl,--whole-archive "$archive" -Wl,--no-whole-archive \
+    -lsetjmp -lwasi-emulated-process-clocks -Wl,--allow-undefined \
+    -Wl,--export-memory -Wl,--max-memory="$MEMORY_BYTES" \
+    -Wl,--export=kernel_alloc -Wl,--export=kernel_free \
+    -Wl,--export=kernel_evaluate -Wl,--export=kernel_result_pointer \
+    -Wl,--export=kernel_result_length -o "$wasm"
+  CARGO_TARGET_DIR="$aot_target" RUSTFLAGS="-L native=$NATIVE_LIBS" \
+    cargo run --locked --release --manifest-path "$KERNEL/aot-builder/Cargo.toml" -- \
+      "$wasm" "$artifact"
+}
+
+build_one 1
+build_one 2
+cmp "$BUILD/pair-1/kernel.wasm" "$BUILD/pair-2/kernel.wasm" || {
+  echo "source-to-Wasm build is not reproducible" >&2
+  exit 1
+}
+cmp "$BUILD/pair-1/kernel.wasmer" "$BUILD/pair-2/kernel.wasmer" || {
+  echo "source-to-AOT build is not reproducible" >&2
+  exit 1
+}
+cp "$BUILD/pair-1/kernel.wasmer" "$OUT/kernel.wasmer"
+
+SOURCE_MANIFEST="$OUT/source.sha256"
+(
+  cd "$ROOT"
+  find journal/src journal/external/s7 journal/wasm-kernel \
+    -type f ! -path '*/target/*' ! -name Cargo.lock \
+    -print0 | sort -z | xargs -0 sha256sum
+  sha256sum journal/wrapper.h journal/Cargo.toml journal/Cargo.lock \
+    journal/wasm-kernel/Cargo.lock journal/wasm-kernel/aot-builder/Cargo.lock \
+    scripts/build-wasmer-kernel
+) > "$SOURCE_MANIFEST"
+
+WASM_SHA=$(sha256sum "$BUILD/pair-1/kernel.wasm" | awk '{print $1}')
+AOT_SHA=$(sha256sum "$OUT/kernel.wasmer" | awk '{print $1}')
+SOURCE_SHA=$(sha256sum "$SOURCE_MANIFEST" | awk '{print $1}')
+GIT_COMMIT=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unavailable)
+python3 - "$OUT/provenance.json" "$GIT_COMMIT" "$SOURCE_SHA" "$WASM_SHA" "$AOT_SHA" "$DIRTY" <<'PY'
+import hashlib, json, pathlib, sys
+path, commit, source, wasm, artifact, dirty = sys.argv[1:]
+root = pathlib.Path(path).parent
+receipt_names = (
+    'builder.txt',
+    'cargo.txt',
+    'llvm.txt',
+    'native-link-libs.sha256',
+    'rustc.txt',
+    'wasi-clang.txt',
+)
+receipts = {
+    name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+    for name in receipt_names
+}
+with open(path, 'w') as output:
+    json.dump({
+        'schema': 'sync-web/wasmer-kernel-provenance/v1',
+        'source_commit': commit,
+        'source_worktree_clean': dirty == 'false',
+        'source_manifest_sha256': source,
+        'wasm_sha256': wasm,
+        'artifact_sha256': artifact,
+        'runtime': 'wasmer-7.2.1-headless',
+        'compiler': 'wasmer-compiler-llvm-7.2.1',
+        'target': 'x86_64-unknown-linux-gnu',
+        'cpu_features': [],
+        'memory_maximum_bytes': 536870912,
+        'independent_source_to_wasm_pair': True,
+        'independent_source_to_aot_pair': True,
+        'receipts_sha256': receipts,
+    }, output, indent=2, sort_keys=True)
+    output.write('\n')
+PY
+cat > "$OUT/env.sh" <<EOF
+export SYNC_WEB_WASMER_KERNEL=$OUT/kernel.wasmer
+export SYNC_WEB_WASMER_KERNEL_SHA256=$AOT_SHA
+EOF
+printf 'kernel=%s\nsha256=%s\nprovenance=%s\n' "$OUT/kernel.wasmer" "$AOT_SHA" "$OUT/provenance.json"

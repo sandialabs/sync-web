@@ -8,7 +8,6 @@ export interface GatewayConfig {
   requestTimeoutMs: number;
   allowAdminRoutes: boolean;
   debugForwarding: boolean;
-  debugForwardingIncludeAuth: boolean;
   kratosPublicUrl: string;
   kratosAdminUrl: string;
   authUiDir: string;
@@ -39,10 +38,6 @@ export const getConfig = (): GatewayConfig => ({
   requestTimeoutMs: toNumber(process.env.REQUEST_TIMEOUT_MS, 30000),
   allowAdminRoutes: toBoolean(process.env.ALLOW_ADMIN_ROUTES, false),
   debugForwarding: toBoolean(process.env.DEBUG_FORWARDING, false),
-  debugForwardingIncludeAuth: toBoolean(
-    process.env.DEBUG_FORWARDING_INCLUDE_AUTH,
-    false
-  ),
   kratosPublicUrl:
     process.env.KRATOS_PUBLIC_URL || "http://identity-provider:4433",
   kratosAdminUrl:

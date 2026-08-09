@@ -10,7 +10,10 @@ from utilities.tools import Utilities
 @require_class(Utilities)
 @require_class(Ubuntu2204Server)
 class SocialAgent:
-    def __init__(self, node_name, router_host, secret, period, size, activity, peers, words, clients=1):
+    def __init__(
+        self, node_name, router_host, secret, period, size, activity, peers,
+        words, clients=1, activity_disabled=0, batch=None,
+    ):
         self.node_name = node_name
         self.router_host = router_host
         self.secret = secret
@@ -20,28 +23,32 @@ class SocialAgent:
         self.peers = peers
         self.words = words
         self.clients = clients
+        self.activity_disabled = activity_disabled
+        self.batch = batch
 
         self.add_docker()
         self.run_agent()
         self.increase_resources()
 
     def run_agent(self):
-        args = " ".join(
-            [
-                f"-e NODE_NAME={self.node_name}",
-                f"-e ROUTER_GATEWAY_BASE=http://{self.router_host}/api/v1/general",
-                f"-e SECRET={self.secret}",
-                f"-e PERIOD={self.period}",
-                f"-e SIZE={self.size}",
-                f"-e WORDS={self.words}",
-                f"-e ACTIVITY={self.activity}",
-                f"-e CLIENTS={self.clients}",
-                "-v /home/ubuntu/peers.json:/srv/peers.json",
-                "-v /home/ubuntu/node-exporter-textfile:/var/lib/node_exporter/textfile",
-                "--net=host",
-                "--name social-agent",
-            ]
-        )
+        environment = [
+            f"-e NODE_NAME={self.node_name}",
+            f"-e ROUTER_GATEWAY_BASE=http://{self.router_host}/api/v1/general",
+            f"-e SECRET={self.secret}",
+            f"-e PERIOD={self.period}",
+            f"-e SIZE={self.size}",
+            f"-e WORDS={self.words}",
+            f"-e ACTIVITY={self.activity}",
+            f"-e ACTIVITY_DISABLED={self.activity_disabled}",
+            f"-e CLIENTS={self.clients}",
+            "-v /home/ubuntu/peers.json:/srv/peers.json",
+            "-v /home/ubuntu/node-exporter-textfile:/var/lib/node_exporter/textfile",
+            "--net=host",
+            "--name social-agent",
+        ]
+        if self.batch is not None:
+            environment.insert(-4, f"-e BATCH={self.batch}")
+        args = " ".join(environment)
 
         self.drop_file(
             -32,

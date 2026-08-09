@@ -6,6 +6,8 @@ export interface JournalCall {
   args?: unknown;
   authentication?: string;
   identityId?: string;
+  routeTarget?: string[];
+  historyIndexes?: number[];
 }
 
 export interface JournalClient {
@@ -19,7 +21,6 @@ export interface JournalClient {
 
 export interface JournalClientOptions {
   debugForwarding?: boolean;
-  debugForwardingIncludeAuth?: boolean;
 }
 
 export class JournalSemanticError extends Error {
@@ -78,33 +79,6 @@ const toSemanticError = (value: unknown): JournalSemanticError | null => {
   });
 };
 
-const cloneBody = (body: Record<string, unknown>): Record<string, unknown> =>
-  JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
-
-export const redactAuth = (body: Record<string, unknown>): Record<string, unknown> => {
-  const cloned = cloneBody(body);
-  if ("authentication" in cloned) {
-    const auth = cloned.authentication;
-    if (auth && typeof auth === "object" && "credentials" in (auth as object)) {
-      cloned.authentication = { ...(auth as Record<string, unknown>), credentials: "***REDACTED***" };
-    } else {
-      cloned.authentication = "***REDACTED***";
-    }
-  }
-  return cloned;
-};
-
-const preview = (value: unknown, maxLen = 1200): string => {
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(value);
-  } catch {
-    serialized = String(value);
-  }
-  if (serialized.length <= maxLen) return serialized;
-  return `${serialized.slice(0, maxLen)}...<truncated>`;
-};
-
 const parseResponse = (text: string): unknown => {
   try {
     return JSON.parse(text);
@@ -152,10 +126,20 @@ export const createJournalClient = (
     }
 
     if (input.authentication) {
-      requestBody.authentication = {
-        ...(input.identityId ? { identity: input.identityId } : {}),
-        credentials: { "*type/string*": input.authentication },
-      };
+      if (input.routeTarget && input.routeTarget.length > 0) {
+        requestBody.invocation = {
+          identity: input.identityId,
+          "route-source": [],
+          "route-target": input.routeTarget,
+          ...(input.historyIndexes ? { "history-indexes": input.historyIndexes } : {}),
+          credentials: { "*type/string*": input.authentication },
+        };
+      } else {
+        requestBody.authentication = {
+          ...(input.identityId ? { identity: ["*state*", input.identityId] } : {}),
+          credentials: { "*type/string*": input.authentication },
+        };
+      }
     }
 
     const controller = new AbortController();
@@ -163,14 +147,11 @@ export const createJournalClient = (
     const startedAt = Date.now();
 
     if (options.debugForwarding) {
-      const loggedBody = options.debugForwardingIncludeAuth
-        ? cloneBody(requestBody)
-        : redactAuth(requestBody);
       logger.info(
         {
           upstream: endpoint,
           mode: "json",
-          outboundBody: loggedBody,
+          function: input.functionName,
         },
         "Gateway -> journal forward request"
       );
@@ -199,9 +180,8 @@ export const createJournalClient = (
           {
             statusCode: response.status,
             code: semanticError.code,
-            message: semanticError.message,
           },
-          "Journal returned semantic error payload"
+          "Journal returned semantic error payload; message omitted"
         );
         throw semanticError;
       }
@@ -213,7 +193,6 @@ export const createJournalClient = (
             mode: "json",
             statusCode: response.status,
             durationMs: Date.now() - startedAt,
-            responsePreview: preview(parsed),
           },
           "Journal -> gateway forward response"
         );
@@ -221,11 +200,8 @@ export const createJournalClient = (
 
       if (!response.ok) {
         logger.error(
-          {
-            statusCode: response.status,
-            body: parsed,
-          },
-          "Upstream journal returned non-OK response"
+          { statusCode: response.status },
+          "Upstream journal returned non-OK response; body omitted"
         );
         throw new Error(`Journal error (${response.status})`);
       }
@@ -269,7 +245,6 @@ export const createJournalClient = (
             upstream: endpoint,
             mode: "scheme",
             function: input.functionName,
-            outboundExpression: input.expression,
           },
         "Gateway -> journal forward request"
       );
@@ -292,9 +267,8 @@ export const createJournalClient = (
           {
             statusCode: response.status,
             code: semanticError.code,
-            message: semanticError.message,
           },
-          "Journal returned semantic error payload"
+          "Journal returned semantic error payload; message omitted"
         );
         throw semanticError;
       }
@@ -307,7 +281,6 @@ export const createJournalClient = (
             function: input.functionName,
             statusCode: response.status,
             durationMs: Date.now() - startedAt,
-            responsePreview: preview(parsed),
           },
           "Journal -> gateway forward response"
         );
@@ -315,11 +288,8 @@ export const createJournalClient = (
 
       if (!response.ok) {
         logger.error(
-          {
-            statusCode: response.status,
-            body: parsed,
-          },
-          "Upstream journal returned non-OK response"
+          { statusCode: response.status },
+          "Upstream journal returned non-OK response; body omitted"
         );
         throw new Error(`Journal error (${response.status})`);
       }
@@ -370,17 +340,7 @@ export const createJournalClient = (
           {
             upstream: rootEndpoint,
             mode: "json",
-            outboundBody: options.debugForwardingIncludeAuth
-              ? requestBody
-              : [
-                  input.functionName,
-                  input.authentication ? "***REDACTED***" : undefined,
-                  ...(Array.isArray(input.args)
-                    ? input.args
-                    : input.args === undefined
-                      ? []
-                      : [input.args]),
-                ].filter((x) => x !== undefined),
+            function: input.functionName,
           },
           "Gateway -> journal forward request"
         );
@@ -402,9 +362,8 @@ export const createJournalClient = (
             {
               statusCode: response.status,
               code: semanticError.code,
-              message: semanticError.message,
             },
-            "Journal returned semantic error payload"
+            "Journal returned semantic error payload; message omitted"
           );
           throw semanticError;
         }
@@ -416,7 +375,6 @@ export const createJournalClient = (
               mode: "json",
               statusCode: response.status,
               durationMs: Date.now() - startedAt,
-              responsePreview: preview(parsed),
             },
             "Journal -> gateway forward response"
           );
@@ -424,11 +382,8 @@ export const createJournalClient = (
 
         if (!response.ok) {
           logger.error(
-            {
-              statusCode: response.status,
-              body: parsed,
-            },
-            "Upstream journal returned non-OK response"
+            { statusCode: response.status },
+            "Upstream journal returned non-OK response; body omitted"
           );
           throw new Error(`Journal error (${response.status})`);
         }

@@ -42,6 +42,15 @@
   border-color: rgba(255, 255, 255, 0.3);
 }
 
+.mode-switch .tab:disabled {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.58);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 .toolbar-session {
   display: flex;
   align-items: center;
@@ -91,14 +100,72 @@
 }
 
 .toolbar-status-line {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 1000;
+  width: min(calc(100% - 32px), 980px);
   padding: 10px 18px;
-  border-bottom: 1px solid var(--border-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   background-color: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 13px;
+  transform: translateX(-50%);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
 }
 
 .toolbar-status-line.error {
   background-color: var(--error-bg);
   color: var(--red);
+}
+
+@media (max-width: 600px) {
+  .toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    min-width: 0;
+    width: 100%;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .toolbar-logo {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+  }
+
+  .mode-switch {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .mode-switch .tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 7px 4px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .toolbar-right {
+    justify-content: flex-end;
+  }
+
+  .toolbar-session {
+    min-width: 0;
+    padding-left: 8px;
+  }
+
+  .toolbar-session-name {
+    max-width: 110px;
+  }
 }

@@ -48,150 +48,100 @@ jobs:
       - name: Check platform package versions
         run: node scripts/sync-platform-package-versions.js
 
-  build:
+  kernel:
     needs: metadata
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x86_64
-            os: ubuntu-latest
-            journal_bin: target/release/journal-sdk
-            ledger_bin: target/release/ledger
-          - target: linux-aarch64
-            os: ubuntu-24.04-arm
-            journal_bin: target/release/journal-sdk
-            ledger_bin: target/release/ledger
-          - target: macos-x86_64
-            os: macos-15-intel
-            journal_bin: target/release/journal-sdk
-            ledger_bin: target/release/ledger
-          - target: macos-aarch64
-            os: macos-14
-            journal_bin: target/release/journal-sdk
-            ledger_bin: target/release/ledger
-          - target: windows-x86_64
-            os: windows-latest
-            journal_bin: target/release/journal-sdk.exe
-            ledger_bin: target/release/ledger.exe
-          - target: windows-aarch64
-            os: windows-11-arm
-            journal_bin: target/release/journal-sdk.exe
-            ledger_bin: target/release/ledger.exe
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: journal
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install -y llvm-dev libclang-dev clang cmake
-
-      - name: Install macOS dependencies
-        if: runner.os == 'macOS'
+      - name: Install LLVM 22 and native dependencies
         run: |
-          brew install llvm
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
-
-      - name: Install Windows dependencies
-        if: runner.os == 'Windows'
-        shell: pwsh
+          sudo apt update
+          sudo apt install -y clang cmake libclang-dev libzstd-dev llvm-dev wget zlib1g-dev
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y libpolly-22-dev
+          echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - name: Build and verify current-source AOT
+        env:
+          LLVM_CONFIG_PATH: /usr/lib/llvm-22/bin/llvm-config
+          LIBCLANG_PATH: /usr/lib/llvm-22/lib
         run: |
-          if ("${{ matrix.target }}" -eq "windows-aarch64") {
-            "LIBCLANG_PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\ARM64\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
-          } else {
-            choco install llvm -y
-            "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
-          }
-
-      - name: Use clang on Unix runners
-        if: runner.os != 'Windows'
-        run: |
-          echo "CC=clang" >> "$GITHUB_ENV"
-          echo "CXX=clang++" >> "$GITHUB_ENV"
-
-      - name: Use C11 mode on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          "CFLAGS=/std:c11" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Build journal-sdk and ledger
-        working-directory: journal
-        run: cargo build --release --bin journal-sdk --bin ledger
-
-      - name: Check versions
-        working-directory: journal
-        shell: bash
-        run: |
-          "${{ matrix.ledger_bin }}" --version
-          "${{ matrix.journal_bin }}" --version
-
-      - name: Package binaries
-        shell: bash
-        run: |
-          mkdir -p dist
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp "journal/${{ matrix.journal_bin }}" "dist/journal-sdk-${{ matrix.target }}.exe"
-            cp "journal/${{ matrix.ledger_bin }}" "dist/ledger-${{ matrix.target }}.exe"
-          else
-            cp "journal/${{ matrix.journal_bin }}" "dist/journal-sdk-${{ matrix.target }}"
-            cp "journal/${{ matrix.ledger_bin }}" "dist/ledger-${{ matrix.target }}"
-          fi
-
+          out="$GITHUB_WORKSPACE/journal/target/release-kernel"
+          scripts/build-wasmer-kernel "$out"
+          rm -rf "$out/bundle"
+          mkdir "$out/bundle"
+          cp "$out"/{builder.txt,cargo.txt,kernel.wasmer,llvm.txt,native-link-libs.sha256,provenance.json,rustc.txt,source.sha256,wasi-clang.txt} "$out/bundle/"
+          cp "$out/build/pair-1/kernel.wasm" "$out/bundle/kernel.wasm"
+          journal/scripts/check-wasmer-kernel-provenance.py "$out/bundle" "$GITHUB_SHA"
+          echo "Wasmer AOT SHA-256: $(sha256sum "$out/kernel.wasmer" | awk '{print $1}')" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: ledger-binaries-${{ matrix.target }}
-          path: dist/*
+          name: ledger-qualified-wasmer-kernel
+          path: journal/target/release-kernel/bundle/
           if-no-files-found: error
 
-  build-musl:
-    needs: metadata
+  build:
+    needs: [metadata, kernel]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: linux-x86_64-musl
-            os: ubuntu-latest
-            platform: linux/amd64
-          - target: linux-aarch64-musl
-            os: ubuntu-24.04-arm
-            platform: linux/arm64
-    runs-on: ${{ matrix.os }}
+          # Both release paths use the same qualified Linux/x86_64 AOT.
+          - variant: glibc
+            target: linux-x86_64
+          - variant: musl
+            target: linux-x86_64-musl
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build Alpine/musl journal-sdk and ledger
+      - uses: actions/download-artifact@v4
+        with:
+          name: ledger-qualified-wasmer-kernel
+          path: target/qualified-kernel
+      - name: Build provenance-locked ${{ matrix.variant }} release builder
         run: |
-          docker run --rm \
-            --platform "${{ matrix.platform }}" \
-            -v "$PWD:/src" \
-            -w /src/journal \
-            alpine:3.23.3 \
-            sh -lc 'apk update && apk add --no-cache build-base cargo clang clang-dev linux-headers openssl-dev && CC=clang CXX=clang++ cargo build --release --bin journal-sdk --bin ledger'
-
-      - name: Check versions
+          journal/scripts/check-wasmer-kernel-provenance.py target/qualified-kernel "$GITHUB_SHA"
+          cp target/qualified-kernel/kernel.wasmer journal/kernel.wasmer
+          aot_sha=$(sha256sum journal/kernel.wasmer | awk '{print $1}')
+          inputs_sha=$( \
+            (git ls-files -z | sort -z | xargs -0 sha256sum; \
+             sha256sum journal/kernel.wasmer) | sha256sum | awk '{print $1}' \
+          )
+          docker build --pull --target builder \
+            --build-arg TARGETARCH=amd64 \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg SOURCE_TREE="$(git rev-parse 'HEAD^{tree}')" \
+            --build-arg SOURCE_INPUTS_SHA256="$inputs_sha" \
+            --build-arg AOT_SHA256="$aot_sha" \
+            -f journal/Dockerfile.${{ matrix.variant }} \
+            -t sync-web-ledger-builder:${{ matrix.variant }} .
+      - name: Smoke binaries with the matching runtime and qualified AOT
         run: |
-          docker run --rm \
-            --platform "${{ matrix.platform }}" \
-            -v "$PWD:/src" \
-            -w /src/journal \
-            alpine:3.23.3 \
-            sh -lc 'apk add --no-cache libgcc libstdc++ && target/release/ledger --version && target/release/journal-sdk --version'
-
-      - name: Package binaries
+          docker run --rm --entrypoint /bin/sh \
+            -e SYNC_WEB_INTERFACE_SECRET=release-smoke-interface \
+            sync-web-ledger-builder:${{ matrix.variant }} -ec '
+              /tmp/journal-sdk --version
+              test "$(/tmp/journal-sdk --evaluate "(+ 1 2)")" = 3
+              /tmp/ledger --version
+              test "$(/tmp/ledger --database /tmp/ledger-smoke/db \
+                --secret release-smoke-root \
+                --evaluate "((function size) (arguments ()))")" = 0
+            '
+      - name: Extract binaries and qualified AOT
         run: |
           mkdir -p dist
-          cp journal/target/release/journal-sdk "dist/journal-sdk-${{ matrix.target }}"
-          cp journal/target/release/ledger "dist/ledger-${{ matrix.target }}"
-
+          container=$(docker create sync-web-ledger-builder:${{ matrix.variant }})
+          trap 'docker rm -f "$container" >/dev/null' EXIT
+          docker cp "$container:/tmp/journal-sdk" "dist/journal-sdk-${{ matrix.target }}"
+          docker cp "$container:/tmp/ledger" "dist/ledger-${{ matrix.target }}"
+          cp target/qualified-kernel/kernel.wasmer "dist/kernel-${{ matrix.target }}.wasmer"
+          cp target/qualified-kernel/provenance.json "dist/kernel-${{ matrix.target }}.provenance.json"
+          docker rm -f "$container" >/dev/null
+          trap - EXIT
       - uses: actions/upload-artifact@v4
         with:
           name: ledger-binaries-${{ matrix.target }}
@@ -200,7 +150,7 @@ jobs:
 
   publish-release:
     if: github.ref == 'refs/heads/main' && needs.metadata.outputs.version_changed == 'true'
-    needs: [metadata, build, build-musl]
+    needs: [metadata, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

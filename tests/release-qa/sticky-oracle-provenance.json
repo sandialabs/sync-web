@@ -1,0 +1,36 @@
+{
+  "contract": "Once a canonical federation route becomes ready, ordinary committed steps and process restart must not discard request-hydrated reverse interface-key material from its serialized route object.",
+  "topology_sha256": "0359230656f4b2b7fac030bc69da8acba9be0481cd5dcfa8ab25037a8e125257",
+  "base": {
+    "commit": "fe07ee34c95ad34612b4261ef6c4c357981923f7",
+    "tree": "10dede8e892efdbc92ea795d4cf0f013c1b887ba",
+    "result": "fail",
+    "signed_probe_failures": 52,
+    "worker_failures": 51,
+    "error": "Federation route is not ready: reverse interface key is unavailable",
+    "evidence_report_sha256": "89b2b789c4671ca6d1db9c36f602d431fadb2cb3cb1dd5d1cbe1349c31ead65c"
+  },
+  "candidate": {
+    "commit": "90adc9987baf5316964380a318502468bec41a80",
+    "tree": "8b69c5151695da095e2a619e829fb340c9cb148d",
+    "result": "pass",
+    "initial_route_sweeps": 37,
+    "post_restart_route_sweeps": 23,
+    "post_ready_failures": 0,
+    "evidence_report_sha256": "0832beb62fd903b75b85e15007e1ff7159e38efde717ff7f64ca5d5453fae2c3"
+  },
+  "serializer_oracle": {
+    "source_commit": "08f91601e2014c39870e19475cf7b2f0b81b1a14",
+    "source_tree": "d69093bf825a19e33cc0079eca47f2cd1811b04d",
+    "probe_sha256": "bb621208ca3caee257eb7adb25319a0f38815a91c74916c83962ebe7b5b3d4c9",
+    "raw_output_sha256": "b9fa52464bcf9723f2aee08723dc604ab51cdff18fb6e86075c3f8c4347e9a32",
+    "reproduction_command": "curl -sS -H 'content-type: text/plain' --data-binary @tests/release-qa/sticky-oracle-probe.scm http://127.0.0.1:20092/api/v1/journal/interface",
+    "fixture": "process-isolated journal-0 selected historical index 12 after recursive route hydration",
+    "object_digest_hex": "01b69c1a149fbe14d80ccab8afc305a158929672de7e53eca1f783b1d5ffbd21",
+    "hydrated_before_serialization": "byte-vector",
+    "plain_full_subtree_roundtrip": "unknown",
+    "explicit_route_field_trace_roundtrip": "byte-vector",
+    "plain_digest_equal": true,
+    "traced_digest_equal": true
+  }
+}

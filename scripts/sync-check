@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Run compact, profile-oriented Sync Web checks using existing test commands."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass
+from pathlib import Path
+
+from sync_artifacts import artifact_root, git_state, repo_root, timestamp, write_artifacts
+
+ROOT = repo_root(__file__)
+
+
+@dataclass(frozen=True)
+class Check:
+    name: str
+    profile: str
+    command: str
+
+
+CHECKS = {
+    "journal": Check(
+        "journal",
+        "journal",
+        "${CARGO:-cargo} test --manifest-path journal/Cargo.toml && "
+        "${CARGO:-cargo} check --manifest-path journal/Cargo.toml --features test-support --lib",
+    ),
+    "records": Check(
+        "records",
+        "records",
+        "CARGO_TARGET_DIR=journal/target ${CARGO:-cargo} test --manifest-path records/tests/Cargo.toml && "
+        "CARGO_TARGET_DIR=journal/target ${CARGO:-cargo} build --manifest-path records/tests/Cargo.toml && "
+        "journal/target/debug/records-test --suite records/tests/suite.toml --jobs 13",
+    ),
+    "gateway": Check("gateway", "gateway", "cd services/gateway && npm test && npm run typecheck"),
+    "explorer": Check(
+        "explorer",
+        "explorer",
+        "cd services/explorer && npm test -- --watchAll=false --runInBand && npm run build",
+    ),
+    "social-agent": Check(
+        "social-agent",
+        "social-agent",
+        "python3 -m unittest discover -s tests/network/common/social-agent/tests -p 'test_*.py' -v && "
+        "python3 -m py_compile tests/network/common/social-agent/run.py",
+    ),
+    "release-qa": Check(
+        "release-qa",
+        "release-qa",
+        "python3 -m unittest discover -s tests/release-qa -p 'test_*.py' -v && "
+        "python3 -m py_compile tests/release-qa/sticky_readiness.py tests/release-qa/single_node_journey.py "
+        "tests/release-qa/image_manifest.py tests/network/compose/generate.py && "
+        "python3 -m unittest discover -s tests/network/compose -p 'test_*.py' && "
+        "sh -n tests/release-qa/run_sticky_readiness.sh tests/api/local-compose.sh",
+    ),
+    "docs": Check("docs", "docs", "cd docs/info && npm run build"),
+    "deploy": Check(
+        "deploy",
+        "deploy",
+        "bash -n deploy/compose/general/run.sh deploy/compose/ledger/run.sh "
+        "tests/network/compose/local-compose.sh && "
+        "sh -n deploy/compose/test-startup-install.sh && "
+        "python3 -m py_compile tests/network/compose/generate.py && "
+        "python3 -m unittest discover -s tests/network/compose -p 'test_*.py' && "
+        "sh deploy/compose/test-admins.sh && "
+        "sh deploy/compose/test-fresh-only.sh && "
+        "sh services/identity-provider/test-config.sh && "
+        "sh services/router/test-router.sh",
+    ),
+    "versions": Check(
+        "versions",
+        "versions",
+        "node scripts/sync-platform-package-versions.js",
+    ),
+}
+PROFILE_ORDER = list(CHECKS)
+
+
+def changed_files(base: str) -> list[str]:
+    files: set[str] = set()
+    commands = [
+        ["git", "diff", "--name-only", f"{base}...HEAD"],
+        ["git", "diff", "--cached", "--name-only"],
+        ["git", "diff", "--name-only"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
+    ]
+    for command in commands:
+        result = subprocess.run(command, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            raise SystemExit(result.stderr.strip() or f"Could not compare against {base}")
+        files.update(line for line in result.stdout.splitlines() if line)
+    return sorted(files)
+
+
+def profiles_for_files(files: list[str]) -> list[str]:
+    selected: set[str] = set()
+    for path in files:
+        if path.startswith("journal/"):
+            selected.update(("journal", "records"))
+        elif path.startswith("records/"):
+            selected.add("records")
+        elif path.startswith("services/gateway/"):
+            selected.add("gateway")
+        elif path.startswith("services/explorer/"):
+            selected.add("explorer")
+        elif path.startswith("tests/network/common/social-agent/"):
+            selected.add("social-agent")
+        elif path.startswith(("tests/network/compose/", "tests/network/firewheel/")):
+            selected.update(("social-agent", "deploy"))
+        elif path.startswith("tests/release-qa/"):
+            selected.add("release-qa")
+        elif path == "tests/api/local-compose.sh":
+            selected.update(("release-qa", "deploy"))
+        elif path.startswith("docs/"):
+            selected.add("docs")
+        elif path.startswith(("deploy/", "services/router/", "services/identity-provider/")):
+            selected.add("deploy")
+        elif path == "VERSION" or path.startswith("scripts/sync-platform-package-versions"):
+            selected.add("versions")
+        elif path.startswith(("scripts/sync-", "scripts/sync_", ".github/workflows/")):
+            selected.update(PROFILE_ORDER)
+        elif path in {"README.md", "CHANGELOG.md", "package.json", "package-lock.json"}:
+            selected.update(("docs", "versions"))
+    return [profile for profile in PROFILE_ORDER if profile in selected]
+
+
+def run_check(check: Check, output_dir: Path) -> dict[str, object]:
+    log_path = output_dir / f"{check.name}.log"
+    started = time.monotonic()
+    env = dict(os.environ)
+    env.setdefault("CARGO", str(Path.home() / ".cargo" / "bin" / "cargo"))
+    with log_path.open("w", encoding="utf-8") as log:
+        log.write(f"$ {check.command}\n\n")
+        result = subprocess.run(
+            ["bash", "-lc", check.command],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+    return {
+        "name": check.name,
+        "profile": check.profile,
+        "command": check.command,
+        "status": "pass" if result.returncode == 0 else "fail",
+        "exit_code": result.returncode,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "log": str(log_path.relative_to(ROOT)),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("profiles", nargs="*", help=f"Profiles: {', '.join(PROFILE_ORDER)}, all")
+    parser.add_argument("--changed", action="store_true", help="Select profiles from all changes relative to --base")
+    parser.add_argument("--base", default="origin/main", help="Base revision for --changed")
+    parser.add_argument("--full", action="store_true", help="Run every profile")
+    parser.add_argument("--plan", action="store_true", help="Print selected checks without running")
+    parser.add_argument("--list", action="store_true", help="List profiles and commands")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--fail-fast", action="store_true")
+    mode.add_argument("--keep-going", action="store_true", help="Run all selected checks (default)")
+    parser.add_argument("--jobs", type=int, default=2, help="Maximum concurrent checks (default: 2)")
+    args = parser.parse_args()
+
+    if args.list:
+        for profile in PROFILE_ORDER:
+            print(f"{profile:13} {CHECKS[profile].command}")
+        return 0
+
+    invalid = sorted(set(args.profiles) - set(PROFILE_ORDER) - {"all"})
+    if invalid:
+        parser.error(f"unknown profiles: {', '.join(invalid)}")
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
+
+    files: list[str] = []
+    if args.full or "all" in args.profiles:
+        profiles = PROFILE_ORDER
+    elif args.changed or not args.profiles:
+        files = changed_files(args.base)
+        profiles = profiles_for_files(files)
+    else:
+        profiles = [profile for profile in PROFILE_ORDER if profile in args.profiles]
+
+    print("Profiles:", ", ".join(profiles) if profiles else "none")
+    if files:
+        print(f"Changed files ({len(files)}):")
+        for path in files:
+            print(f"  {path}")
+    checks = [CHECKS[profile] for profile in profiles]
+    repository_check = Check(
+        "diff-check", "repository", "git diff --check && git diff --cached --check"
+    )
+    checks.append(repository_check)
+    for check in checks:
+        print(f"  {check.name}: {check.command}")
+    if args.plan:
+        return 0
+
+    output_dir = artifact_root(ROOT, "sync-check") / timestamp()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, object]] = []
+    pending = iter(checks)
+    futures = {}
+    failed = False
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        for _ in range(min(args.jobs, len(checks))):
+            check = next(pending, None)
+            if check:
+                futures[executor.submit(run_check, check, output_dir)] = check
+        while futures:
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                check = futures.pop(future)
+                result = future.result()
+                results.append(result)
+                marker = "PASS" if result["status"] == "pass" else "FAIL"
+                print(f"{marker:4} {check.name:15} {result['duration_seconds']:8.3f}s  {result['log']}")
+                failed = failed or result["status"] == "fail"
+                if result["status"] == "fail":
+                    tail = (ROOT / str(result["log"])).read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+                    print("\n".join(f"      {line}" for line in tail))
+                if not (args.fail_fast and failed):
+                    next_check = next(pending, None)
+                    if next_check:
+                        futures[executor.submit(run_check, next_check, output_dir)] = next_check
+
+    results.sort(key=lambda item: [check.name for check in checks].index(str(item["name"])))
+    summary = {
+        "tool": "sync-check",
+        "git": git_state(ROOT),
+        "base": args.base if (args.changed or not args.profiles) else None,
+        "changed_files": files,
+        "profiles": profiles,
+        "results": results,
+        "ok": not failed,
+    }
+    report = [
+        "# sync-check",
+        "",
+        f"- Result: {'PASS' if not failed else 'FAIL'}",
+        f"- Profiles: {', '.join(profiles) if profiles else 'none'}",
+        f"- Commit: `{summary['git']['commit']}`",
+        "",
+        "| Check | Status | Seconds | Log |",
+        "|---|---:|---:|---|",
+        *[
+            f"| {item['name']} | {item['status']} | {item['duration_seconds']} | `{item['log']}` |"
+            for item in results
+        ],
+    ]
+    write_artifacts(output_dir, summary, report, [check.command for check in checks])
+    print(f"Artifacts: {output_dir.relative_to(ROOT)}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

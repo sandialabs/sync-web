@@ -2,6 +2,15 @@
 The purpose of this changelog is to document new features and breaking changes that are most likely to affect developers
 ------------------------------------------------------------------------------------------------------------------------
 
+--- v1.4.0 (2026.07.30) ---
+
+- Make `sync-eval` an exact one-argument object loader and execute shared self-coded methods through fresh isolated `sync-let` children
+- Build one sealed capability template per request and clone fresh direct slots for each ordinary or serializer boundary without sharing application state or results
+- Add request-local proof serialization queries over the authoritative Journal session, including exact field tracing for hydrated federation route material
+- Keep staged procedure execution in the Records Interface with explicit inherited Interface dispatch rather than Journal or sync-let helper primitives
+- Add deterministic scenario time/randomness, message scheduling, trace capture, and isolated Records test support
+- Harden persistor overlays, strict graph availability, caught-error cleanup, and all sync-let failure releases
+
 --- v1.2.0 (2026.03.29) ---
 
 - Rework strict `sync-eval` around explicit `sync-state` bootstrapping and a more isolated evaluation environment

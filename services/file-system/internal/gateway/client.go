@@ -23,20 +23,12 @@ func New(baseURL string) *Client {
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTPClient: &http.Client{Timeout: 30 * time.Second}}
 }
 
-func (c *Client) Get(ctx context.Context, r *http.Request, path []paths.Segment, meta bool) (any, error) {
-	body := map[string]any{"path": JSONPath(path)}
-	if meta {
-		body["meta?"] = true
-	}
-	return c.post(ctx, r, "/general/get", body)
+func (c *Client) Get(ctx context.Context, r *http.Request, path []paths.Segment) (any, error) {
+	return c.post(ctx, r, "/general/get", map[string]any{"path": JSONPath(path)})
 }
 
-func (c *Client) Resolve(ctx context.Context, r *http.Request, path []paths.Segment, meta bool) (any, error) {
-	body := map[string]any{"path": JSONPath(path)}
-	if meta {
-		body["meta?"] = true
-	}
-	return c.post(ctx, r, "/general/resolve", body)
+func (c *Client) Resolve(ctx context.Context, r *http.Request, path []paths.Segment) (any, error) {
+	return c.post(ctx, r, "/general/resolve", map[string]any{"path": JSONPath(path)})
 }
 
 func (c *Client) Set(ctx context.Context, r *http.Request, path []paths.Segment, value any) error {

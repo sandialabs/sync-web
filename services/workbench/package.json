@@ -1,6 +1,6 @@
 {
   "name": "synchronic-workbench",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "private": true,
   "homepage": "/workbench",
   "dependencies": {

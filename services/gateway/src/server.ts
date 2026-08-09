@@ -17,7 +17,7 @@ Versioned, function-oriented HTTP gateway over Synchronic journal transport endp
 Start here:
 - Use GET routes for simple read-only checks: /api/v1/general/size and /api/v1/general/info.
 - Use POST /api/v1/general/{operation} for function calls that take arguments.
-- Use POST /api/v1/general/batch for ordered multi-request workflows under one authenticated call.
+- Use dedicated batch operations for common bulk workflows and staged programs through /api/v1/general/call for application-specific composition.
 - For restricted routes, authenticate via a Kratos session cookie or an API token (Authorization: Bearer sync-...).
 
 Request bodies:
@@ -509,7 +509,6 @@ displayRequestDuration: true,
     app.log,
     {
       debugForwarding: config.debugForwarding,
-      debugForwardingIncludeAuth: config.debugForwardingIncludeAuth,
     }
   );
 

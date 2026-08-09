@@ -1,0 +1,13 @@
+[package]
+name = "sync-web-wasmer-aot-builder"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+enumset = "=1.1.14"
+target-lexicon = "=0.13.5"
+wasmer = { version = "=7.2.1", default-features = false, features = ["sys", "llvm"] }
+wasmer-compiler = { version = "=7.2.1" }
+wasmer-compiler-llvm = { version = "=7.2.1" }
+wasmer-types = { version = "=7.2.1" }

@@ -10,6 +10,8 @@ use rocket::{get, post, routes};
 use serde_json::Value;
 use std::fs;
 use std::net::{IpAddr, Ipv6Addr};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,7 +22,8 @@ const STANDARD_SCM: &str = include_str!("../../../../records/lisp/standard.scm")
 const LOG_CHAIN_SCM: &str = include_str!("../../../../records/lisp/log-chain.scm");
 const TREE_SCM: &str = include_str!("../../../../records/lisp/tree.scm");
 const LEDGER_SCM: &str = include_str!("../../../../records/lisp/ledger.scm");
-const DOCUMENT_SCM: &str = include_str!("../../../../records/lisp/document.scm");
+const FEDERATION_SCM: &str = include_str!("../../../../records/lisp/federation.scm");
+const AUTHORIZATION_SCM: &str = include_str!("../../../../records/lisp/authorization.scm");
 const INTERFACE_SCM: &str = include_str!("../../../../records/lisp/interface.scm");
 
 const INDEX_HTML: &str = r#"<!DOCTYPE html>
@@ -99,7 +102,7 @@ struct Args {
     #[arg(short, long, default_value = "", help = "Evaluate a ledger query and exit immediately")]
     evaluate: String,
 
-    #[arg(long, default_value = "", help = "Root/interface secret; generated locally when omitted")]
+    #[arg(long, default_value = "", help = "Root secret; generated locally when omitted")]
     secret: String,
 
     #[arg(long, default_value_t = false, help = "Reinstall/update embedded records in an existing database")]
@@ -114,11 +117,6 @@ struct Args {
     #[arg(long, default_value = "", help = "Journal name advertised in ledger info")]
     name: String,
 
-    #[arg(long, default_value = "push", help = "Bridge publish policy: push|pull|none")]
-    bridge_publish: String,
-
-    #[arg(long, default_value = "pull", help = "Bridge subscribe policy: push|pull|none")]
-    bridge_subscribe: String,
 }
 
 #[get("/")]
@@ -175,6 +173,15 @@ fn database_has_content(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(unix)]
+fn restrict_secret_file(path: &Path) {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .expect("failed to restrict secret file permissions");
+}
+
+#[cfg(not(unix))]
+fn restrict_secret_file(_path: &Path) {}
+
 fn generate_secret() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -188,6 +195,13 @@ fn secret_path(database: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("ledger.secret")
+}
+
+fn interface_secret_path(database: &Path) -> PathBuf {
+    database
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("ledger.interface-secret")
 }
 
 fn resolve_secret(args: &Args) -> String {
@@ -205,13 +219,37 @@ fn resolve_secret(args: &Args) -> String {
         fs::create_dir_all(parent).expect("failed to create ledger state directory");
     }
     fs::write(&path, format!("{secret}\n")).expect("failed to write generated ledger secret");
+    restrict_secret_file(&path);
     eprintln!("Generated local ledger secret at {}", path.display());
     secret
 }
 
-fn install_expr(args: &Args, secret: &str, clear: bool) -> String {
+fn resolve_interface_secret(args: &Args) -> String {
+    if let Ok(secret) = std::env::var("SYNC_WEB_INTERFACE_SECRET") {
+        if !secret.is_empty() {
+            return secret;
+        }
+    }
+
+    let path = interface_secret_path(&args.database);
+    if let Ok(secret) = fs::read_to_string(&path) {
+        return secret.trim().to_string();
+    }
+
+    let secret = generate_secret();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create ledger state directory");
+    }
+    fs::write(&path, format!("{secret}\n"))
+        .expect("failed to write generated Interface secret");
+    restrict_secret_file(&path);
+    eprintln!("Generated local Interface secret at {}", path.display());
+    secret
+}
+
+fn install_expr(args: &Args, secret: &str, interface_secret: &str, clear: bool) -> String {
     let interface = if args.interface.is_empty() {
-        secret.to_string()
+        format!("http://localhost:{}/interface", args.port)
     } else {
         args.interface.clone()
     };
@@ -229,27 +267,24 @@ fn install_expr(args: &Args, secret: &str, clear: bool) -> String {
           (window {}) \
           (root {}) \
           (interface \"{}\") \
-          (name \"{}\") \
-          (push-enabled? #t) \
-          (bridge-policy ((publish {}) (subscribe {}))))",
+          (name \"{}\"))",
         escape_scheme_string(secret),
-        escape_scheme_string(secret),
+        escape_scheme_string(interface_secret),
         args.window,
         ROOT_SCM,
         escape_scheme_string(&interface),
         escape_scheme_string(&name),
-        args.bridge_publish,
-        args.bridge_subscribe,
     );
     let expr = format!(
-        "({interface_scm} {config} {standard} {chain} {tree} {ledger} {document})",
+        "({interface_scm} {config} {standard} {chain} {tree} {ledger} {federation} {authorization})",
         interface_scm = INTERFACE_SCM,
         config = config,
         standard = quote_expr(STANDARD_SCM),
         chain = quote_expr(LOG_CHAIN_SCM),
         tree = quote_expr(TREE_SCM),
         ledger = quote_expr(LEDGER_SCM),
-        document = quote_expr(DOCUMENT_SCM),
+        federation = quote_expr(FEDERATION_SCM),
+        authorization = quote_expr(AUTHORIZATION_SCM),
     );
     if clear {
         expr
@@ -258,19 +293,23 @@ fn install_expr(args: &Args, secret: &str, clear: bool) -> String {
     }
 }
 
-fn install_or_update_records(args: &Args, secret: &str) {
-    let has_content = database_has_content(&args.database);
+fn install_or_update_records(
+    args: &Args,
+    secret: &str,
+    interface_secret: &str,
+    has_content: bool,
+) {
     if !has_content {
-        let result = JOURNAL.evaluate(&install_expr(args, secret, true));
-        info!("Installed ledger records: {result}");
+        let result = JOURNAL.evaluate(&install_expr(args, secret, interface_secret, true));
+        info!("Installed ledger records; result omitted");
         if result.starts_with("(error ") {
-            panic!("failed to install ledger records: {result}");
+            panic!("failed to install ledger records; result omitted");
         }
     } else if args.update_records {
-        let result = JOURNAL.evaluate(&install_expr(args, secret, false));
-        info!("Updated ledger records: {result}");
+        let result = JOURNAL.evaluate(&install_expr(args, secret, interface_secret, false));
+        info!("Updated ledger records; result omitted");
         if result.starts_with("(error ") {
-            panic!("failed to update ledger records: {result}");
+            panic!("failed to update ledger records; result omitted");
         }
     }
 }
@@ -279,15 +318,19 @@ fn install_or_update_records(args: &Args, secret: &str) {
 async fn main() {
     env_logger::init();
     let args = Args::parse();
-    let secret = resolve_secret(&args);
+    let has_content = database_has_content(&args.database);
     if let Some(parent) = args.database.parent() {
         fs::create_dir_all(parent).expect("failed to create ledger database parent directory");
     }
     unsafe {
         std::env::set_var("SYNC_WEB_DATABASE", args.database.to_string_lossy().to_string());
     }
+    // Force isolated evaluator health before secrets, installation, or request service.
+    let _ = &*JOURNAL;
+    let secret = resolve_secret(&args);
+    let interface_secret = resolve_interface_secret(&args);
 
-    install_or_update_records(&args, &secret);
+    install_or_update_records(&args, &secret, &interface_secret, has_content);
 
     if !args.evaluate.is_empty() {
         println!("{}", JOURNAL.evaluate(&args.evaluate));
@@ -318,8 +361,8 @@ async fn main() {
                 ))
                 .await;
             }
-            let result = JOURNAL.evaluate(&format!("(*step* \"{}\")", escape_scheme_string(&step_secret)));
-            info!("Step ({:.6}): {result}", until as f64 / MICRO);
+            JOURNAL.evaluate(&format!("(*step* \"{}\")", escape_scheme_string(&step_secret)));
+            info!("Step ({:.6}) completed; result omitted", until as f64 / MICRO);
             step += 1;
         }
     });

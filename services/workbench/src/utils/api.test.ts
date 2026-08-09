@@ -27,6 +27,41 @@ describe('executeQuery', () => {
     expect(result.response).toContain('HTTP 200 OK');
   });
 
+  it('should classify a canonical top-level journal error without losing the exchange text', async () => {
+    const journalError = `(error 'api-error "Interface does not implement API endpoint: no-such-function")`;
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: () => Promise.resolve(journalError),
+    });
+
+    const result = await executeQuery('http://localhost:4096/interface', '((function no-such-function))');
+
+    expect(result.error).toBe('Journal error: api-error');
+    expect(result.result).toBe(journalError);
+    expect(result.request).toContain('((function no-such-function))');
+    expect(result.response).toContain(journalError);
+  });
+
+  it.each([
+    'plain text containing error',
+    `prefix (error 'api-error "not top level")`,
+    '(error-message ordinary-value)',
+    '{"error":"ordinary JSON value"}',
+  ])('should not classify an ordinary response as a journal error: %s', async (responseText) => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: () => Promise.resolve(responseText),
+    });
+
+    const result = await executeQuery('http://localhost:4096/interface', '(ordinary)');
+    expect(result.error).toBeUndefined();
+    expect(result.result).toEqual(responseText.startsWith('{') ? JSON.parse(responseText) : responseText);
+  });
+
   it('should handle HTTP errors', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

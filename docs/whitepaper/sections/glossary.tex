@@ -1,0 +1,94 @@
+\section*{Glossary}
+\label{sec:glossary}
+\addcontentsline{toc}{section}{Glossary}
+
+Reference definitions for recurring terms introduced throughout the paper.
+
+\begin{description}[style=nextline]
+  \item[Authentication]
+    Verification of an asserted identity, origin, or authority through evidence such as credentials and signatures. Merkle integrity supplies the complementary structural check against a commitment.
+
+  \item[Authorization]
+    A policy decision determining whether a principal may perform an operation. In current federation, terminal-local rules grant remote principals path-scoped \texttt{get}, \texttt{set!}, and \texttt{resolve} permissions; administrators remain local principals.
+
+  \item[Bridge]
+    A reciprocal signed-head-retention relationship through which each journal preserves a verified head for the other. Reciprocity provides identity and history reachability, while terminal policy independently grants application-data authority.
+
+  \item[Digest]
+    A cryptographic hash derived from a node or larger structure and used as its integrity identifier.
+
+  \item[Historical cursor]
+    The independently selected origin and per-hop indexes used only by \texttt{resolve}. A canonical public journal-relative path interleaves these indexes with directional aliases; the Interface separates that path into the current route used for authentication and endpoint context and the historical cursor used to select committed content.
+
+  \item[History]
+    Used in its ordinary broad sense for prior states and changes. Concrete chains, heads, and receipts represent history using ordinary Synchronic Web structures.
+
+  \item[Integrity]
+    The property that modification can be detected relative to a known commitment. Authentication and authorization supply the associated claims about identity, origin, and authority.
+
+  \item[Journal]
+    The software an entity runs together with all data persisted on it. A journal supplies the root from which that entity views the Synchronic Web and is analogous to a site or origin on the conventional Web.
+
+  \item[Journal identity]
+    A stable commitment formed from a domain-separated random nonce and bound by bridges, preapprovals, and invocation audiences. Active signing keys may evolve beneath this identity through predecessor-authorized transitions.
+
+  \item[Key-index]
+    The terminal-local history index whose committed bridge state authenticated a remote interface key. Authorization may constrain this index relative to the terminal's current history.
+
+  \item[Merge]
+    To combine compatible partial structures whose integrity relationships agree.
+
+  \item[Node]
+    A generic term whose meaning follows from context. It may denote a node in the integrity-verifiable data-structure DAG or an entity in the graph of journals and relationships.
+
+  \item[Object]
+    A durable structure that couples executable behavior with state. Its documented protocol determines how the state is read, transformed, and represented; its internal layout remains implementation-specific.
+
+  \item[Origin-local pin]
+    Retention of verified remote proof material in the originating journal under the full origin-relative historical path. It follows a federated \texttt{resolve} and mutates the origin's retention state.
+
+  \item[Path]
+    A sequence interpreted from a selected journal root to address a resource or intermediate structure. A canonical federated path interleaves optional historical indexes with directional aliases before the terminal namespace and local path. Like a relative URL, its meaning is completed by a starting root.
+
+  \item[Prune]
+    To remove retained material while preserving the integrity relationships needed to identify the larger structure.
+
+  \item[Record]
+    Any snippet of data stored on a journal or transmitted between journals. The term is intentionally fluid across object shapes, historical entries, and storage units.
+
+  \item[Resource]
+    A path-addressed value or object in a journal-relative view. Its low-level representation may be a leaf or a larger self-encoding structure.
+
+  \item[Root]
+    A distinguished reference from which persisted structure is reached and interpreted. Unless otherwise qualified, a journal root is also the starting point for paths in that journal's view.
+
+  \item[Root commitment]
+    A digest or integrity reference accepted as the fixed point against which a structure is verified. Additional evidence is required to establish who created, supplied, or endorsed it.
+
+  \item[Slice]
+    A proof-preserving partial structure retaining the material required for selected paths while replacing unrelated material with stubs.
+
+  \item[State]
+    Used in its ordinary broad sense for the condition or contents of a system, structure, object, or resource at a relevant point or context.
+
+  \item[Step]
+    A discrete journal transition that turns staged changes into a new historically resolvable state.
+
+  \item[Stub]
+    A representation that retains the digest of unavailable, undisclosed, or intentionally pruned structure while omitting its contents. A stub represents unknown structure; null represents empty structure.
+
+  \item[Stump]
+    The low-level persisted node form used to represent a stub. It stores a retained logical digest under a distinct local node handle.
+
+  \item[Synchronic Web]
+    The network, data structure, computational medium, and protocol family formed when independently rooted journals make resources and histories reachable through journal-relative paths and bridges.
+
+  \item[Terminal journal]
+    The journal that directly receives and authorizes a federated application invocation after the origin follows a working route to its committed endpoint and authentication object.
+
+  \item[Working route]
+    The ordered receiver-local directional aliases used from the origin's latest committed view to select the terminal authentication object, endpoint, and reverse path to the origin key. Its implicit indexes are current; \texttt{resolve} may select historical content independently.
+
+  \item[Entanglement]
+    Cross-history ordering created when one journal incorporates another's committed head into its own later state. The term follows Maniatis and Baker's secure-history protocol~\cite{Maniatis2002timeline}.
+\end{description}

@@ -25,19 +25,22 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
           <section>
             <h3>Getting Started</h3>
             <ol>
-              <li>Use Stage to browse and edit local files and folders.</li>
+              <li>Use Stage to browse and edit documents and folders.</li>
               <li>Use Ledger to synchronize and browse committed state.</li>
-              <li>Use Admin to manage bridges, window size, and interface admins.</li>
+              <li>Clicking either tab returns that mode to the Self namespace root.</li>
+              <li>Use Admin to manage bridges, window size, and interface admins. Destructive bridge, preapproval, and retention-window actions require confirmation.</li>
             </ol>
           </section>
 
           <section>
             <h3>Stage Mode</h3>
             <ul>
-              <li>The left tree shows local staged files and folders.</li>
+              <li>The permanent <code>*state*</code> row returns to the browsing-only current namespace root.</li>
+              <li>The left tree shows staged documents and folders beneath that root.</li>
+              <li>Remote descendant selections optimistically show mutation controls; the terminal journal decides authorization and denied edits remain available for correction.</li>
               <li>Tree rows provide rename and delete actions.</li>
-              <li>Selecting a directory shows its contents and file/folder creation actions.</li>
-              <li>Selecting a file shows a read-only view until you press Edit.</li>
+              <li>Selecting a directory shows its contents and document/folder creation actions.</li>
+              <li>Selecting a document shows a read-only view until you press Edit.</li>
             </ul>
           </section>
 
@@ -45,6 +48,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
             <h3>Ledger Mode</h3>
             <ul>
               <li>The route strip defines the current committed view.</li>
+              <li>Click a breadcrumb to return both trees to that journal's namespace root.</li>
               <li>The first hop is the local journal and additional hops extend through bridges.</li>
               <li>Each hop accepts <code>latest</code> or a negative snapshot index.</li>
               <li>The tree below the route strip shows the state at the current route tip.</li>
@@ -52,12 +56,22 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
           </section>
 
           <section>
+            <h3>Access Mode</h3>
+            <ul>
+              <li>A complete remote principal has one or more route segments followed by <code>*state* USER</code>.</li>
+              <li>Partial or malformed principal text reports the accepted shapes on submission.</li>
+              <li>The Document history window governs which committed indexes resolve may access.</li>
+              <li>Quote owner-relative path segments containing spaces; percent, quote, and backslash characters are encoded once and decoded for display.</li>
+            </ul>
+          </section>
+
+          <section>
             <h3>Content Pane</h3>
             <ul>
               <li>Directories are shown as a simple contents view.</li>
-              <li>Files can be viewed as content in both modes.</li>
-              <li>In Ledger, the content header toggles between content and proof for the current file.</li>
-              <li>Pinning is available from the ledger file header.</li>
+              <li>Documents can be viewed as content in both modes.</li>
+              <li>In Ledger, the content header toggles between content and proof for the current document.</li>
+              <li>Pinning is available from the ledger document header.</li>
             </ul>
           </section>
         </div>

@@ -45,8 +45,10 @@ fi
 HTTP_PORT="${HTTP_PORT:-${PORT:-8192}}"
 HTTPS_PORT="${HTTPS_PORT:-8193}"
 ORIGIN="${ORIGIN:-http://localhost:$HTTP_PORT}"
-SECRET="${SECRET:-password}"
+SECRET="${SECRET:-root-password}"
+INTERFACE_SECRET="${INTERFACE_SECRET:-interface-password}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin-pass}"
 PERIOD="${PERIOD:-2}"
 WINDOW="${WINDOW:-1024}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
@@ -57,6 +59,8 @@ LOCAL_COMPOSE_FORCE_HTTP="${LOCAL_COMPOSE_FORCE_HTTP:-1}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 
 LOCAL_COMPOSE_SKIP_FILE_SYSTEM="${LOCAL_COMPOSE_SKIP_FILE_SYSTEM:-0}"
+LOCAL_COMPOSE_SKIP_BUILD="${LOCAL_COMPOSE_SKIP_BUILD:-0}"
+IMAGE_MANIFEST="${IMAGE_MANIFEST:-$ROOT_DIR/target/release-qa/local-images.json}"
 
 if [ "$CONTAINER_RUNTIME" = "docker" ]; then
     COMPOSE_GLOBAL_ARGS="${COMPOSE_GLOBAL_ARGS:---ansi always}"
@@ -180,16 +184,68 @@ build_and_retag() {
     $CONTAINER_RUNTIME tag "$local_tag" "$remote_tag"
 }
 
-build_and_retag "$ROOT_DIR/journal" "$JOURNAL_SDK_LOCAL_TAG" "$JOURNAL_SDK_REMOTE_TAG"
-build_and_retag "$ROOT_DIR/services/gateway" "$GATEWAY_LOCAL_TAG" "$GATEWAY_REMOTE_TAG"
-build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_REMOTE_TAG"
-build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
-build_and_retag "$ROOT_DIR/services/router" "$ROUTER_LOCAL_TAG" "$ROUTER_REMOTE_TAG"
-build_and_retag "$ROOT_DIR/services/identity-provider" "$IDENTITY_PROVIDER_LOCAL_TAG" "$IDENTITY_PROVIDER_REMOTE_TAG"
-if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" != "1" ]; then
-    build_and_retag "$ROOT_DIR/services/file-system" "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_REMOTE_TAG"
-    echo "Tagging $FILE_SYSTEM_LOCAL_TAG as $FILE_SYSTEM_IMAGE ..."
-    $CONTAINER_RUNTIME tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
+image_manifest_arguments() {
+    set -- \
+        --image "$JOURNAL_SDK_REMOTE_TAG" \
+        --image "$GATEWAY_REMOTE_TAG" \
+        --image "$EXPLORER_REMOTE_TAG" \
+        --image "$WORKBENCH_REMOTE_TAG" \
+        --image "$ROUTER_REMOTE_TAG" \
+        --image "$IDENTITY_PROVIDER_REMOTE_TAG"
+    if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" != "1" ]; then
+        set -- "$@" --image "$FILE_SYSTEM_IMAGE"
+    fi
+    printf '%s\n' "$@"
+}
+
+if [ "$LOCAL_COMPOSE_SKIP_BUILD" != "1" ]; then
+    : "${SYNC_WEB_WASMER_KERNEL:?set SYNC_WEB_WASMER_KERNEL to the qualified AOT artifact}"
+    if [ "${LOCAL_COMPOSE_RELEASE_QA:-0}" = "1" ]; then
+        CONTAINER_RUNTIME="$CONTAINER_RUNTIME" \
+            "$ROOT_DIR/journal/scripts/build-journal-image" \
+            --variant musl --kernel "$SYNC_WEB_WASMER_KERNEL" \
+            --tag "$JOURNAL_SDK_LOCAL_TAG" \
+            --evidence-dir "$ROOT_DIR/target/local-compose-journal-image"
+    else
+        cp "$SYNC_WEB_WASMER_KERNEL" "$ROOT_DIR/journal/kernel.wasmer"
+        trap 'rm -f "$ROOT_DIR/journal/kernel.wasmer"; cleanup' EXIT
+        $CONTAINER_RUNTIME build --build-arg TARGETARCH=amd64 \
+            --build-arg SOURCE_COMMIT=local-dirty \
+            --build-arg SOURCE_TREE=local-dirty \
+            --build-arg SOURCE_INPUTS_SHA256=local-dirty \
+            --build-arg AOT_SHA256="$(sha256sum "$ROOT_DIR/journal/kernel.wasmer" | awk '{print $1}')" \
+            -f "$ROOT_DIR/journal/Dockerfile.musl" \
+            -t "$JOURNAL_SDK_LOCAL_TAG" "$ROOT_DIR"
+        rm -f "$ROOT_DIR/journal/kernel.wasmer"
+        trap cleanup EXIT
+    fi
+    echo "Tagging $JOURNAL_SDK_LOCAL_TAG as $JOURNAL_SDK_REMOTE_TAG ..."
+    $CONTAINER_RUNTIME tag "$JOURNAL_SDK_LOCAL_TAG" "$JOURNAL_SDK_REMOTE_TAG"
+    build_and_retag "$ROOT_DIR/services/gateway" "$GATEWAY_LOCAL_TAG" "$GATEWAY_REMOTE_TAG"
+    build_and_retag "$ROOT_DIR/services/explorer" "$EXPLORER_LOCAL_TAG" "$EXPLORER_REMOTE_TAG"
+    build_and_retag "$ROOT_DIR/services/workbench" "$WORKBENCH_LOCAL_TAG" "$WORKBENCH_REMOTE_TAG"
+    build_and_retag "$ROOT_DIR/services/router" "$ROUTER_LOCAL_TAG" "$ROUTER_REMOTE_TAG"
+    build_and_retag "$ROOT_DIR/services/identity-provider" "$IDENTITY_PROVIDER_LOCAL_TAG" "$IDENTITY_PROVIDER_REMOTE_TAG"
+    if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" != "1" ]; then
+        build_and_retag "$ROOT_DIR/services/file-system" "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_REMOTE_TAG"
+        echo "Tagging $FILE_SYSTEM_LOCAL_TAG as $FILE_SYSTEM_IMAGE ..."
+        $CONTAINER_RUNTIME tag "$FILE_SYSTEM_LOCAL_TAG" "$FILE_SYSTEM_IMAGE"
+    fi
+    if [ "${LOCAL_COMPOSE_RELEASE_QA:-0}" = "1" ]; then
+        mkdir -p "$(dirname "$IMAGE_MANIFEST")"
+        # shellcheck disable=SC2046
+        python3 "$ROOT_DIR/tests/release-qa/image_manifest.py" write \
+            --manifest "$IMAGE_MANIFEST" --source-root "$ROOT_DIR" --runtime "$CONTAINER_RUNTIME" \
+            $(image_manifest_arguments)
+    fi
+else
+    [ -f "$IMAGE_MANIFEST" ] || {
+        echo "Exact-tag repeat requires IMAGE_MANIFEST: $IMAGE_MANIFEST" >&2
+        exit 2
+    }
+    python3 "$ROOT_DIR/tests/release-qa/image_manifest.py" verify \
+        --manifest "$IMAGE_MANIFEST" --source-root "$ROOT_DIR" --runtime "$CONTAINER_RUNTIME"
+    echo "Skipping local image builds; verified source-bound image identities."
 fi
 
 if [ "$MODE" = "build" ]; then
@@ -197,7 +253,7 @@ if [ "$MODE" = "build" ]; then
     exit 0
 fi
 
-export SECRET ADMIN_USERNAME PERIOD WINDOW HTTP_PORT ORIGIN HTTPS_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
+export SECRET INTERFACE_SECRET ADMIN_USERNAME ADMIN_PASSWORD PERIOD WINDOW HTTP_PORT ORIGIN HTTPS_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
 
 compose_up_services=""
 if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" = "1" ]; then
@@ -295,7 +351,7 @@ case "$size_response" in
         ;;
 esac
 
-config_response="$(api_post "{\"function\":\"config\",\"authentication\":\"$SECRET\"}")"
+config_response="$(api_post "{\"function\":\"config\",\"authentication\":\"$INTERFACE_SECRET\"}")"
 if [ -z "$config_response" ]; then
     echo "FAIL: config response is empty"
     exit 1
@@ -310,8 +366,8 @@ case "$gateway_size" in
 esac
 
 root_unauthorized_status="$(gateway_status POST "/api/v1/root/step" -H "Content-Type: application/json" -d '[]')"
-if [ "$root_unauthorized_status" != "401" ]; then
-    echo "FAIL: expected gateway root route to require auth (401), got $root_unauthorized_status"
+if [ "$root_unauthorized_status" != "404" ]; then
+    echo "FAIL: expected Root to remain unavailable through Gateway (404), got $root_unauthorized_status"
     exit 1
 fi
 
@@ -345,7 +401,7 @@ login_flow="$(printf "%s" "$login_flow_json" | python -c 'import json,sys; print
 session_json="$(curl -fsS \
   -X POST "http://127.0.0.1:$HTTP_PORT/auth/.ory/self-service/login?flow=$login_flow" \
   -H "Content-Type: application/json" \
-  -d "{\"method\":\"password\",\"identifier\":\"$ADMIN_USERNAME\",\"password\":\"$SECRET\"}")"
+  -d "{\"method\":\"password\",\"identifier\":\"$ADMIN_USERNAME\",\"password\":\"$ADMIN_PASSWORD\"}")"
 session_token="$(printf "%s" "$session_json" | python -c 'import json,sys; print(json.load(sys.stdin)["session_token"])')"
 api_token_json="$(curl -fsS \
   -X POST "http://127.0.0.1:$HTTP_PORT/api/v1/tokens" \
@@ -408,6 +464,14 @@ webdav_delete_status="$(curl -sS -o /dev/null -w "%{http_code}" \
 if [ "$webdav_delete_status" != "204" ]; then
     echo "FAIL: expected WebDAV DELETE to return 204, got $webdav_delete_status"
     exit 1
+fi
+
+if [ "${LOCAL_COMPOSE_RELEASE_QA:-0}" = "1" ]; then
+    echo "Running pre-release identity, authorization, run, and UI-help journey..."
+    python3 "$ROOT_DIR/tests/release-qa/single_node_journey.py" \
+      --base "http://127.0.0.1:$HTTP_PORT" \
+      --admin-username "$ADMIN_USERNAME" \
+      --admin-password "$ADMIN_PASSWORD"
 fi
 
 echo "PASS: smoke checks succeeded."

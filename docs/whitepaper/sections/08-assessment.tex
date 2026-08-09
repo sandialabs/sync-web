@@ -1,0 +1,37 @@
+\section{Discussion and Conclusion}
+\label{sec:assessment}
+\label{sec:properties}
+\label{sec:tradeoffs}
+\label{sec:conclusion}
+
+\subsection{Bounded Guarantees}
+
+The Synchronic Web composes bounded assurances: a root and verifier establish structural integrity; a signature authenticates a head's key; historical resolution identifies earlier states; entanglement orders a foreign head before incorporation; a committed route connects a remote key and endpoint to retained evidence; and authorization applies local rules. Authentication gives a key historical meaning, domain evidence supports truth, preservation sustains availability, witnesses expose divergent branches, and selective disclosure, terminal policy, secure transport, and protected storage sustain confidentiality. Confidentiality extends into persistence: journals durably hold private data and credentials, so the client, evaluator, runtime, persisted state, backups, and key store form the trusted computing base. The Root secret remains host-only and unpersisted; a distinct rotatable Interface bearer lives in private Root state but is absent from Ledger and Federation objects, proofs, traces, user state, and public configuration, making backups live credential material. \Cref{tab:assurance-matrix} summarizes these mechanisms and dependencies. Their limits clarify failure: a surviving digest identifies lost evidence, two signatures can expose equivocation, and a deterministic transition can reproduce a supplied timestamp without establishing its accuracy. The architecture preserves evidence for judgment and keeps the boundary visible.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \input{tables/assurance-matrix}
+  \caption{Architectural Assurance Boundaries}
+  \label{tab:assurance-matrix}
+\end{table}
+
+\subsection{Costs and Architectural Fit}
+
+Integrity adds hashing, persisted handles, proof paths, and verification work; history adds retained states and key stewardship; partial possession saves content storage while keeping ancestor evidence, stumps, and serialization metadata; self-encoding objects add evaluation, confinement, debugging, compatibility, and migration; and federation adds exact-object routing, direct transport, terminal-local authorization, origin verification of historical results, and application handling of accepted replay. A controlling exact-checkpoint social comparison measured 86.22\% of native throughput and 1.193$\times$ Journal CPU per cycle; four-Journal PSS medians of approximately 1.42$\times$ at the measurement boundary and 1.44$\times$ after idle were material but noisy. No hard stop or parity claim follows, and negative host tuning leaves the portable AOT as the sole retained direction. These costs make architectural fit important, as summarized in \cref{tab:architectural-fit}. The Synchronic Web becomes compelling when independent roots, selective possession, durable interpretation, historical correction, and cross-institutional evidence coincide, as they may in production traceability, portable identity, or decentralized archives. Applications may still add coordination above the journal layer for payments, settlement, exclusive allocation, deadlines, or physical custody; journals give these domain protocols durable inputs and histories, while each application defines its shared decision procedure.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \input{tables/architectural-fit}
+  \caption{Architectural Fit}
+  \label{tab:architectural-fit}
+\end{table}
+
+\subsection{From Architecture to Specification}
+
+The records layer supplies a reference implementation of the architecture: digest and handle separation, partial possession, root advancement, reciprocal continuity, stable journal identity with predecessor-authorized signing-key rotation, exact-object multi-hop routing through directional aliases, signed descriptor and audience binding, direct \texttt{get}/\texttt{set!}/\texttt{resolve}, dedicated staged batches and grouped committed resolution, terminal-local authorization, and origin verification and retention of resolved proofs. A durable specification should define these observable invariants without freezing the current object layouts or service decomposition, and conformance tests should connect each invariant to accepted and rejected traces. Its assurance boundary must remain equally explicit. Acceptance of a foreign head is not incorporation; only a later signed head plus inclusion proof establishes the cross-history ordering claim. Routine signing-key rotation preserves a stable journal identity, but catastrophic loss or compromise of the accepted signing authority still requires a governance rule outside that lineage. The shared execution boundary isolates capabilities and copies inert values, while request isolation can contain one causal operation through a private fixed host deadline and mediation bounds; it exposes no deterministic Scheme-operation or public accounting contract and cannot prevent aggregate out-of-memory failure from coordinated concurrent requests without host admission controls. These are bounded properties of the architecture, not unfinished protocol features: they identify where applications, operators, and future specifications must add policy without weakening the integrity claims made here.
+
+\subsection{Toward a Plural Web}
+
+The architecture begins from a modest observation: durable information needs both continuity and a point of view. Integrity-protected state, signed succession, retained definitions, and cross-history receipts supply continuity; a journal that chooses roots, preserves evidence, follows relationships, and applies local policy supplies the viewpoint. Their composition produces a distinctive Web in which resources survive changes in representation and host, histories intersect while retaining independent order, observers possess different portions of one committed state, definitions evolve beside the objects they interpret, and federated paths preserve the historical routes through which other journals became meaningful. This is the deeper value of timeline entanglement in a resource architecture~\cite{Maniatis2002timeline}: foreign history becomes locally retained evidence, self-encoding structure turns evidence into durable meaning, journal-relative paths make that meaning findable and citable, and specialized clients keep the machinery quiet during ordinary use and explicit during inspection. A plural Web will still contain disagreement, loss, compromise, and institutional change; its strength lies in giving those events durable form through corrections, receipts, witnesses, and independently held roots. Networked information can thereby become easier to carry across time while preserving the diversity of systems and institutions that give it meaning.

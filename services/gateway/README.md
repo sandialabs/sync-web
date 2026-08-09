@@ -67,7 +67,6 @@ npm run start
 - Request body limit: `64 MiB`
 - `ALLOW_ADMIN_ROUTES` (default: `false`)
 - `DEBUG_FORWARDING` (default: `false`)
-- `DEBUG_FORWARDING_INCLUDE_AUTH` (default: `false`; unsafe, local debugging only)
 - `KRATOS_PUBLIC_URL` (default: `http://identity-provider:4433`)
 - `KRATOS_ADMIN_URL` (default: `http://identity-provider:4434`)
 
@@ -103,7 +102,7 @@ Gateway supports both JSON and Scheme request bodies for `POST` operation endpoi
 { ... }
 ```
 
-- Use keyword-style argument object fields directly (for example `{ "path": ... }` for staged reads or `{ "path": ..., "pinned?": true, "proof?": true }` for committed/indexed `resolve` calls).
+- Use keyword-style argument object fields directly (for example `{ "path": ... }` for staged reads or `{ "path": ..., "pinned?": true, "proof?": true }` for committed/indexed `resolve` calls). `set` and `set-batch` accept optional `expected` values: every expected staged value must match or the operation returns `false` without writing; conditional writes require both read and write authorization.
 
 - General routes are forwarded to the raw journal interface transport endpoint: `/interface` with `Content-Type: application/json`
 
@@ -176,30 +175,66 @@ Included metrics:
 - `GET /api/v1/general/size` (public)
 - `GET /api/v1/general/info` (public)
 - `POST /api/v1/general/get`
+- `POST /api/v1/general/get-batch`
 - `POST /api/v1/general/set`
 - `POST /api/v1/general/pin`
+- `POST /api/v1/general/pin-batch`
 - `POST /api/v1/general/unpin`
-- `POST /api/v1/general/batch`
-- `POST /api/v1/general/synchronize`
+- `POST /api/v1/general/unpin-batch`
+- `POST /api/v1/general/call`
+- `POST /api/v1/general/set-batch`
+- `POST /api/v1/general/synchronize!` (public reciprocal exchange)
 - `POST /api/v1/general/resolve`
+- `POST /api/v1/general/resolve-batch`
 - `POST /api/v1/general/trace` (public)
+- `POST /api/v1/general/trace-batch` (public)
+- `POST /api/v1/general/route` (public)
 - `POST /api/v1/general/bridge`
 - `POST /api/v1/general/config`
+- `POST /api/v1/general/update-config`
 - `POST /api/v1/general/admins`
 - `POST /api/v1/general/set-admins`
 - `POST /api/v1/general/set-window`
 - `POST /api/v1/general/set-secret`
+- `POST /api/v1/general/authorizations`
+- `POST /api/v1/general/authorize`
+- `POST /api/v1/general/deauthorize`
 
 Admin-oriented general endpoints:
 
-- `admins` calls `*admins-get*` and returns the interface admin username list.
-- `set-admins` calls `*admins-set*` and replaces that list wholesale.
+- `admins` calls `*admins-get*` and returns local administrator principal paths.
+- `set-admins` calls `*admins-set*` and replaces that list wholesale; entries must be `[*state*, <name>]` principals.
 - `set-window` calls `*window-set*` and updates the public ledger retention window.
-- `bridge` expects `info-local` with a concrete remote journal proxy endpoint, for example `((interface "http://peer.example/api/v1/journal/interface") (policy ((publish push) (subscribe pull))) (role #f) (remote-name local-journal))`.
+- `bridge` creates a reciprocal relationship from `name`, `interface`, and `remote-name`.
+- `update-config` manages explicit ledger configuration such as `(public bridge-accept)` and `(private bridge-preapproval <name>)`.
+- Authorization routes are Self-local. `user` is the owner's local `[*state*, USER]` namespace and `rule.path` is owner-relative. A remote exact bridge principal requires a terminal authentication `key-index` such as `[-32, -1]`; exact local/public principals omit it. Resolve is independent and uses `true`, `false`, or a document-history range such as `[0, -1]`. The complete stored rule must be sent unchanged to `deauthorize`.
+- `call` asks Interface to load the current staged Scheme procedure from `path`, evaluate it outside `sync-let` in an Interface-owned masked environment, and apply it to an inherited authenticated journal capability followed by the explicit `arguments` list. Invocation is limited to configured Interface administrators/root; namespace ownership and Authorization rules cannot grant it, and federated invocation is rejected.
+- Staged JSON `get`, `set`, `get-batch`, and `set-batch` calls accept `$federation: { route: [<aliases>] }`; one dedicated batch uses one exact working route and signs its complete ordered arguments. Committed `resolve`, `pin`, and `unpin`, including their batch forms, use canonical full paths containing the origin index and each alias/index hop; one resolution batch may span multiple route/history groups. Interface preserves result order, verifies one compact terminal proof per compatible group, and never returns those internal proofs from `resolve-batch`. Optional `pinned?` status is checked independently for each origin-relative path. Pin/unpin and all administration remain local mutations at the origin journal; `pin-batch!` fetches every remote proof before its one atomic retention mutation. Batch calls accept at most 1,024 paths; existing transport body, response, and timeout bounds still apply.
 
-### Root (disabled by default)
+Dedicated batch routes preserve duplicates and request order. Missing content is returned as the Journal `(nothing)` sentinel. `set` and `set-batch` distinguish an omitted `expected` field from explicit `false`/`#f`; batch expectations compare against one snapshot, cardinalities must match, and a conflict returns `false` without a transition. Conditional writes require both read and write authority. Empty data/retention batches are identity operations, while `trace-batch` needs at least one same-anchor path. There is no arbitrary `/general/batch` or `/general/copy` route.
 
-Enable with `ALLOW_ADMIN_ROUTES=1`:
+```json
+POST /api/v1/general/set-batch
+{
+  "paths": [["*state*", "alice", "one"], ["*state*", "alice", "two"]],
+  "values": ["new-one", "new-two"],
+  "expected": ["old-one", "old-two"],
+  "expression?": true
+}
+```
+
+```scheme
+((paths ((*state* alice one) (*state* alice two)))
+ (values (new-one new-two))
+ (expected (old-one old-two))
+ (expression? #t))
+```
+
+The OpenAPI document at `/api/v1/docs` contains JSON and Scheme examples for all six dedicated batch routes. Journal semantic failures retain their symbolic error code and are returned as HTTP 400; transport/runtime failures remain HTTP 502/504 according to the existing Gateway contract.
+
+### Root (disabled in the standard deployment)
+
+The codebase retains these explicitly opt-in routes, but the standard deployment gives Gateway only the independently rotatable Interface credential, never Root. Root administration therefore remains Journal-local:
 
 - `POST /api/v1/root/eval`
 - `POST /api/v1/root/call`
@@ -208,12 +243,33 @@ Enable with `ALLOW_ADMIN_ROUTES=1`:
 - `POST /api/v1/root/set-step`
 - `POST /api/v1/root/set-query`
 
+Root `set-secret` atomically commits a journal signing-key transition bound to
+the journal's stable random identity. Update the Journal-only runtime `SECRET`
+configuration before subsequent root calls or steps; peers verify the transition
+during normal bridge synchronization.
+
 ## Examples
 
 Public read:
 
 ```bash
 curl http://127.0.0.1:8180/api/v1/general/size
+```
+
+Authorization add/delete JSON rule (use the identical rule for both operations):
+
+```json
+{
+  "user": ["*state*", "alice"],
+  "rule": {
+    "principal": ["peer-a", "*state*", "bob"],
+    "key-index": [-32, -1],
+    "path": ["docs"],
+    "get": true,
+    "set!": false,
+    "resolve": [0, -1]
+  }
+}
 ```
 
 Restricted JSON call:
@@ -224,6 +280,25 @@ curl -X POST http://127.0.0.1:8180/api/v1/general/get \
   -H "Content-Type: application/json" \
   -d '{"path":["*state*","docs","article","hash"]}'
 ```
+
+Federated committed read (Alice → Carol → Bob):
+
+```bash
+curl -X POST http://127.0.0.1:8180/api/v1/general/resolve \
+  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": [7,"*state*","bob","shared","message"],
+    "pinned?": true,
+    "proof?": true,
+    "$federation": {
+      "route": ["carol","bob"],
+      "history": [-1,4,7]
+    }
+  }'
+```
+
+The returned proof is verified by the origin. To retain remote content, send that proof to the local `pin` endpoint with the full origin-relative historical path and no `$federation` context.
 
 Restricted Scheme call:
 
@@ -243,36 +318,7 @@ curl -X POST http://127.0.0.1:8180/api/v1/root/step \
   -d '[]'
 ```
 
-Restricted batch call:
-
-```bash
-curl -X POST http://127.0.0.1:8180/api/v1/general/batch \
-  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "queries": [
-      {
-        "function": "get",
-        "arguments": {
-          "path": ["*state*","docs","article","hash"]
-        }
-      },
-      {
-        "function": "config"
-      }
-    ]
-  }'
-```
-
-Restricted batch call in Scheme mode:
-
-```bash
-curl -X POST http://127.0.0.1:8180/api/v1/general/batch \
-  -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
-  -H "Content-Type: text/plain" \
-  -d '((queries (((function get) (arguments ((path (*state* docs article hash))))
-               ((function config))))))'
-```
+Application-specific multi-step workflows belong in staged Scheme programs invoked through `call`. Nested calls retain ordinary authorization and are explicitly non-atomic; use conditional `set`/`set-batch` expectations when optimistic concurrency is required.
 
 Forwarding debug mode:
 
@@ -287,7 +333,7 @@ Recommended integration pattern:
 1. Use `GET` endpoints for simple public reads (`size`, `info`).
 2. Use `POST /api/v1/general/<operation>` for everything that takes arguments.
 3. Default to JSON in services; use Scheme mode for advanced evaluator-native flows.
-4. Use `batch` when one workflow needs multiple ordered ledger requests under one authenticated call.
+4. Use dedicated batch operations for common bulk work. Configured local administrators/root may use staged `call` programs for application-specific, explicitly non-atomic composition.
 5. Validate payloads in Swagger first, then copy canonical samples into tests.
 
 ## Metrics
@@ -308,4 +354,4 @@ Current metrics include:
 Operational cautions:
 
 - `root` routes are admin-level and disabled by default.
-- `DEBUG_FORWARDING_INCLUDE_AUTH=1` logs raw secrets and should only be used in local debugging.
+- Forwarding diagnostics omit request and response bodies entirely. There is no mode that logs raw credentials or payloads.
