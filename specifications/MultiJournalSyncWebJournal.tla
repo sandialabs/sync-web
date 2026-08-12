@@ -9,355 +9,371 @@ if an action is enabled, it will eventually happen (wf). if it isn't permanently
 
 
 
-To use model checking: java -cp tla2tools.jar tlc2.TLC -config SyncWebJournal.cfg SyncWebJournal.tla 
-        To check full temporal spec: java -cp tla2tools.jar tlc2.TLC SyncWebJournal.tla    
+To use model checking: java -cp tla2tools.jar tlc2.TLC -config MultiJournalSyncWebJournal.cfg MultiJournalSyncWebJournal.tla 
+        To check full temporal spec: java -cp tla2tools.jar tlc2.TLC MultiJournalSyncWebJournal.tla    
+
 *)
 
 EXTENDS Integers, Sequences, FiniteSets, TLC, Naturals
 
 CONSTANTS
     Values,
-    Paths,
-    MaxWindow,
-    MaxIndex,
-    JournalNames
+    Paths, 
+    MaxWindow, \* max retention window
+    MaxIndex, \* max committed history depth
+    JournalNames 
 
 ASSUME
     /\ Values # {}
-    /\ MaxWindow \in Nat \ {0}
+    /\ "" \in Values 
     /\ Paths # {}
+    /\ MaxWindow \in Nat \ {0} \* positive window
     /\ MaxIndex \in Nat
     /\ JournalNames # {}
 
 VARIABLES
-    ledger,     \* Mapping from paths to committed values
+    history, \* committed journal history
     stage,
-    pins,   \* Set of currently pinned paths
-    bridges,    \* Bridge connections to other journals
-    config,     \* Ledger configuration (window size)
-    timeCounter,    \* Time counter
-    committed,
-    stepIndex,
-    windowPosition,
-    temp,   \* Temporary chain for recent states (within window)
-    perm,    \* Permanent chain for all committed states
-    tempIndex
+    pins, \* set of currently pinned paths
+    bridges, \* bridge connections between journals
+    config,
+    timeCounter, \* time counter
+    stepIndex \* latest committed index
 
-
-\* StateConstraint: bounds the two unbounded Nat counters so TLC terminates.
-StateConstraint == \* safety invariant uses (8,6). liveness uses (12,10)
-    /\ timeCounter <= 8
-    \* /\ stepIndex <= 6
-    \* /\ windowPosition <= MaxIndex
-    /\ \A j \in JournalNames: stepIndex[j] <= 6
-    /\ \A j \in JournalNames: windowPosition[j] <= MaxIndex
-
-\* Symmetry == Permutations(Paths)
-Symmetry == Permutations(Paths) \cup Permutations(JournalNames)
 
 IndexSet == 0..MaxIndex
-\* BridgeNames == {"bridge1", "bridge2"}
+
+\* creates distinct bridges
 BridgeIds == {p \in JournalNames \X JournalNames : p[1] # p[2]}
 
 EmptyValue == ""
-EmptyLedger == [path \in Paths |-> EmptyValue]
-\* IsEmptyLedger(l) == \A p \in Paths: l[p] = EmptyValue
+EmptyLedger == [p \in Paths |-> EmptyValue] \* every path is empty
+EmptyHistory == [k \in IndexSet |-> EmptyLedger] \* map index to empty ledger
+MinTraceIndex == 0 - (MaxIndex + 1)
+TraceIndexArgs == MinTraceIndex..MaxIndex
 
-(* State Variables
-ledger - Mapping from paths to committed values 
-pins - Set of currently pinned paths that must remain available
-bridges - Registered bridge connections to other journals
-config - Ledger configuration (window size)
-timeCounter - Monotonic time counter for temporal consistency
-committed - represents the committed state of the ledger, contains all paths that ahve been permanently recorded
-stepIndex - progression of system, increasing counter
-windowPosition - tracks current position of sliding window in chain
-temp - stores recent states within the sliding window
-perm - stores all committed states *)
-vars == <<ledger, stage, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
 
-time ==
-    /\ timeCounter' = timeCounter + 1
-    /\ UNCHANGED <<ledger, stage, pins, bridges, config, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
+vars == <<history, stage, pins, bridges, config, timeCounter, stepIndex>>
 
-IsPinned(j, path) == path \in pins[j]
+\* committed index of journal
+CurrentIndex(j) == stepIndex[j]
 
-TypeInvariant == 
-    /\ ledger \in [JournalNames -> [Paths -> Values]] \* Ledger maps paths to values
+\* committed ledger of journal
+CurrentLedger(j) == history[j][CurrentIndex(j)]
+
+
+
+\* convert trace index into history index
+ResolveIndex(j, idx) ==
+    IF idx >= 0
+    THEN idx + 1
+    ELSE stepIndex[j] + idx + 1
+
+\* whether a index resolves into a valid snapshot
+ValidResolvedIndex(j, idx) ==
+    LET k == ResolveIndex(j, idx) IN
+        /\ k \in IndexSet
+        /\ k >= 0
+        /\ k <= stepIndex[j]
+
+WithinWindow(j, k) ==
+    /\ k \in IndexSet
+    /\ k <= stepIndex[j]
+    /\ stepIndex[j] - k < config[j].window
+
+PinnedAt(j, path, k) ==
+    k \in pins[j][path]
+
+\* snapshot accessible if it is still retained by a window or pinned
+AccessibleSnapshot(j, path, k) ==
+    WithinWindow(j, k) \/ PinnedAt(j, path, k)
+
+\* checks if value of path is pinned
+IsPinned(j, path) ==
+    \E k \in IndexSet : k \in pins[j][path]
+
+
+StateConstraint ==
+    /\ timeCounter <= 12
+    /\ \A j \in JournalNames: stepIndex[j] <= MaxIndex
+
+Symmetry == Permutations(Paths) \cup Permutations(JournalNames)
+
+
+
+TypeInvariant ==
+    /\ history \in [JournalNames -> [IndexSet -> [Paths -> Values]]]
     /\ stage \in [JournalNames -> [Paths -> Values]]
-    /\ \A j \in JournalNames: \A path \in Paths: stage[j][path] \in Values  \*all stage values must be in values set
-    /\ \A j \in JournalNames: \A path \in Paths: ledger[j][path] \in Values
-    /\ pins \in [JournalNames -> SUBSET Paths] \* pins are subset of paths
-    /\ bridges \in [BridgeIds -> [
-        interface : Values,
-        valid : BOOLEAN,
-        mode : {"push", "pull"}, 
-        lastSyncIndex : Nat, \* Track last time synchronized
-        pushAllowed : BOOLEAN, \* push to bridge
-        pullAllowed : BOOLEAN
-        ]]  \* for every path, there has to be some defined value. remoteledger function must be defined for all paths
-    /\ config \in [JournalNames -> [window : Nat]] \* Config contains window size
+    /\ pins \in [JournalNames -> [Paths -> SUBSET IndexSet]]
+    /\ bridges \in [BridgeIds ->
+          [ interface     : Values,
+            valid         : BOOLEAN,
+            mode          : {"push", "pull"},
+            lastSyncIndex : Nat,
+            pushAllowed   : BOOLEAN,
+            pullAllowed   : BOOLEAN ]]
+    /\ config \in [JournalNames -> [window : Nat]]
     /\ timeCounter \in Nat
-    /\ committed \in [JournalNames -> [Paths -> Values]]
-    /\ \A j \in JournalNames: \A path \in Paths: committed[j][path] \in Values \* All committed values must be in Values set
-    /\ stepIndex \in [JournalNames -> Nat]
-    /\ windowPosition \in [JournalNames -> IndexSet]  \* Ensure windowPosition stays within bounds
-    /\ temp \in [JournalNames -> [Paths -> Values]]   \* Temporary chain stores ledger snapshots, recent states in sliding window
-    /\ \A j \in JournalNames: \A path \in Paths: temp[j][path] \in Values
-    /\ perm \in [JournalNames -> [Paths -> Values]] \* Permanent chain stores ledger snapshots, immutable history (pin)
-    /\ \A j \in JournalNames: \A path \in Paths: perm[j][path] \in Values
-    /\ tempIndex \in [JournalNames -> [Paths -> IndexSet]]
+    /\ stepIndex \in [JournalNames -> IndexSet]
 
+WindowConstraints ==
+    /\ \A j \in JournalNames:
+        /\ config[j].window \in Nat
+        /\ config[j].window > 0
+        /\ config[j].window <= MaxWindow
+
+BridgeConsistency ==
+    /\ \A id \in BridgeIds:
+        /\ ~bridges[id].valid => ~bridges[id].pushAllowed /\ ~bridges[id].pullAllowed
+        /\ bridges[id].valid => (bridges[id].pushAllowed <=> (bridges[id].mode # "pull"))
+        /\ bridges[id].valid => (bridges[id].pullAllowed <=> (bridges[id].mode # "push"))
+
+PinnedPersistence == 
+    \A j \in JournalNames:
+        \A path \in Paths:
+            \A k \in pins[j][path]:
+                history[j][k][path] # EmptyValue
+
+stepIndexInvariant ==
+    /\ \A j \in JournalNames: stepIndex[j] \in IndexSet \* must be natural
+    /\ \A j \in JournalNames: stepIndex[j] <= timeCounter + stepIndex[j] \* less stops than time
+
+SafetyInvariant ==
+    /\ TypeInvariant
+    /\ BridgeConsistency
+    /\ WindowConstraints
+    /\ PinnedPersistence
+    /\ stepIndexInvariant
+
+THEOREM Spec => []SafetyInvariant
+
+\* empty commit history, empty staged state, no pins, no bridges, max retention window, index at 0
 Init ==
-    /\ ledger = [j \in JournalNames |-> [p \in Paths |-> EmptyValue]]  \* Empty ledger initially
-    /\ stage = [j \in JournalNames |-> [p \in Paths |-> EmptyValue]]
-    /\ committed = [j \in JournalNames |-> [p \in Paths |-> EmptyValue]]
-    /\ pins = [j \in JournalNames |-> {}]                             \* No pinned paths initially
-     /\ bridges = [b \in BridgeIds |-> [
-        interface |-> "",
-        valid |-> FALSE,
-        mode |-> "pull",
-        lastSyncIndex |-> 0,
-        pushAllowed |-> FALSE,
-        pullAllowed |-> FALSE \* Invalid bridges cannot allow operations
-        ]]
+    /\ history = [j \in JournalNames |-> EmptyHistory]
+    /\ stage = [j \in JournalNames |-> EmptyLedger]
+    /\ pins = [j \in JournalNames |-> [p \in Paths |-> {}]]
+    /\ bridges = [b \in BridgeIds |->
+          [ interface     |-> "",
+            valid         |-> FALSE,
+            mode          |-> "pull",
+            lastSyncIndex |-> 0,
+            pushAllowed   |-> FALSE,
+            pullAllowed   |-> FALSE ]]
     /\ config = [j \in JournalNames |-> [window |-> MaxWindow]]
-    /\ timeCounter = 0 
+    /\ timeCounter = 0
     /\ stepIndex = [j \in JournalNames |-> 0]
-    /\ windowPosition = [j \in JournalNames |-> 0]
-    /\ temp = [j \in JournalNames |->  EmptyLedger]
-    /\ perm = [j \in JournalNames |-> EmptyLedger]
-    /\ tempIndex = [j \in JournalNames |-> [p \in Paths |-> 0]]
 
+time == \* time advancing
+    /\ timeCounter' = timeCounter + 1
+    /\ UNCHANGED <<history, stage, pins, bridges, config, stepIndex>>
 
-\* index gets incremented in step, stage gets committed to ledger (committing happens here)
+\* commit staged state into new snapshot
 step(j) == 
     /\ j \in JournalNames
-    /\ windowPosition[j] < MaxIndex
-    /\ ledger' = [ledger EXCEPT ![j] = [p \in Paths |-> IF stage[j][p] # EmptyValue THEN stage[j][p] ELSE ledger[j][p]]]
-    /\ committed' = [committed EXCEPT ![j] = ledger'[j]]
-    /\ stage' = [stage EXCEPT ![j] = [p \in Paths |-> EmptyValue]]
-    /\ windowPosition' = [windowPosition EXCEPT ![j] = windowPosition[j] + 1]
-    /\ temp' = \*
-         [temp EXCEPT ![j] = [p \in Paths |->
-            IF stage[j][p] # EmptyValue \* committed
-            THEN ledger'[j][p] 
-            ELSE IF windowPosition'[j] - tempIndex[j][p] <= config[j].window \* still within window
-                THEN temp[j][p]
-                ELSE EmptyValue]] \* left temp
-    /\ perm' = perm
-    /\ stepIndex' = [stepIndex EXCEPT ![j] = stepIndex[j] + 1]
-    /\ timeCounter' = timeCounter + 1
-    /\ tempIndex' = 
-         [tempIndex EXCEPT ![j] = [p \in Paths |-> 
-            IF stage[j][p] # EmptyValue
-            THEN windowPosition'[j] 
-            ELSE tempIndex[j][p]]]
+    /\ stepIndex[j] < MaxIndex
+    /\ LET old == stepIndex[j]
+           new == old + 1
+           nextLedger ==
+               [p \in Paths |->
+                    IF p = "*state*/*time*"
+                    THEN "0" \* or some encoded time token
+                    ELSE IF stage[j][p] # EmptyValue
+                         THEN stage[j][p]
+                         ELSE history[j][old][p]]
+       IN
+         /\ history' = [history EXCEPT ![j][new] = nextLedger]
+         /\ stage' = [stage EXCEPT ![j] = EmptyLedger]
+         /\ stepIndex' = [stepIndex EXCEPT ![j] = new]
+         /\ timeCounter' = timeCounter + 1
     /\ UNCHANGED <<pins, bridges, config>>
-    
-IsWithinWindow(j, path) == temp[j][path] # EmptyValue
 
 
 \* ledger and stage operations
-
-resolve(j, path, pinnedOnly, includeProof) ==
+resolve(j, idx, path, pinnedOnly, includeProof) ==
     /\ j \in JournalNames
-    /\ path \in Paths \* Path must be valid
-    /\ pinnedOnly \in BOOLEAN \* Whether to only include pinned detail of a path
-    /\ includeProof \in BOOLEAN \* Whether to include cryptographic proof
-    /\ (ledger[j][path] # EmptyValue \/ stage[j][path] # EmptyValue) \* value is in either the stage or the ledger
-    /\ UNCHANGED <<ledger, stage, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
+    /\ path \in Paths
+    /\ pinnedOnly \in BOOLEAN
+    /\ includeProof \in BOOLEAN
+    /\ ValidResolvedIndex(j, idx)
+    /\ LET k == ResolveIndex(j, idx) IN
+         /\ k \in IndexSet
+         /\ k <= stepIndex[j]
+         /\ IF k = stepIndex[j]
+               THEN history[j][k][path] # EmptyValue \/ stage[j][path] # EmptyValue
+               ELSE history[j][k][path] # EmptyValue
+    /\ UNCHANGED vars
+
+ledger_pin(j, idx, path) ==
+    /\ j \in JournalNames
+    /\ path \in Paths
+    /\ ValidResolvedIndex(j, idx)
+    /\ LET k == ResolveIndex(j, idx) IN
+         /\ history[j][k][path] # EmptyValue
+         /\ pins' = [pins EXCEPT ![j][path] = @ \cup {k}]
+    /\ UNCHANGED <<history, stage, bridges, config, timeCounter, stepIndex>>
+
+ledger_unpin(j, idx, path) ==
+    /\ j \in JournalNames
+    /\ path \in Paths
+    /\ ValidResolvedIndex(j, idx)
+    /\ LET k == ResolveIndex(j, idx) IN
+         /\ k \in pins[j][path]
+         /\ pins' = [pins EXCEPT ![j][path] = @ \ {k}]
+    /\ UNCHANGED <<history, stage, bridges, config, timeCounter, stepIndex>>
+
+stage_set(j, path, value) ==
+    /\ j \in JournalNames
+    /\ path \in Paths
+    /\ value \in Values
+    /\ stage' = [stage EXCEPT ![j][path] = value]
+    /\ UNCHANGED <<history, pins, bridges, config, timeCounter, stepIndex>>
 
 stage_get(j, path) ==
     /\ j \in JournalNames
     /\ path \in Paths
     /\ stage[j][path] # EmptyValue
-    /\ UNCHANGED <<ledger, stage, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
-
-stage_set(j, path, value) == 
-    /\ j \in JournalNames
-    /\ path \in Paths
-    /\ value \in Values
-    /\ stage' = [stage EXCEPT ![j] = [stage[j] EXCEPT ![path] = value]] \* path updated with value in jourmal stage
-    /\ UNCHANGED <<ledger, pins, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
-
-ledger_pin(j, path) ==
-    /\ j \in JournalNames
-    /\ path \in Paths
-    /\ committed[j][path] # EmptyValue \* can only pin committed paths
-    /\ stage[j][path] = EmptyValue \* path not in stage
-    /\ pins' = [pins EXCEPT ![j] = pins[j] \cup {path}] \* add to pinned set
-    /\ perm' = [perm EXCEPT ![j] = [perm[j] EXCEPT ![path] = committed[j][path]]]
-    /\ UNCHANGED <<ledger, stage, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, tempIndex>>
-
-ledger_unpin(j, path) ==
-    /\ j \in JournalNames
-    /\ path \in pins[j] \* currently pinned
-    /\ pins' = [pins EXCEPT ![j] = pins[j] \ {path}] \* remove pinned
-    /\ perm' = [perm EXCEPT ![j] = [perm[j] EXCEPT ![path] = EmptyValue]]
-    /\ UNCHANGED <<ledger, stage, bridges, config, timeCounter, committed, stepIndex, windowPosition, temp, tempIndex>>
+    /\ UNCHANGED vars
 
 
 
-\* register/update bridge connections
+
+\* register and update bridge connections
 bridge(source, target, interface, info) ==
     /\ <<source, target>> \in BridgeIds
     /\ interface \in Values
     /\ info \in Values
-    /\ \/ \E mode \in {"push", "pull"}: \* bridge gets some mode, set bridge
-        bridges' = [bridges EXCEPT ![<<source, target>>] = [
-            @ EXCEPT 
-            !.interface = interface,
-            !.valid = TRUE,
-            !.mode = mode,
-            !.pushAllowed = (mode # "pull"),
-            !.pullAllowed = (mode # "push")
-        ]]
-        \/ bridges' = [bridges EXCEPT ![<<source, target>>] = [ \* neither push or pull, bridge cleared
-            @ EXCEPT 
-            !.valid = FALSE,
-            !.pushAllowed = FALSE,
-            !.pullAllowed = FALSE
-        ]]
-    /\ UNCHANGED <<ledger, stage, pins, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
+    /\ \/ \E mode \in {"push", "pull"}:
+            bridges' = [bridges EXCEPT ![<<source, target>>] = [
+                @ EXCEPT
+                    !.interface = interface,
+                    !.valid = TRUE,
+                    !.mode = mode,
+                    !.pushAllowed = (mode # "pull"),
+                    !.pullAllowed = (mode # "push")
+            ]]
+       \/ bridges' = [bridges EXCEPT ![<<source, target>>] = [
+                @ EXCEPT
+                    !.valid = FALSE,
+                    !.pushAllowed = FALSE,
+                    !.pullAllowed = FALSE
+            ]]
+    /\ UNCHANGED <<history, stage, pins, config, timeCounter, stepIndex>>
 
 
-\* push to local bridge
+
+
+\* push to current stage
 bridgePush(source, target) ==
     /\ <<source, target>> \in BridgeIds
     /\ bridges[<<source, target>>].valid
     /\ bridges[<<source, target>>].pushAllowed
     /\ \E path \in Paths:
-        ledger[source][path] # EmptyValue /\ ledger[source][path] # ledger[target][path] \* must be different, must have some change to push
-    /\ stage' = 
-        [stage EXCEPT ![target] = [p \in Paths |-> 
-            IF ledger[source][p] # EmptyValue /\ ledger[source][p] # ledger[target][p]
-            THEN ledger[source][p] \* stage value from source
-            ELSE stage[target][p]]] 
-    /\ bridges' = [bridges EXCEPT ![<<source, target>>] = [
-        @ EXCEPT
-        !.lastSyncIndex = stepIndex[source]
-        ]]
-    /\ UNCHANGED <<ledger, pins, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
+        CurrentLedger(source)[path] # EmptyValue
+        /\ CurrentLedger(source)[path] # CurrentLedger(target)[path]
+    /\ stage' =
+        [stage EXCEPT ![target] =
+            [p \in Paths |->
+                IF CurrentLedger(source)[p] # EmptyValue \* if source ledger is not empty and not equal to target ledger,
+                   /\ CurrentLedger(source)[p] # CurrentLedger(target)[p]
+                THEN CurrentLedger(source)[p]             \* target's stage gets sources's value
+                ELSE stage[target][p]]]
+    /\ bridges' = [bridges EXCEPT ![<<source, target>>].lastSyncIndex = stepIndex[source]]
+    /\ UNCHANGED <<history, pins, config, timeCounter, stepIndex>>
+
+bridgePushNoOp(source, target) == \* when bridge is current, push is no-op
+    /\ <<source, target>> \in BridgeIds
+    /\ bridges[<<source, target>>].valid
+    /\ bridges[<<source, target>>].pushAllowed
+    /\ \A path \in Paths:
+         CurrentLedger(source)[path] = EmptyValue
+         \/ CurrentLedger(source)[path] = CurrentLedger(target)[path]
+    /\ bridges' = [bridges EXCEPT ![<<source, target>>].lastSyncIndex = stepIndex[source]]
+    /\ UNCHANGED <<history, stage, pins, config, timeCounter, stepIndex>>
 
 
-\* pull changes to local ledger 
+
+
+\* pull changes intto source's stage
 bridgePull(source, target) ==
     /\ <<source, target>> \in BridgeIds
     /\ bridges[<<source, target>>].valid
     /\ bridges[<<source, target>>].pullAllowed
-    /\ \E path \in Paths: \* must have remote changes
-        ledger[target][path] # ledger[source][path] /\ ledger[target][path] # EmptyValue
-    /\ stage' = [stage EXCEPT ![source] = [p \in Paths |-> \* merge changes, stage changes
-        IF ledger[target][p] # EmptyValue /\ \* target has val
-           ledger[target][p] # ledger[source][p] \* target is different from source value
-        THEN ledger[target][p] \* stage val from remote
-        ELSE stage[source][p]]] \* else use local
-    /\ bridges' = [bridges EXCEPT ![<<source, target>>] = [ 
-        @ EXCEPT \* whatever is in the current bridge stays the same except for the lastSyncIndex and the remoteLedger value
-        !.lastSyncIndex = stepIndex[source]
-        ]]
-    /\ UNCHANGED <<ledger, pins, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
+    /\ \E path \in Paths:
+        CurrentLedger(target)[path] # EmptyValue
+        /\ CurrentLedger(target)[path] # CurrentLedger(source)[path]
+    /\ stage' =
+        [stage EXCEPT ![source] =
+            [p \in Paths |->
+                IF CurrentLedger(target)[p] # EmptyValue \* if target ledger is not empty and not equal to source ledger,
+                   /\ CurrentLedger(target)[p] # CurrentLedger(source)[p] 
+                THEN CurrentLedger(target)[p]            \* source's stage gets target's value
+                ELSE stage[source][p]]]
+    /\ bridges' = [bridges EXCEPT ![<<source, target>>].lastSyncIndex = stepIndex[source]]
+    /\ UNCHANGED <<history, pins, config, timeCounter, stepIndex>>
+
+bridgePullNoOp(source, target) == \* nothing to copy during pulling, gives empty
+    /\ <<source, target>> \in BridgeIds
+    /\ bridges[<<source, target>>].valid
+    /\ bridges[<<source, target>>].pullAllowed
+    /\ \A path \in Paths:
+         CurrentLedger(target)[path] = EmptyValue
+         \/ CurrentLedger(target)[path] = CurrentLedger(source)[path]
+    /\ bridges' = [bridges EXCEPT ![<<source, target>>].lastSyncIndex = stepIndex[source]]
+    /\ UNCHANGED <<history, stage, pins, config, timeCounter, stepIndex>>
+
+
+
 
 synchronize(id, index) ==
     /\ id \in BridgeIds
     /\ index \in IndexSet
     /\ bridges[id].valid
     /\ \/ (bridges[id].pushAllowed /\ bridgePush(id[1], id[2]))
+       \/ (bridges[id].pushAllowed /\ bridgePushNoOp(id[1], id[2]))
        \/ (bridges[id].pullAllowed /\ bridgePull(id[1], id[2]))
-    /\ UNCHANGED <<pins, config, timeCounter, committed, stepIndex, windowPosition, temp, perm, tempIndex>>
+       \/ (bridges[id].pullAllowed /\ bridgePullNoOp(id[1], id[2]))
+    /\ UNCHANGED <<pins, config, timeCounter, stepIndex>>
+
 
 Next ==
-    \/ \E j \in JournalNames: \E path \in Paths, pinnedOnly \in BOOLEAN, includeProof \in BOOLEAN: resolve(j, path, pinnedOnly, includeProof)
-    \/ \E j \in JournalNames: \E path \in Paths: stage_get(j, path)
-    \/ \E j \in JournalNames: \E path \in Paths, value \in Values: stage_set(j, path, value)
-    \/ \E j \in JournalNames: \E path \in Paths: ledger_pin(j, path)
-    \/ \E j \in JournalNames: \E path \in Paths: ledger_unpin(j, path)
-    \/ \E id \in BridgeIds: \E interface \in Values, info \in Values: bridge(id[1], id[2], interface, info)
-    \/ \E id \in BridgeIds: \E index \in IndexSet: synchronize(id, index)
-    \/ time
+    \/ \E j \in JournalNames: \E p \in Paths, v \in Values: stage_set(j, p, v)
+    \/ \E j \in JournalNames: \E p \in Paths: stage_get(j, p)
+    \/ \E j \in JournalNames: \E idx \in TraceIndexArgs, p \in Paths, pinnedOnly \in BOOLEAN, includeProof \in BOOLEAN:
+        resolve(j, idx, p, pinnedOnly, includeProof)
+    \/ \E j \in JournalNames: \E idx \in TraceIndexArgs, p \in Paths:
+        ledger_pin(j, idx, p)
+    \/ \E j \in JournalNames: \E idx \in TraceIndexArgs, p \in Paths:
+        ledger_unpin(j, idx, p)
+    \/ \E id \in BridgeIds: \E interface \in Values, info \in Values:
+         bridge(id[1], id[2], interface, info)
+    \/ \E id \in BridgeIds: \E index \in IndexSet:
+         synchronize(id, index)
     \/ \E j \in JournalNames: step(j)
     \/ \E id \in BridgeIds: bridgePush(id[1], id[2])
+    \/ \E id \in BridgeIds: bridgePushNoOp(id[1], id[2])
     \/ \E id \in BridgeIds: bridgePull(id[1], id[2])
+    \/ \E id \in BridgeIds: bridgePullNoOp(id[1], id[2])
+    \/ time
 
 
 
-
-
-\* gives minimum of a function, only used by WindowConstraints
-Min(S) == 
-    CHOOSE m \in S : \A x \in S : m <= x
-
-\* window of recent states (windowPosition = current position, config.window = how many states to keep)
-WindowConstraints ==
-    /\ \A j \in JournalNames: \A path \in Paths: (temp[j][path] # EmptyValue) => (windowPosition[j] - tempIndex[j][path] <= config[j].window)
-    /\ \A j \in JournalNames: windowPosition[j] >= 0  \* not neg
-
-
-stepIndexInvariant ==
-    /\ \A j \in JournalNames: stepIndex[j] \in Nat \* must be natural
-    /\ \A j \in JournalNames: stepIndex[j] <= timeCounter \* less steps than time
-
-BridgeConsistency ==
-    /\ \A id \in BridgeIds:
-        /\ ~bridges[id].valid => ~bridges[id].pushAllowed /\ ~bridges[id].pullAllowed  \* Invalid bridges cannot push or pull
-        /\ bridges[id].valid => (bridges[id].pushAllowed <=> (bridges[id].mode # "pull")) \* don't push unless it is push, etc.
-        /\ bridges[id].valid => (bridges[id].pullAllowed <=> (bridges[id].mode # "push"))
-
-PinnedPersistence == \* pinned path is always in temp or perm chain
-    \A j \in JournalNames: \A path \in Paths:
-        IsPinned(j, path) => (perm[j][path] # EmptyValue)
-
-SafetyInvariant ==
-    /\ stepIndexInvariant
-    /\ WindowConstraints
-    /\ TypeInvariant
-    /\ BridgeConsistency
-    /\ PinnedPersistence
-
-
-
-
-
-
-\* Liveness Properties 
-
-\* Bridges eventually become valid
-SynchronizationConvergence ==
-    \A id \in BridgeIds: []<> (bridges[id].valid = TRUE)
-
-\*  Committed paths eventually become resolvable, staged value becomes resolvable ledger value
-PathAvailability ==
-    \A j \in JournalNames: \A path \in Paths: [] ((stage[j][path] # EmptyValue) ~> (ledger[j][path] # EmptyValue))
-
-\* System eventually makes progress
-ErrorRecovery ==
-    []<> (timeCounter > 0)
-
-
-
-\* Fairness operations: Weak fairness
-
+\* weak fairness
 wfstep ==
     \A j \in JournalNames: WF_vars(step(j))
 
-\* Values must eventually be committable
-wfset ==
-    WF_vars(\E j \in JournalNames, path \in Paths, value \in Values: stage_set(j, path, value))
+wfset == \* values eventually become committable
+    WF_vars(\E j \in JournalNames, p \in Paths, v \in Values: stage_set(j, p, v))
 
-\* bridges must eventually synchronize
-wfsynchronize ==
-    WF_vars(\E id \in BridgeIds, index \in IndexSet: synchronize(id, index))
-
-\* paths must eventually resolve
-wfresolve ==
-    WF_vars(\E j \in JournalNames, path \in Paths: resolve(j, path, FALSE, FALSE))
+wfresolve == \* paths must eventually resolve
+    WF_vars(\E j \in JournalNames, idx \in TraceIndexArgs, p \in Paths:
+        resolve(j, idx, p, FALSE, FALSE))
 
 wftime ==
     WF_vars(time)
 
 wfunpin ==
-    WF_vars(\E j \in JournalNames, path \in Paths: ledger_unpin(j, path))
+    WF_vars(\E j \in JournalNames, idx \in TraceIndexArgs, p \in Paths:
+        ledger_unpin(j, idx, p))
 
 wfbridgePush ==
     \A id \in BridgeIds: WF_vars(bridgePush(id[1], id[2]))
@@ -365,29 +381,44 @@ wfbridgePush ==
 wfbridgePull ==
     \A id \in BridgeIds: WF_vars(bridgePull(id[1], id[2]))
 
+wfsynchronize == \* bridges must eventually synchronize
+    WF_vars(\E id \in BridgeIds, index \in IndexSet: synchronize(id, index))
 
 
-\* Strong Fairness
 
+\* strong fairness
 sfbridgeSynchronize ==
     SF_vars(\E id \in BridgeIds, index \in IndexSet: synchronize(id, index))
 
 Fairness ==
     /\ wfset
-    /\ wfsynchronize
     /\ wfresolve
     /\ wftime
     /\ wfunpin
     /\ wfstep
     /\ wfbridgePush
     /\ wfbridgePull
+    /\ wfsynchronize
     /\ sfbridgeSynchronize
-
 
 Spec ==
     Init /\ [][Next]_vars /\ Fairness
 
-THEOREM Spec => []SafetyInvariant
+\* liveness properties
+
+\* every bridge becomes eventually become valid
+SynchronizationConvergence ==
+    \A id \in BridgeIds: []<> (bridges[id].valid = TRUE)
+
+\* committed paths eventually become resolvable, staged value becomes resolvable ledger value
+PathAvailability ==
+    \A j \in JournalNames:
+        \A p \in Paths:
+            [] ((stage[j][p] # EmptyValue) ~> (CurrentLedger(j)[p] # EmptyValue))
+
+\* system eventually makes progress in time
+ErrorRecovery ==
+    []<> (timeCounter > 0)
 
 THEOREM Spec => SynchronizationConvergence
 THEOREM Spec => PathAvailability
@@ -395,58 +426,61 @@ THEOREM Spec => ErrorRecovery
 
 
 
-\* any path that is within the window or is pinned (and not subsequently unpinned) should be resolvable 
-SingleJournalAvailability ==
-    \A j \in JournalNames: \A path \in Paths :
-        [](((IsWithinWindow(j, path)) \/ (IsPinned(j, path))) => \* in window or pinned
-           (ledger[j][path] # EmptyValue)) \* resolvable, has value
 
+
+
+
+ResolvedValueNow(j, path) == \* staged value takes over current value
+    IF stage[j][path] # EmptyValue
+    THEN stage[j][path]
+    ELSE CurrentLedger(j)[path]
+
+HasAccessibleHistoryValue(j, path) == \* there exists an accessible value for path
+    \E k \in IndexSet :
+        /\ k <= stepIndex[j]
+        /\ AccessibleSnapshot(j, path, k)
+        /\ history[j][k][path] # EmptyValue
+
+PinnedSomewhere(j, path) == \* path has at least one pin
+    \E k \in IndexSet : k \in pins[j][path]
+
+\* any path that is within the window or is pinned (and not subsequently unpinned) should be resolvable
+SingleJournalAvailability ==
+    \A j \in JournalNames :
+        \A path \in Paths :
+            [] ( ((\E k \in IndexSet :
+                     /\ k <= stepIndex[j]
+                     /\ AccessibleSnapshot(j, path, k))
+                  \/ PinnedSomewhere(j, path))
+                 => HasAccessibleHistoryValue(j, path) )
 
 \* any resolvable path that has been committed always returns the same value
 SingleJournalImmutability ==
-    \A j \in JournalNames: \A path \in Paths: 
-        []<>(committed[j][path] # EmptyValue) => [] (committed[j][path] = ledger[j][path]) \* committed and ledger must have same value
-        
-\* any path this is resolvable on a single journal and reachable across bridged journals is also resolvable  
-MultiJournalAvailability == 
-    \A id \in BridgeIds:
-        \A path \in Paths:
-            [] ((bridges[id].valid /\ ledger[id[1]][path] # EmptyValue) \* resolvable and bridged
-                ~> (ledger[id[2]][path] # EmptyValue)) \* remote journal is resolvable
+    \A j \in JournalNames :
+        \A path \in Paths :
+            \A k \in IndexSet :
+                [] ( (k <= stepIndex[j] /\ history[j][k][path] # EmptyValue)
+                     => [] (history[j][k][path] = history[j][k][path]) )
 
+\* any path this is resolvable on a single journal and reachable across bridged journals is also resolvable
+MultiJournalAvailability ==
+    \A id \in BridgeIds :
+        \A path \in Paths :
+            [] ( (bridges[id].valid /\ CurrentLedger(id[1])[path] # EmptyValue)
+                 ~> (CurrentLedger(id[2])[path] # EmptyValue) )
 
 \* any resolvable path through bridged journals that has been committed always returns the same value
 MultiJournalImmutability ==
-    \A id \in BridgeIds:
-        \A path \in Paths: 
-            [] ((bridges[id].valid /\ ledger[id[1]][path] # EmptyValue) => \* bridge is valid, remote journal has value
-                [] (ledger[id[2]][path] = ledger[id[1]][path])) \* remote and local has same value
+    \A id \in BridgeIds :
+        \A path \in Paths :
+            [] ( (bridges[id].valid
+                  /\ CurrentLedger(id[1])[path] # EmptyValue
+                  /\ CurrentLedger(id[2])[path] # EmptyValue)
+                 => [] (CurrentLedger(id[2])[path] = CurrentLedger(id[1])[path]) ) 
 
 THEOREM Spec => SingleJournalAvailability
 THEOREM Spec => SingleJournalImmutability
 THEOREM Spec => MultiJournalAvailability
 THEOREM Spec => MultiJournalImmutability
 
-
-StepProgression ==
-    \A j \in JournalNames: []<> (stepIndex[j] > 0)  \* Steps eventually occur
-
-
-WindowProgression ==
-    \A j \in JournalNames: []<> (windowPosition > 0)  \* Window eventually moves
-
-
-WindowRetention == \* non empty states in temp chain stay within the retention window
-    [] (\A j \in JournalNames: \A path \in Paths:
-        (temp[j][path] # EmptyValue) => (windowPosition[j] - tempIndex[j][path] <= config[j].window))
-
-
-
-
-THEOREM Spec => StepProgression
-THEOREM Spec => WindowProgression
-THEOREM Spec => WindowRetention
-
-
 ====
-
