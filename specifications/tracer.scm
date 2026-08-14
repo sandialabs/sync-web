@@ -1,14 +1,9 @@
 ;; wraps objects with operation, arguments, success/error, and returned value
 
 (begin
-
-
-
-
   
 (define (trace-sanitize-string s)
   s)
-
 
 ;; turns values into logs so every arg and result can be properly read  back
 (define (trace-safe x)
@@ -25,7 +20,6 @@
     (define (trace-next-seq!)
         (set! trace-seq (+ trace-seq 1))
         trace-seq)
-
 
 
 ;; Wraps an object so method calls are logged as events
@@ -61,8 +55,6 @@
                   (log! (list 'event seq journal-name method
                               (trace-safe call-args) 'error (trace-safe error-args)))
                   (apply error error-args))))))))
-
-
 
 
 ;; turns collected list into string of event records 
