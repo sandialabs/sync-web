@@ -6,23 +6,27 @@
 
 `check-trace.sh` and `run-traced-test.sh` require `journal-sdk`. Build it by running the following comand in the `journal/` directory: 
 ```sh 
-cargo build --release```
+cargo build --release
+```
 
 ## Running the Trace and Model Checking Workflow
 
 To generate event logs from `test-ledger.scm` and run model checking on the resulting trace, run: 
 ```sh 
-./check-trace.sh```
+./check-trace.sh
+```
 
 ## Running the Base TLA+ Model
 To run TLC directly on MultiJournalSyncWebJournal.tla with a possible corresponding config file, run: 
 ```sh 
-java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers auto -config MultiJournalSyncWebJournal.cfg MultiJournalSyncWebJournal.tla```
+java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers auto -config MultiJournalSyncWebJournal.cfg MultiJournalSyncWebJournal.tla
+```
 
 ## Running TLC on the Generated Traces
 After check-trace.sh first generates the traces in `check-trace-output/`, it is possible to run TLC on the generated trace specific model with 
 ```sh 
-java -XX:+UseParallelGC -cp ../tla2tools.jar tlc2.TLC -workers auto -config LedgerTrace.cfg LedgerTrace.tla```
+java -XX:+UseParallelGC -cp ../tla2tools.jar tlc2.TLC -workers auto -config LedgerTrace.cfg LedgerTrace.tla
+```
 
 ## Folder Layout
 | File | Description |
