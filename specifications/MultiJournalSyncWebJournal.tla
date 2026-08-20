@@ -99,54 +99,6 @@ StateConstraint ==
 
 Symmetry == Permutations(Paths) \cup Permutations(JournalNames)
 
-
-
-TypeInvariant ==
-    /\ history \in [JournalNames -> [IndexSet -> [Paths -> Values]]]
-    /\ stage \in [JournalNames -> [Paths -> Values]]
-    /\ pins \in [JournalNames -> [Paths -> SUBSET IndexSet]]
-    /\ bridges \in [BridgeIds ->
-          [ interface     : Values,
-            valid         : BOOLEAN,
-            mode          : {"push", "pull"},
-            lastSyncIndex : Nat,
-            pushAllowed   : BOOLEAN,
-            pullAllowed   : BOOLEAN ]]
-    /\ config \in [JournalNames -> [window : Nat]]
-    /\ timeCounter \in Nat
-    /\ stepIndex \in [JournalNames -> IndexSet]
-
-WindowConstraints ==
-    /\ \A j \in JournalNames:
-        /\ config[j].window \in Nat
-        /\ config[j].window > 0
-        /\ config[j].window <= MaxWindow
-
-BridgeConsistency ==
-    /\ \A id \in BridgeIds:
-        /\ ~bridges[id].valid => ~bridges[id].pushAllowed /\ ~bridges[id].pullAllowed
-        /\ bridges[id].valid => (bridges[id].pushAllowed <=> (bridges[id].mode # "pull"))
-        /\ bridges[id].valid => (bridges[id].pullAllowed <=> (bridges[id].mode # "push"))
-
-PinnedPersistence == 
-    \A j \in JournalNames:
-        \A path \in Paths:
-            \A k \in pins[j][path]:
-                history[j][k][path] # EmptyValue
-
-stepIndexInvariant ==
-    /\ \A j \in JournalNames: stepIndex[j] \in IndexSet \* must be natural
-    /\ \A j \in JournalNames: stepIndex[j] <= timeCounter + stepIndex[j] \* less stops than time
-
-SafetyInvariant ==
-    /\ TypeInvariant
-    /\ BridgeConsistency
-    /\ WindowConstraints
-    /\ PinnedPersistence
-    /\ stepIndexInvariant
-
-THEOREM Spec => []SafetyInvariant
-
 \* empty commit history, empty staged state, no pins, no bridges, max retention window, index at 0
 Init ==
     /\ history = [j \in JournalNames |-> EmptyHistory]
@@ -404,6 +356,56 @@ Fairness ==
 Spec ==
     Init /\ [][Next]_vars /\ Fairness
 
+
+
+
+TypeInvariant ==
+    /\ history \in [JournalNames -> [IndexSet -> [Paths -> Values]]]
+    /\ stage \in [JournalNames -> [Paths -> Values]]
+    /\ pins \in [JournalNames -> [Paths -> SUBSET IndexSet]]
+    /\ bridges \in [BridgeIds ->
+          [ interface     : Values,
+            valid         : BOOLEAN,
+            mode          : {"push", "pull"},
+            lastSyncIndex : Nat,
+            pushAllowed   : BOOLEAN,
+            pullAllowed   : BOOLEAN ]]
+    /\ config \in [JournalNames -> [window : Nat]]
+    /\ timeCounter \in Nat
+    /\ stepIndex \in [JournalNames -> IndexSet]
+
+WindowConstraints ==
+    /\ \A j \in JournalNames:
+        /\ config[j].window \in Nat
+        /\ config[j].window > 0
+        /\ config[j].window <= MaxWindow
+
+BridgeConsistency ==
+    /\ \A id \in BridgeIds:
+        /\ ~bridges[id].valid => ~bridges[id].pushAllowed /\ ~bridges[id].pullAllowed
+        /\ bridges[id].valid => (bridges[id].pushAllowed <=> (bridges[id].mode # "pull"))
+        /\ bridges[id].valid => (bridges[id].pullAllowed <=> (bridges[id].mode # "push"))
+
+PinnedPersistence == 
+    \A j \in JournalNames:
+        \A path \in Paths:
+            \A k \in pins[j][path]:
+                history[j][k][path] # EmptyValue
+
+stepIndexInvariant ==
+    /\ \A j \in JournalNames: stepIndex[j] \in IndexSet \* must be natural
+    /\ \A j \in JournalNames: stepIndex[j] <= timeCounter + stepIndex[j] \* less stops than time
+
+SafetyInvariant ==
+    /\ TypeInvariant
+    /\ BridgeConsistency
+    /\ WindowConstraints
+    /\ PinnedPersistence
+    /\ stepIndexInvariant
+
+THEOREM Spec => []SafetyInvariant
+
+
 \* liveness properties
 
 \* every bridge becomes eventually become valid
@@ -446,21 +448,17 @@ PinnedSomewhere(j, path) == \* path has at least one pin
 
 \* any path that is within the window or is pinned (and not subsequently unpinned) should be resolvable
 SingleJournalAvailability ==
-    \A j \in JournalNames :
-        \A path \in Paths :
-            [] ( ((\E k \in IndexSet :
-                     /\ k <= stepIndex[j]
-                     /\ AccessibleSnapshot(j, path, k))
-                  \/ PinnedSomewhere(j, path))
-                 => HasAccessibleHistoryValue(j, path) )
+    [] (\A j \in JournalNames : 
+        \A path \in Paths : 
+            (((\E k \in IndexSet :
+                /\ k <= stepIndex[j] /\ AccessibleSnapshot(j, path, k) /\ history[j][k][path] # EmptyValue) \/ PinnedSomewhere(j, path))
+                    => HasAccessibleHistoryValue(j, path)))
 
 \* any resolvable path that has been committed always returns the same value
-SingleJournalImmutability ==
-    \A j \in JournalNames :
-        \A path \in Paths :
-            \A k \in IndexSet :
-                [] ( (k <= stepIndex[j] /\ history[j][k][path] # EmptyValue)
-                     => [] (history[j][k][path] = history[j][k][path]) )
+SingleJournalImmutability == 
+    [] [\A j \in JournalNames : \A path \in Paths : \A k \in IndexSet :
+            (k <= stepIndex[j] /\ history[j][k][path] # EmptyValue
+                    => history[j][k][path]' = history[j][k][path])]_vars
 
 \* any path this is resolvable on a single journal and reachable across bridged journals is also resolvable
 MultiJournalAvailability ==

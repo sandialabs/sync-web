@@ -50,3 +50,7 @@ java -XX:+UseParallelGC -cp ../tla2tools.jar tlc2.TLC -workers auto -config Ledg
 | `LedgerTraceOps.tla` | Generated TLA+ module containing the sequence of translated trace operations |
 | `LedgerTrace.cfg` | Generated TLC configuration file built from the journals, paths, and values found in the traces |
 | `tlc-output.txt` | TLC output from model checking the generated trace replay | 
+
+# Version
+
+The current TLA+ specification maps to the 1.4.3 release of Synchronic Web.
