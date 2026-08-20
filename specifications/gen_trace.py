@@ -675,6 +675,11 @@ def generate_cfg(journal_names, paths, values, max_window, max_index):
         "    TypeInvariant",
         "    SafetyInvariant",
         "",
+        "PROPERTIES",
+        "   SingleJournalAvailability",
+        "   SingleJournalImmutability",
+        "   MultiJournalAvailability",
+        "   MultiJournalImmutability",
     ]
     return "\n".join(lines)
 
