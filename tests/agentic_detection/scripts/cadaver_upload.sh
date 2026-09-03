@@ -8,7 +8,7 @@ source "$script_dir/webdav_config.sh"
 WATCH_DIR="${WATCH_DIR:-$project_root/incoming}"
 DONE_DIR="${DONE_DIR:-$project_root/uploaded}"
 FAILED_DIR="${FAILED_DIR:-$project_root/failed}"
-LOG_FILE="${LOG_FILE:-$project_root/logs/cadaver-upload.log}"
+LOG_FILE="${LOG_FILE:-$project_root/logs/cadaver_upload.log}"
 WEBDAV_URL=$(resolve_webdav_url) || exit 1
 
 # Directory upload readiness marker.

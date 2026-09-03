@@ -75,7 +75,7 @@ First, launch the local sync-web stack using its [project instructions](https://
 Then, from this `tests/agentic_detection` directory, start the uploader and run the workflow:
 
 ```bash
-./scripts/cadaver-upload.sh > /dev/null 2>&1 &
+./scripts/cadaver_upload.sh > /dev/null 2>&1 &
 uploader_pid=$!
 
 ./scripts/run_workflow.sh
@@ -110,7 +110,7 @@ ls -1t verifier_files/report_*.json | head -n 1
 Uploader activity is written to:
 
 ```text
-logs/cadaver-upload.log
+logs/cadaver_upload.log
 ```
 
 Agent session exports are written beneath:
