@@ -1,0 +1,8 @@
+session_logs/
+failed/
+incoming/
+logs/
+pending/
+uploaded/
+verifier_files/
+__pycache__/
