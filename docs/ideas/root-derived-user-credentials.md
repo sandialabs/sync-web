@@ -81,13 +81,13 @@ Possession of the issuer key is therefore broad authority over users at that jou
 
 Durable Root state should contain only a verifier or secure one-way derivative of the Root secret. The raw Root value must not become ordinary journal data, a federated credential, or an Interface request credential.
 
-The locally configured periodic step already has a special relationship with Root: its on-box expression may contain or obtain the Root secret and pass it into the installed Root step handler. That local step may deterministically derive a user's credential and call a staged program through the ordinary user-authenticated `call!` path when needed.
+The locally configured periodic step already has a special relationship with Root: its on-box expression may contain or obtain the Root secret and pass it into the installed Root step handler. That local step may deterministically derive a user's credential and call a staged program through the ordinary user-authenticated `run!` path when needed.
 
 “On box” is an operational boundary, not a claim that command-line arguments, process memory, container configuration, or local secret files are equivalent to hardware-backed storage. Deployments may strengthen storage independently.
 
 ## Role of the user issuer
 
-The user issuer key exists only for user credential lifecycle operations. It should not authenticate ordinary `get`, `set!`, `resolve`, `call!`, bridge administration, or federation operations.
+The user issuer key exists only for user credential lifecycle operations. It should not authenticate ordinary read-only `use!`, `put!`, `retrieve`, `run!`, bridge administration, or federation operations.
 
 Its intended authority includes:
 
@@ -125,7 +125,7 @@ A public, signed credential projection might be shaped conceptually as:
 
 The exact shape is intentionally unresolved. Authentication material belongs under the reserved `*crypto*` namespace, not ordinary user-writable `*state*` data.
 
-Only material needed for federated verification must be projected into public signed `*crypto*` proofs. The local bearer verifier may remain in private/root credential state if no remote verifier needs it. Ordinary `set!` must never be able to alter reserved credential records.
+Only material needed for federated verification must be projected into public signed `*crypto*` proofs. The local bearer verifier may remain in private/root credential state if no remote verifier needs it. Ordinary `put!` must never be able to alter reserved credential records.
 
 ## Local authentication
 
@@ -220,9 +220,9 @@ Direct clients, agents, and services may authenticate to the raw Journal Interfa
 
 ## Consequence for staged programs
 
-Because Root can deterministically derive the issuer and any current user's secret, the local Root step can authenticate an ordinary Interface call as that user. This allows scheduled local orchestration to call staged programs with `call!` while preserving the same per-operation user authorization checks as external requests.
+Because Root can deterministically derive the issuer and any current user's secret, the local Root step can authenticate an ordinary Interface call as that user. This allows scheduled local orchestration to call staged programs with `run!` while preserving the same per-operation user authorization checks as external requests.
 
-This is intentional Root authority, not ambient authority granted to the staged program. The program still receives only its bounded Journal capability, and nested operations reauthenticate/re-authorize according to the `call!` contract.
+This is intentional Root authority, not ambient authority granted to the staged program. The program still receives only its bounded Journal capability, and nested operations reauthenticate/re-authorize according to the `run!` contract.
 
 ## Non-goals
 

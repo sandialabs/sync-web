@@ -12,6 +12,7 @@ interface ToolBarProps {
   theme: 'light' | 'dark';
   onModeChange: (mode: ExplorerMode) => void;
   onThemeToggle: () => void;
+  onSignOut?: () => void;
 }
 
 const ToolBar: React.FC<ToolBarProps> = ({
@@ -23,10 +24,12 @@ const ToolBar: React.FC<ToolBarProps> = ({
   theme,
   onModeChange,
   onThemeToggle,
+  onSignOut = () => undefined,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
 
   const handleLogout = async () => {
+    onSignOut();
     const returnTo = encodeURIComponent(window.location.href);
     const res = await fetch(
       `/auth/.ory/self-service/logout/browser?return_to=${returnTo}`,
@@ -48,7 +51,7 @@ const ToolBar: React.FC<ToolBarProps> = ({
       <div className="toolbar">
         <div className="toolbar-left">
           <img
-            src={process.env.PUBLIC_URL + '/logo.png'}
+            src="/explorer/logo.png"
             alt="Synchronic Web"
             className="toolbar-logo"
             onClick={handleLogoClick}
@@ -56,16 +59,16 @@ const ToolBar: React.FC<ToolBarProps> = ({
           />
           <div className="mode-switch">
             <button
-              className={`tab ${mode === 'ledger' ? 'active' : ''}`}
-              onClick={() => onModeChange('ledger')}
-            >
-              Ledger
-            </button>
-            <button
               className={`tab ${mode === 'stage' ? 'active' : ''}`}
               onClick={() => onModeChange('stage')}
             >
               Stage
+            </button>
+            <button
+              className={`tab ${mode === 'ledger' ? 'active' : ''}`}
+              onClick={() => onModeChange('ledger')}
+            >
+              Ledger
             </button>
             <button
               className={`tab ${mode === 'access' ? 'active' : ''}`}

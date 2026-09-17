@@ -50,6 +50,21 @@ assert_body() {
     }
 }
 
+assert_transport_overlimit_nonreflection() {
+    base=$1
+    token="SENSITIVE_TRANSPORT_TOKEN_$(head -c 9000 /dev/zero | tr '\000' A)"
+    status=$(curl -ksS -o "$tmp/transport-overlimit.out" -w '%{http_code}' \
+        "$base/api/v1/raw?selection=$token")
+    case "$status" in
+        400|414) ;;
+        *) echo "Expected transport rejection from $base, got $status" >&2; exit 1 ;;
+    esac
+    if grep -q 'SENSITIVE_TRANSPORT_TOKEN' "$tmp/transport-overlimit.out"; then
+        echo "Transport rejection reflected the Raw token at $base" >&2
+        exit 1
+    fi
+}
+
 assert_unavailable() {
     url=$1
     shift
@@ -154,11 +169,15 @@ http_port=$("$RUNTIME" port "$router" 80/tcp | tail -1 | sed 's/.*://')
 assert_status 404 "http://127.0.0.1:$http_port/metrics"
 assert_status 404 "http://127.0.0.1:$http_port/metrics?source=public"
 assert_status 404 "http://127.0.0.1:$http_port/%6Detrics"
-for path in healthz readyz api/v1/general/size interface explorer workbench webdav/; do
+for path in healthz readyz api/v1/general/size 'api/v1/raw?selection=test-token' interface explorer workbench webdav/; do
     assert_status 200 "http://127.0.0.1:$http_port/$path"
 done
-assert_body 'old-gateway:/api/v1/general/get?proof=true:GET:session=before' \
-    "http://127.0.0.1:$http_port/api/v1/general/get?proof=true" -H 'Cookie: session=before'
+raw_max=$(head -c 4096 /dev/zero | tr '\000' A)
+assert_status 200 "http://127.0.0.1:$http_port/api/v1/raw?selection=$raw_max"
+assert_status 200 "http://127.0.0.1:$http_port/api/v1/raw?selection=${raw_max}A"
+assert_transport_overlimit_nonreflection "http://127.0.0.1:$http_port"
+assert_body 'old-gateway:/api/v1/general/use?proof=true:GET:session=before' \
+    "http://127.0.0.1:$http_port/api/v1/general/use?proof=true" -H 'Cookie: session=before'
 assert_body 'old-gateway:/api/v1/general/pin:POST:session=before' \
     "http://127.0.0.1:$http_port/api/v1/general/pin" -X POST -H 'Cookie: session=before'
 assert_body 'old-gateway:/auth/login?return=%2Fexplorer:GET:' \
@@ -176,6 +195,8 @@ assert_body 'old-gateway:/readyz?full=true:GET:' \
 "$RUNTIME" exec "$router" grep -A1 'location = /metrics' /etc/nginx/includes/nginx.routes.inc | grep -q 'return 404'
 "$RUNTIME" exec "$router" grep -q '^resolver .* valid=5s ipv6=off;' /etc/nginx/includes/nginx.routes.inc
 "$RUNTIME" exec "$router" grep -q 'proxy_pass http://\$gateway_upstream;' /etc/nginx/includes/nginx.routes.inc
+"$RUNTIME" exec "$router" grep -q '^set \$file_system_upstream "file-system:8080";' /etc/nginx/includes/nginx.routes.inc
+"$RUNTIME" exec "$router" grep -q 'proxy_pass http://\$file_system_upstream;' /etc/nginx/includes/nginx.routes.inc
 "$RUNTIME" exec "$router" grep -q '^resolver .* valid=1s ipv6=off;' /etc/nginx/conf.d/sync-ui-upstreams.conf
 "$RUNTIME" exec "$router" grep -q 'proxy_pass http://sync_explorer_upstream/;' /etc/nginx/includes/nginx.routes.inc
 "$RUNTIME" exec "$router" grep -q 'proxy_pass http://sync_workbench_upstream/;' /etc/nginx/includes/nginx.routes.inc
@@ -207,8 +228,8 @@ new_ip=$("$RUNTIME" inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}
 wait_replacement_ready "$gateway_mock" "$new_ip" /healthz \
     'new-gateway:/healthz:GET:' gateway
 wait_body 'new-gateway:/healthz:GET:' "http://127.0.0.1:$http_port/healthz" gateway
-assert_body 'new-gateway:/api/v1/general/get?proof=true:GET:session=after' \
-    "http://127.0.0.1:$http_port/api/v1/general/get?proof=true" -H 'Cookie: session=after'
+assert_body 'new-gateway:/api/v1/general/use?proof=true:GET:session=after' \
+    "http://127.0.0.1:$http_port/api/v1/general/use?proof=true" -H 'Cookie: session=after'
 assert_body 'new-gateway:/api/v1/general/pin:POST:session=after' \
     "http://127.0.0.1:$http_port/api/v1/general/pin" -X POST -H 'Cookie: session=after'
 pin_requests=$("$RUNTIME" logs "$gateway_mock" 2>&1 | grep -c 'POST /api/v1/general/pin ' || true)
@@ -256,9 +277,12 @@ assert_status 301 "http://127.0.0.1:$plain_port/healthz"
 assert_status 404 "https://127.0.0.1:$tls_port/metrics"
 assert_status 404 "https://127.0.0.1:$tls_port/metrics?source=public"
 assert_status 404 "https://127.0.0.1:$tls_port/%6Detrics"
-for path in healthz readyz api/v1/general/size explorer workbench webdav/; do
+for path in healthz readyz api/v1/general/size 'api/v1/raw?selection=test-token' explorer workbench webdav/; do
     assert_status 200 "https://127.0.0.1:$tls_port/$path"
 done
+assert_status 200 "https://127.0.0.1:$tls_port/api/v1/raw?selection=$raw_max"
+assert_status 200 "https://127.0.0.1:$tls_port/api/v1/raw?selection=${raw_max}A"
+assert_transport_overlimit_nonreflection "https://127.0.0.1:$tls_port"
 
 # The checked-in include is the non-templated variant used by direct nginx builds.
 grep -A1 'location = /metrics' "$root/services/router/nginx.routes.conf" | grep -q 'return 404'

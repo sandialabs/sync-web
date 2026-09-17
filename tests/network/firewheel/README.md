@@ -60,10 +60,10 @@ To access the Grafana monitoring dashboard:
 ### Social Agent Parameters
 - **Connectivity**: Number of peer connections per agent
 - **Size**: Agent population size
-- **Activity**: Seconds between per-user activity cycles. The default is `4`; `0` removes the delay for maximum-throughput saturation traffic. Use `ACTIVITY_DISABLED=1` for setup-only runs.
+- **Activity**: Seconds between per-user activity cycles. The default is `8`; `0` removes the delay for maximum-throughput saturation traffic. Use `ACTIVITY_DISABLED=1` for setup-only runs.
 - **Users**: Number of deterministic non-admin fixture users (compose/runtime `USERS`).
 - **Segments**: Maximum federated walk length for same-user private authority; bounded walks may revisit journals (compose/runtime `SEGMENTS`, default `2`).
-- **Batch**: Optional positive final social-agent argument/runtime `BATCH`. When present, continuous activity uses same-route unique `get-batch`/`set-batch` and latest-index `pin-batch`/`unpin-batch`; setup remains scalar. It must not exceed `1024` or any selectable public/private group capacity. Metrics report logical path operations separately from HTTP requests.
+- **Batch**: Optional positive final social-agent argument/runtime `BATCH`. When present, continuous activity uses same-route unique read-only `use-batch`/`put-batch` and latest-index `pin-batch`/`unpin-batch`; setup remains scalar. It must not exceed `1024` or any selectable public/private group capacity. Metrics report logical path operations separately from HTTP requests.
 
 ## Example Configurations
 

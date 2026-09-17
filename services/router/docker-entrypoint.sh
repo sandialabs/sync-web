@@ -40,6 +40,7 @@ cat > /etc/nginx/includes/nginx.routes.inc <<EOF
 resolver ${DNS_RESOLVERS} valid=5s ipv6=off;
 resolver_timeout 2s;
 set \$gateway_upstream "${GATEWAY_HOST}";
+set \$file_system_upstream "${FILE_SYSTEM_HOST}";
 
 location = / {
     try_files /index.html =404;
@@ -94,11 +95,11 @@ location /workbench {
 }
 
 location = /webdav {
-    proxy_pass http://${FILE_SYSTEM_HOST};
+    proxy_pass http://\$file_system_upstream;
 }
 
 location /webdav/ {
-    proxy_pass http://${FILE_SYSTEM_HOST};
+    proxy_pass http://\$file_system_upstream;
 }
 EOF
 

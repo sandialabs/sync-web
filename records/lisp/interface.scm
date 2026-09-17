@@ -1,8 +1,8 @@
 (macro (config standard-module chain tree ledger federation authorization . classes)
-  (if (not (equal? (sync-digest *sync-state*)
-                   #u(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-                      0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0)))
-      (error 'upgrade-error "This Interface supports fresh installation only"))
+  (define empty-state-digest
+    #u(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+       0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0))
+  (define fresh? (equal? (sync-digest *sync-state*) empty-state-digest))
   (set! chain (eval chain))
   (set! tree (eval tree))
   (set! ledger (eval ledger))
@@ -17,8 +17,9 @@
       (error 'argument-error "Root and Interface credentials must differ"))
   (set! config (append config '((clear? #t) (admins ()) (window #f)
                                 (bridge-accept auto))))
-  (if (not (cfg 'clear?))
-      (error 'upgrade-error "This Interface supports fresh installation only"))
+  (if (eq? fresh? (not (cfg 'clear?)))
+      (error 'upgrade-error
+             "Fresh installation and versioned upgrade state do not match clear?"))
 
   (define standard-source (eval standard-module))
   (define standard-module* (eval standard-source))
@@ -28,23 +29,22 @@
   (define (set-query body) (sync-call `(*set-query* ,(cfg 'root-secret) ,body) #t))
   (define (set-step body) (sync-call `(*set-step* ,(cfg 'root-secret) ,body) #t))
 
-  (let ((result (sync-call `(,(cfg 'root) ,(cfg 'root-secret) fresh) #t)))
-    (if (and (pair? result) (eq? (car result) 'error))
-        (apply error (cdr result))))
-  (call `(lambda (root) (let* ((standard-module (eval ',standard-source))
+  (if fresh?
+      (begin
+        (let ((result (sync-call `(,(cfg 'root) ,(cfg 'root-secret) fresh) #t)))
+          (if (and (pair? result) (eq? (car result) 'error))
+              (apply error (cdr result))))
+        (call `(lambda (root) (let* ((standard-module (eval ',standard-source))
 			       (standard-node (standard-module 'make))
 			       (standard-class (standard-module 'class))
-			       (identity-nonce ,(random-byte-vector 32))
-			       (identity-id (sync-hash (expression->byte-vector
-							(list 'sync-web/journal-id/v1 identity-nonce))))
-			       (identity `((id ,identity-id) (nonce ,identity-nonce)))
+			       (key-derivation-salt ,(random-byte-vector 32))
 			       (journal-keys (crypto-generate (expression->byte-vector
-							       (list 'sync-web/journal-signing-key/v1 identity-id
+							       (list 'sync-web/journal-signing-key/v1 key-derivation-salt
 								     (sync-hash (expression->byte-vector ,(cfg 'root-secret)))))))
                                (interface-keys
                                 (crypto-generate
                                  (expression->byte-vector
-                                  (list 'sync-web/interface-signing-key/v1 identity-id
+                                  (list 'sync-web/interface-signing-key/v1 key-derivation-salt
                                         (sync-hash
                                          (expression->byte-vector ,(cfg 'interface-secret)))))))
 			       (federation-node
@@ -59,7 +59,8 @@
                                (interface-public-key (car interface-keys))
                                (ledger-config
                                 `((public
-                                   ((window ,,(cfg 'window)) (identity ,identity)
+                                   ((window ,,(cfg 'window))
+                                    (key-derivation-salt ,key-derivation-salt)
                                     (public-key ,(car journal-keys))
                                     (journal ((public-key ,(car journal-keys))
                                               (latest-rotation-index -1)))
@@ -95,7 +96,96 @@
 			  ((root 'set!) '(interface admins) ',(cfg 'admins))
 			  ((root 'set!) '(interface endpoint) ,(cfg 'interface))
 			  ((root 'set!) '(interface name) ',(cfg 'name))
-			  #t)))
+			  #t))))
+      (call
+       `(lambda (root)
+          (let* ((standard-module (eval ',standard-source))
+                 (standard-node (standard-module 'make))
+                 (old-ledger
+                  (sync-eval ((root 'get) '(root object ledger))))
+                 (old-federation
+                  (sync-eval ((root 'get) '(root object federation))))
+                 (ledger-config ((old-ledger 'config)))
+                 (public (cadr (assoc 'public ledger-config)))
+                 (private (cadr (assoc 'private ledger-config)))
+                 (identity (and (assoc 'identity public)
+                                (cadr (assoc 'identity public))))
+                 (identity-id (and (list? identity) (assoc 'id identity)
+                                   (cadr (assoc 'id identity))))
+                 (identity-nonce (and (list? identity) (assoc 'nonce identity)
+                                      (cadr (assoc 'nonce identity))))
+                 (journal-key (cadr (assoc 'public-key public)))
+                 (interface-config (cadr (assoc 'interface public)))
+                 (interface-key (cadr (assoc 'public-key interface-config)))
+                 (derived-journal
+                  (car (crypto-generate
+                        (expression->byte-vector
+                         (list 'sync-web/journal-signing-key/v1 identity-id
+                               (sync-hash
+                                (expression->byte-vector ,(cfg 'root-secret))))))))
+                 (derived-interface
+                  (car (crypto-generate
+                        (expression->byte-vector
+                         (list 'sync-web/interface-signing-key/v1 identity-id
+                               (sync-hash
+                                (expression->byte-vector ,(cfg 'interface-secret))))))))
+                 (federation-config ((old-federation 'config))))
+            (define (drop entries key)
+              (let loop ((entries entries) (out '()))
+                (cond ((null? entries) (reverse out))
+                      ((eq? (caar entries) key) (loop (cdr entries) out))
+                      (else (loop (cdr entries) (cons (car entries) out))))))
+            (define* (get entries key (default '()))
+              (let ((entry (and (list? entries) (assoc key entries))))
+                (if entry (cadr entry) default)))
+            (define (put entries key value)
+              (cons (list key value) (drop entries key)))
+            (define (strip-peer entry)
+              (list (car entry)
+                    (drop (drop (cadr entry) 'identity) 'identity-id)))
+            (if (not (and (list? ledger-config) (list? public) (list? private)
+                          (not (assoc 'key-derivation-salt public))
+                          (byte-vector? identity-id) (= (length identity-id) 32)
+                          (byte-vector? identity-nonce) (= (length identity-nonce) 32)
+                          (equal? identity-id
+                                  (sync-hash
+                                   (expression->byte-vector
+                                    (list 'sync-web/journal-id/v1 identity-nonce))))
+                          (equal? journal-key derived-journal)
+                          (equal? interface-key derived-interface)
+                          (equal? interface-key (cadr (assoc 'public-key federation-config)))))
+                (error 'upgrade-error "State is not the exact identity-bound Interface version"))
+            (set! public
+                  (put (drop public 'identity)
+                       'key-derivation-salt identity-id))
+            (set! private (put private 'bridge-preapproval '()))
+            (set! private (drop private 'bridge-identity))
+            (if (assoc 'bridge private)
+                (set! private
+                      (put private 'bridge
+                           (map strip-peer (cadr (assoc 'bridge private))))))
+            (if (assoc 'bridge-retired private)
+                (set! private
+                      (put private 'bridge-retired
+                           (map strip-peer
+                                (cadr (assoc 'bridge-retired private))))))
+            (set! federation-config
+                  (put federation-config 'peers
+                       (map strip-peer (get federation-config 'peers))))
+            (set! federation-config
+                  (put federation-config 'retired
+                       (map strip-peer (get federation-config 'retired))))
+            ((old-ledger '~field!) 'config
+             (expression->byte-vector
+              `((public ,public) (private ,private))))
+            ((old-federation '~field!) 'config
+             (expression->byte-vector federation-config))
+            ((old-ledger '~field!) 'standard standard-node)
+            ((old-federation '~field!) 'standard standard-node)
+            ((root 'set!) '(root object standard) standard-node)
+            ((root 'set!) '(root object ledger) (old-ledger))
+            ((root 'set!) '(root object federation) (old-federation))
+            #t))))
 
   (let loop ((rest classes)) (if (pair? rest) (begin (call `(lambda (root)
 							      ((root 'set!) '(root object ,(caar rest)) ,(cadar rest))))
@@ -111,13 +201,12 @@
 									(standard (module 'local ((root 'get) '(root class standard)) std-node))
 									(ledger (module 'local ((root 'get) '(root class ledger))
 										((root 'get) '(root object ledger))))
-									(identity ((ledger 'config) '(public identity)))
-									(id (cadr (assoc 'id identity)))
+									(salt ((ledger 'config) '(public key-derivation-salt)))
 									(old (crypto-generate (expression->byte-vector
-											       (list 'sync-web/journal-signing-key/v1 id (sync-hash
+											       (list 'sync-web/journal-signing-key/v1 salt (sync-hash
 																	  (expression->byte-vector old-secret))))))
 									(new (crypto-generate (expression->byte-vector
-											       (list 'sync-web/journal-signing-key/v1 id (sync-hash
+											       (list 'sync-web/journal-signing-key/v1 salt (sync-hash
 																	  (expression->byte-vector new-secret))))))
 									(indexes ((ledger 'config) '(journal-rotation-indexes)))
 									(previous (if (null? indexes) -1 (car (reverse indexes))))
@@ -127,7 +216,7 @@
 														    (public-key ,(car new)) (secret-key ,(cdr new))
 														    (rotation ((previous-key ,(car old)) (public-key ,(car new)) (signature
 																						  ,(crypto-sign (cdr old) (expression->byte-vector
-																									   (list 'sync-web/journal-key-rotation/v1 id index
+																									   (list 'sync-web/journal-key-rotation/v2 index
 																										 previous (car old) (car new)))))))))
 														 ((root 'set!) '(root object ledger) (ledger))))
                                                                    ((root 'set!) '(interface root-verifier)
@@ -139,6 +228,8 @@
 					     (authentication (and (assoc 'authentication query)
 								  (cadr (assoc 'authentication query))))
 					     (invocation (and (assoc 'invocation query) (cadr (assoc 'invocation query))))
+                                             (delegation (and (assoc 'delegation query)
+                                                              (cadr (assoc 'delegation query))))
 					     (prepared (and (assoc 'prepared query) (cadr (assoc 'prepared query))))
 					     (module (eval ((root 'get) '(root class standard-module))))
                                              (std-node ((root 'get) '(root object standard)))
@@ -150,15 +241,14 @@
                                              (authorization (module 'local ((root 'get) '(root class authorization))
                                                                     ((root 'get) '(root object authorization))))
                                              (context '()) (auth-head #f) (ancestor? #f)
-					     (delegated? #f))
+                                             (caller #f) (delegated? #f))
 
 					(define (arg name) (let ((entry (assoc name arguments))) (and entry (cadr entry))))
                                         (define (transient-key domain secret)
-                                          (let* ((identity ((ledger 'config) '(public identity)))
-                                                 (id (cadr (assoc 'id identity))))
+                                          (let ((salt ((ledger 'config) '(public key-derivation-salt))))
                                             (crypto-generate
                                              (expression->byte-vector
-                                              (list domain id
+                                              (list domain salt
                                                     (sync-hash
                                                      (expression->byte-vector secret)))))))
                                         (define (request-secret)
@@ -166,19 +256,73 @@
                                               (arg-from invocation 'credentials)
                                               (error 'authentication-error
                                                      "Signing requires local credentials")))
+                                        (define (delegation-proof principal delegated-context
+                                                                  delegated-function
+                                                                  delegated-arguments)
+                                          (sync-hash
+                                           (expression->byte-vector
+                                            (list 'sync-web/call-delegation/v1
+                                                  ((root 'get) '(interface credential))
+                                                  principal delegated-context
+                                                  delegated-function delegated-arguments))))
 					(define (set-alist values key value) (let loop ((in values) (out '()))
 									       (cond ((null? in) (reverse (cons (list key value) out))) ((eq? (caar in) key)
 																	 (append (reverse out) (cons (list key value) (cdr in))))
 										     (else (loop (cdr in) (cons (car in) out))))))
+                                        (define (local-admin? principal)
+                                          (and (list? principal) (= (length principal) 2)
+                                               (eq? (car principal) '*state*)
+                                               (symbol? (cadr principal))))
+                                        (define (admin-principals->map admins)
+                                          (let loop ((principals admins) (keys '()) (entries '()))
+                                            (cond ((null? principals) (reverse entries))
+                                                  ((and (pair? principals)
+                                                        (local-admin? (car principals))
+                                                        (not (memq (cadar principals) keys)))
+                                                   (loop (cdr principals)
+                                                         (cons (cadar principals) keys)
+                                                         (cons (list (cadar principals)
+                                                                     (car principals))
+                                                               entries)))
+                                                  (else
+                                                   (error 'integrity-error
+                                                          "Stored admins must be unique local principals")))))
+                                        (define (admin-map->principals admins)
+                                          (let loop ((entries admins) (keys '()) (principals '()))
+                                            (if (null? entries) (reverse principals)
+                                                (if (and (pair? entries)
+                                                         (list? (car entries))
+                                                         (= (length (car entries)) 2)
+                                                         (symbol? (caar entries))
+                                                         (local-admin? (cadar entries))
+                                                         (eq? (caar entries) (cadr (cadar entries)))
+                                                         (not (memq (caar entries) keys)))
+                                                    (loop (cdr entries)
+                                                          (cons (caar entries) keys)
+                                                          (cons (cadar entries) principals))
+                                                    (error 'argument-error
+                                                           "Admins must be a username-keyed map of local principals")))))
 					(if (or (assoc 'meta arguments) (assoc 'metas arguments) (assoc 'meta? arguments))
 					    (error 'argument-error "Metadata is not supported"))
+                                        (if (and (memq function '(use! use-batch!))
+                                                 (assoc 'read-only? arguments)
+                                                 (not (boolean? (arg 'read-only?))))
+                                            (error 'argument-error
+                                                   "read-only? must be boolean"))
+                                        (if (assoc 'index? arguments)
+                                            (if (not (memq function '(retrieve retrieve-batch)))
+                                                (error 'argument-error
+                                                       "index? is only supported by retrieve operations")
+                                                (if (not (boolean? (arg 'index?)))
+                                                    (error 'argument-error
+                                                           "index? must be boolean"))))
 					(if (and (eq? function 'pin!) (assoc 'response arguments))
 					    (error 'argument-error "Pin proof responses are internal"))
-                                        (if (and (eq? function 'resolve-batch)
+                                        (if (and (eq? function 'retrieve-batch)
                                                  (assoc 'proof? arguments)
                                                  (not invocation))
                                             (error 'argument-error
-                                                   "Resolve batch proofs are internal"))
+                                                   "Retrieve batch proofs are internal"))
 					(define (with-auth request) (cond (authentication
 									   (append request `((authentication ,authentication))))
 									  (invocation (append request `((invocation ,invocation))))
@@ -241,35 +385,181 @@
 											 (next (and (pair? result) (pair? (car result)) (assoc 'continuation result))))
 										    (cond (next (failure (self-call (cadr next)))) (prepared result)
 											  (else (failure result)))))
-					(define (authenticate) (if invocation
-								   (let ((source (arg-from invocation 'route-source))
-									 (target (arg-from invocation 'route-target)))
-								     (if (and (null? source) (null? target))
-									 (let ((identity (arg-from invocation 'identity))) (if (not (equal?
-																     (sync-hash (expression->byte-vector
-																		 (arg-from invocation 'credentials)))
-																     ((root 'get) '(interface secret))))
-															       (error 'authentication-error "Authentication failed"))
-									      (if (eq? identity '*journal*) '()
-										  (if (eq? identity '*public*) '(*public*) `(*state* ,identity))))
-									 (let* ((result ((federation 'authenticate) ledger
-											 `((function ,function) (arguments ,arguments)
-											   (invocation ,invocation)))))
-									   (set! context (cadr (assoc 'context result)))
-									   (set! auth-head
-										 (and (assoc 'data-head result)
-										      `((index ,(cadr (assoc 'data-head-index result)))
-										        (object ,(cadr (assoc 'data-head result))))))
-									   (cadr (assoc 'principal result)))))
-								   (if (not authentication) '(*public*)
-								       (let ((principal (or (arg-from authentication 'identity) '())))
-									 (if (not (equal? (sync-hash (expression->byte-vector
-												      (arg-from authentication 'credentials)))
-											  ((root 'get) '(interface secret))))
-									     (error 'authentication-error "Authentication failed"))
-									 principal))))
+                                        (define (authenticate)
+                                          (if delegation
+                                              (let ((principal (arg-from delegation 'principal))
+                                                    (delegated-context
+                                                     (arg-from delegation 'context))
+                                                    (delegated-function
+                                                     (arg-from delegation 'function))
+                                                    (delegated-arguments
+                                                     (arg-from delegation 'arguments))
+                                                    (proof (arg-from delegation 'proof)))
+                                                (if (or authentication invocation
+                                                        (not
+                                                         (and (list? delegation)
+                                                              (= (length delegation) 5)
+                                                              (list? principal)
+                                                              (list? delegated-context)
+                                                              (assoc 'latest-index delegated-context)
+                                                              (integer?
+                                                               (arg-from delegated-context
+                                                                         'latest-index))
+                                                              (or
+                                                               (not
+                                                                (assoc 'authentication-index
+                                                                       delegated-context))
+                                                               (integer?
+                                                                (arg-from delegated-context
+                                                                          'authentication-index)))
+                                                              (eq? delegated-function function)
+                                                              (equal? delegated-arguments arguments)
+                                                              (equal?
+                                                               proof
+                                                               (delegation-proof
+                                                                principal delegated-context
+                                                                delegated-function
+                                                                delegated-arguments)))))
+                                                    (error 'authentication-error
+                                                           "Invalid call delegation"))
+                                                (set! context delegated-context)
+                                                principal)
+                                              (if invocation
+                                                  (let ((source
+                                                         (arg-from invocation 'route-source))
+                                                        (target
+                                                         (arg-from invocation 'route-target)))
+                                                    (if (and (null? source) (null? target))
+                                                        (let ((identity
+                                                               (arg-from invocation 'identity)))
+                                                          (if (not
+                                                               (equal?
+                                                                (sync-hash
+                                                                 (expression->byte-vector
+                                                                  (arg-from invocation
+                                                                            'credentials)))
+                                                                ((root 'get) '(interface secret))))
+                                                              (error 'authentication-error
+                                                                     "Authentication failed"))
+                                                          (if (eq? identity '*journal*) '()
+                                                              (if (eq? identity '*public*)
+                                                                  '(*public*)
+                                                                  `(*state* ,identity))))
+                                                        (let* ((result
+                                                                ((federation 'authenticate)
+                                                                 ledger
+                                                                 `((function ,function)
+                                                                   (arguments ,arguments)
+                                                                   (invocation ,invocation)))))
+                                                          (set! context
+                                                                (cadr (assoc 'context result)))
+                                                          (if (assoc 'provider-paths result)
+                                                              (let ((paths
+                                                                     (cadr
+                                                                      (assoc
+                                                                       'provider-paths result))))
+                                                                (set! arguments
+                                                                      (set-alist
+                                                                       arguments
+                                                                       (if (eq? function
+                                                                                'retrieve)
+                                                                           'path 'paths)
+                                                                       (if (eq? function
+                                                                                'retrieve)
+                                                                           (car paths) paths)))))
+                                                          (set! auth-head
+                                                                (and
+                                                                 (assoc 'data-head result)
+                                                                 `((index
+                                                                    ,(cadr
+                                                                      (assoc
+                                                                       'data-head-index result)))
+                                                                   (object
+                                                                    ,(cadr
+                                                                      (assoc
+                                                                       'data-head result))))))
+                                                          (cadr (assoc 'principal result)))))
+                                                  (if (not authentication) '(*public*)
+                                                      (let ((principal
+                                                             (or
+                                                              (arg-from authentication
+                                                                        'identity)
+                                                              '())))
+                                                        (if (not
+                                                             (equal?
+                                                              (sync-hash
+                                                               (expression->byte-vector
+                                                                (arg-from authentication
+                                                                          'credentials)))
+                                                              ((root 'get)
+                                                               '(interface secret))))
+                                                            (error 'authentication-error
+                                                                   "Authentication failed"))
+                                                        principal)))))
 					(define (arg-from values key) (let ((entry (and (list? values) (assoc key values))))
 									(and entry (cadr entry))))
+                                        (define retained-provider?
+                                          (and invocation
+                                               (pair? (arg-from invocation 'route-source))
+                                               (null? (arg-from invocation 'route-target))
+                                               (not (assoc 'data-object invocation))
+                                               (memq function '(retrieve retrieve-batch))))
+                                        (define (retained-path path)
+                                          (define (reject)
+                                            (error 'path-error
+                                                   "Invalid retained path: ~S" path))
+                                          (if (not (and (list? path) (pair? path)
+                                                        (integer? (car path))
+                                                        (pair? (cdr path))))
+                                              (reject))
+                                          (let loop ((segments (cdr path)) (route '())
+                                                     (history (list (car path))))
+                                            (cond
+                                             ((null? segments)
+                                              `((route ,route) (history ,history)
+                                                (path ,path) (retained-provider? #t)))
+                                             ((memq (car segments)
+                                                    '(*state* *transition* *crypto*))
+                                              `((route ,route) (history ,history)
+                                                (path ,path) (retained-provider? #t)))
+                                             ((and (eq? (car segments) '*bridge*)
+                                                   (null? (cdr segments)))
+                                              `((route ,route) (history ,history)
+                                                (path ,path) (retained-provider? #t)))
+                                             (else
+                                              (let* ((explicit? (eq? (car segments) '*bridge*))
+                                                     (name
+                                                      (if explicit?
+                                                          (and (pair? (cdr segments))
+                                                               (cadr segments))
+                                                          (car segments)))
+                                                     (rest
+                                                      (if explicit?
+                                                          (and (pair? (cdr segments))
+                                                               (cddr segments))
+                                                          (cdr segments))))
+                                                (if (not (and (symbol? name)
+                                                              (not (memq name
+                                                                         '(*state* *transition*
+                                                                           *crypto* *bridge*)))
+                                                              (list? rest)))
+                                                    (reject))
+                                                (let ((route (append route (list name))))
+                                                  (if (null? rest)
+                                                      `((route ,route) (history ,history)
+                                                        (path ,path)
+                                                        (retained-provider? #t))
+                                                      (let* ((explicit-index?
+                                                              (integer? (car rest)))
+                                                             (index
+                                                              (if explicit-index?
+                                                                  (car rest) -1))
+                                                             (rest
+                                                              (if explicit-index?
+                                                                  (cdr rest) rest)))
+                                                        (loop rest route
+                                                              (append history
+                                                                      (list index)))))))))))
 					(define (committed-path path)
 					  (define (reject) (error 'path-error "Invalid committed path: ~S" path))
 					  (if (not (and (list? path) (pair? path) (integer? (car path))
@@ -290,6 +580,70 @@
 					                  (history ,(reverse (cons index history)))
 					                  (path ,(cons index rest)))
 					                (loop rest (cons alias route) (cons index history))))))))
+                                        (define* (committed-indexes selected (proof #f))
+                                          (let* ((route (arg-from selected 'route))
+                                                 (history (arg-from selected 'history)))
+                                            (if (and proof (pair? route))
+                                                (let loop ((chain-node ((standard 'deserialize) proof))
+                                                           (route route) (history history)
+                                                           (indexes '()))
+                                                  (let* ((selection
+                                                          ((standard 'deep-call) chain-node '()
+                                                           `(lambda (chain)
+                                                              (let ((index
+                                                                     ((chain 'index)
+                                                                      ,(car history))))
+                                                                (list index
+                                                                      ((chain 'get) index))))))
+                                                         (index (car selection))
+                                                         (head (cadr selection))
+                                                         (indexes (append indexes (list index))))
+                                                    (if (null? route) indexes
+                                                        (let ((nested
+                                                               ((standard 'deep-get) head
+                                                                `((*bridge* ,(car route) chain)))))
+                                                          (if (or (not (sync-node? nested))
+                                                                  (equal? nested '(nothing))
+                                                                  (equal? nested '(unknown)))
+                                                              (error 'integrity-error
+                                                                     "Selected proof omits nested bridge chain")
+                                                              (if (null? (cdr history)) indexes
+                                                                  (loop nested (cdr route) (cdr history)
+                                                                        indexes)))))))
+                                                (if (pair? route)
+                                                    (error 'integrity-error
+                                                           "Federated index projection requires verified proof")
+                                                    (let ((origin
+                                                           (if (< (car history) 0)
+                                                               (+ ((ledger 'size)) (car history))
+                                                               (car history))))
+                                                      (list origin))))))
+                                        (define (indexed-result result selected)
+                                          (let ((indexes
+                                                 (committed-indexes
+                                                  selected
+                                                  (and (pair? result) (pair? (car result))
+                                                       (or (assoc 'proof result)
+                                                           (assoc 'indexed-proof result))
+                                                       (cadr (or (assoc 'proof result)
+                                                                 (assoc 'indexed-proof result)))))))
+                                            (cond ((and (pair? result) (pair? (car result))
+                                                        (assoc 'indexed-proof result))
+                                                   `((content ,(cadr (assoc 'content result)))
+                                                     (indexes ,indexes)))
+                                                  ((and (pair? result) (pair? (car result))
+                                                        (assoc 'content result))
+                                                   (append
+                                                    (let loop ((entries result) (public '()))
+                                                      (cond ((null? entries) (reverse public))
+                                                            ((memq (caar entries) '(proof-index indexes))
+                                                             (loop (cdr entries) public))
+                                                            (else
+                                                             (loop (cdr entries)
+                                                                   (cons (car entries) public)))))
+                                                    `((indexes ,indexes))))
+                                                  (else
+                                                   `((content ,result) (indexes ,indexes))))))
 					(define (origin-identity principal)
 					  (cond ((equal? principal '(*public*)) '*public*)
 					        ((null? principal) '*journal*)
@@ -297,7 +651,8 @@
 					              (pair? (cdr principal)) (symbol? (cadr principal))
 					              (null? (cddr principal))) (cadr principal))
 					        (else (error 'authentication-error "Invalid local federation identity"))))
-                                        (define (authorize-path principal path operation)
+                                        (define* (authorize-path principal path operation
+                                                                 (operation-arguments '()))
                                           (let* ((admins ((root 'get) '(interface admins)))
                                                  (remote (assoc 'authentication-index context))
                                                  (direct?
@@ -311,8 +666,10 @@
                                             (if direct? 'direct
                                                 (and path
                                                      ((authorization 'authorized?)
-                                                      principal ctx path operation)))))
-                                        (define (authorize-batch paths operation)
+                                                      principal ctx path operation
+                                                      operation-arguments)))))
+                                        (define* (authorize-batch paths operation
+                                                                  (operation-arguments '()))
                                           (if (not (list? paths))
                                               (error 'argument-error
                                                      "Batch paths must be a proper list"))
@@ -326,15 +683,16 @@
                                                   (let ((decision
                                                          (authorize-path principal
                                                                          (car paths)
-                                                                         operation)))
+                                                                         operation operation-arguments)))
                                                     (if (not decision)
                                                         (error 'authorization-error
                                                                "Not authorized"))
                                                     (loop (cdr paths)
                                                           (cons (eq? decision 'ancestor)
                                                                 ancestors)))))))
-                                        (define (authorize)
-                                          (let* ((principal (authenticate))
+                                        (define* (authorize (authenticated-principal #f))
+                                          (let* ((principal (or authenticated-principal
+                                                                (authenticate)))
                                                  (path
                                                   (let ((path (arg 'path)))
                                                     (if (and (eq? function 'trace)
@@ -347,8 +705,8 @@
                                                  (owner (arg 'user))
                                                  (conditional? (assoc 'expected arguments))
                                                  (periodic-write?
-                                                  (and (memq function '(set! set-batch!))
-                                                       (if (eq? function 'set!)
+                                                  (and (memq function '(put! put-batch! copy! copy-batch!))
+                                                       (if (memq function '(put! copy!))
                                                            (equal? path '(*state* *periodic*))
                                                            (let loop ((paths (arg 'paths)))
                                                              (and (pair? paths)
@@ -367,36 +725,89 @@
                                                  (decision
                                                   (cond
                                                    (periodic-write? (and direct? 'direct))
-                                                   ((eq? function 'call!)
+                                                   ((memq function '(truncate! prune! prune-batch!))
                                                     (and direct? 'direct))
-                                                   ((eq? function 'set-batch!)
+                                                   ((eq? function 'put-batch!)
                                                     (let ((writes
                                                            (authorize-batch
-                                                            (arg 'paths) 'set!))
+                                                            (arg 'paths) 'put!))
                                                           (reads
                                                            (and conditional?
                                                                 (authorize-batch
-                                                                 (arg 'paths) 'get))))
+                                                                 (arg 'paths) 'use!
+                                                                 '((read-only? #t))))))
                                                       (and (not (member #t (cadr writes)))
                                                            (or (not reads)
                                                                (not (member #t
                                                                             (cadr reads))))
                                                            'direct)))
-                                                   ((and (eq? function 'set!) conditional?)
+                                                   ((eq? function 'use-batch!)
+                                                    (let ((uses
+                                                           (authorize-batch
+                                                            (arg 'paths) 'use!
+                                                            `((read-only?
+                                                               ,(not (not (arg 'read-only?))))))))
+                                                      (and (not (member #t (cadr uses)))
+                                                           'direct)))
+                                                   ((eq? function 'copy-batch!)
+                                                    (let ((source-reads
+                                                           (authorize-batch
+                                                            (arg 'sources) 'use!
+                                                            '((read-only? #t))))
+                                                          (target-writes
+                                                           (authorize-batch
+                                                            (arg 'paths) 'put!))
+                                                          (target-reads
+                                                           (and conditional?
+                                                                (authorize-batch
+                                                                 (arg 'paths) 'use!
+                                                                 '((read-only? #t))))))
+                                                      (and (not (member #t (cadr source-reads)))
+                                                           (not (member #t (cadr target-writes)))
+                                                           (or (not target-reads)
+                                                               (not (member #t
+                                                                            (cadr target-reads))))
+                                                           'direct)))
+                                                   ((and (eq? function 'put!) conditional?)
                                                     (let ((write
-                                                           (authorize-path principal path 'set!))
+                                                           (authorize-path principal path 'put!))
                                                           (read
-                                                           (authorize-path principal path 'get)))
+                                                           (authorize-path principal path 'use!
+                                                                           '((read-only? #t)))))
                                                       (and write read
                                                            (not (eq? write 'ancestor))
                                                            (not (eq? read 'ancestor))
                                                            'direct)))
+                                                   ((eq? function 'copy!)
+                                                    (let ((source-read
+                                                           (authorize-path principal
+                                                                           (arg 'source) 'use!
+                                                                           '((read-only? #t))))
+                                                          (target-write
+                                                           (authorize-path principal path 'put!))
+                                                          (target-read
+                                                           (and conditional?
+                                                                (authorize-path principal path 'use!
+                                                                                '((read-only? #t))))))
+                                                      (and source-read target-write
+                                                           (or (not conditional?) target-read)
+                                                           (not (eq? source-read 'ancestor))
+                                                           (not (eq? target-write 'ancestor))
+                                                           (or (not conditional?)
+                                                               (not (eq? target-read 'ancestor)))
+                                                           'direct)))
                                                    (direct? 'direct)
                                                    (else
-                                                    (authorize-path principal path function)))))
+                                                    (authorize-path
+                                                     principal path function
+                                                     (if (eq? function 'use!)
+                                                         `((read-only?
+                                                            ,(not (not (arg 'read-only?)))))
+                                                         '()))))))
                                             (if (not decision)
                                                 (error 'authorization-error "Not authorized"))
                                             (set! ancestor? (eq? decision 'ancestor))
+                                            (set! caller principal)
                                             principal))
 					(define (encode value expression?) (cond ((equal? value '(nothing)) value)
 										 (expression? (expression->byte-vector value))
@@ -407,6 +818,28 @@
 										 ((and (pair? value) (pair? (car value)) (assoc 'content value))
 										  (set-alist value 'content (decode (cadr (assoc 'content value)) #t)))
 										 (else value)))
+                                        (define (resource-result value expression?)
+                                          (define (inert? value)
+                                            (cond ((or (sync-node? value) (procedure? value)
+                                                       (macro? value)) #f)
+                                                  ((byte-vector? value) #t)
+                                                  ((pair? value)
+                                                   (and (not (eq? (car value) 'sync-node))
+                                                        (inert? (car value))
+                                                        (inert? (cdr value))))
+                                                  ((vector? value) #f)
+                                                  (else #t)))
+                                          (cond ((equal? value '(unknown)) value)
+                                                (expression?
+                                                 (if (not (inert? value))
+                                                     (error 'value-error
+                                                            "Resource result cannot expose runtime objects"))
+                                                 (expression->byte-vector value)
+                                                 value)
+                                                ((byte-vector? value) value)
+                                                (else
+                                                 (error 'value-error
+                                                        "Resource result must match the expression codec"))))
 					(define* (stage-directory value (admitted? ancestor?)) (if (not admitted?) value
 									    (let ((entries (and (pair? value) (eq? (car value) 'directory) (cadr value))))
 									      (if (not entries) (error 'authorization-error "Not a directory"))
@@ -418,17 +851,29 @@
 					(define* (hydrate path (index -1))
 					  ((federation 'route) ledger
 					   `((operation hydrate) (path ,path) (index ,index))))
-					(define (federate) (if (not (memq function '(get set! get-batch set-batch!)))
+					(define (federate) (if (not (memq function '(put! copy! use! put-batch! copy-batch! use-batch!
+                                                                                       run! retrieve retrieve-batch)))
 							       (error 'api-error "Not federated"))
 					  (if (not (equal? (sync-hash
 							    (expression->byte-vector (arg-from invocation 'credentials)))
 							   ((root 'get) '(interface secret))))
 					      (error 'authentication-error "Authentication failed"))
-					  ((federation 'invoke) ledger function arguments (arg-from invocation 'route-target)
-					   (arg-from invocation 'history-indexes)
-					   (arg-from invocation 'identity)
-                                           (transient-key 'sync-web/interface-signing-key/v1
-                                                          (request-secret))))
+                                          (if (eq? function 'retrieve-batch)
+                                              `((results
+                                                 ,((federation 'invoke-batch) ledger arguments
+                                                   (arg-from invocation 'route-target)
+                                                   (arg-from invocation 'history-indexes)
+                                                   (arg-from invocation 'identity)
+                                                   (transient-key
+                                                    'sync-web/interface-signing-key/v1
+                                                    (request-secret)))))
+                                              ((federation 'invoke) ledger function arguments
+                                               (arg-from invocation 'route-target)
+                                               (arg-from invocation 'history-indexes)
+                                               (arg-from invocation 'identity)
+                                               (transient-key
+                                                'sync-web/interface-signing-key/v1
+                                                (request-secret)))))
 					(define* (committed-invoke operation principal selected invoke-arguments
 					                           (indexed-proof? #f))
 					  ((federation 'invoke) ledger operation
@@ -517,7 +962,7 @@
                                                    (positionals (car split))
                                                    (keywords (cadr split)))
                                               (case method
-                                                ((set!)
+                                                ((put!)
                                                  (let ((result
                                                         (cond
                                                          ((>= (length positionals) 2)
@@ -531,14 +976,38 @@
                                                          ((assoc 'path keywords) keywords)
                                                          (else
                                                           (error 'argument-error
-                                                                 "set! requires a path")))))
+                                                                 "put! requires a path")))))
                                                    (if (or (assoc 'expression? result)
                                                            (not (assoc 'value result)))
                                                        result
                                                        (cons '(expression? #t) result))))
-                                                ((get resolve)
+                                                ((copy!)
                                                  (let ((result
                                                         (cond
+                                                         ((>= (length positionals) 2)
+                                                          (append
+                                                           `((source ,(car positionals))
+                                                             (path ,(cadr positionals)))
+                                                           keywords))
+                                                         ((and (assoc 'source keywords)
+                                                               (assoc 'path keywords))
+                                                          keywords)
+                                                         (else
+                                                          (error 'argument-error
+                                                                 "copy! requires source and path")))))
+                                                   (if (or (assoc 'expression? result)
+                                                           (not (assoc 'expected result)))
+                                                       result
+                                                       (cons '(expression? #t) result))))
+                                                ((use! retrieve)
+                                                 (let ((result
+                                                        (cond
+                                                         ((and (= (length positionals) 1)
+                                                               (list? (car positionals))
+                                                               (pair? (car positionals))
+                                                               (pair? (caar positionals))
+                                                               (assoc 'path (car positionals)))
+                                                          (append (car positionals) keywords))
                                                          ((pair? positionals)
                                                           (cons `(path ,(car positionals))
                                                                 keywords))
@@ -546,9 +1015,29 @@
                                                          (else
                                                           (error 'argument-error
                                                                  "~S requires a path" method)))))
-                                                   (if (assoc 'expression? result) result
-                                                       (cons '(expression? #t) result))))
-                                                ((get-batch resolve-batch pin-batch! unpin-batch!)
+                                                   (let ((result
+                                                          (if (assoc 'expression? result) result
+                                                              (cons '(expression? #t) result))))
+                                                     (if (and (eq? method 'use!)
+                                                              (pair? positionals)
+                                                              (not (assoc 'read-only? result))
+                                                              (not (assoc 'method result)))
+                                                         (cons '(read-only? #t) result)
+                                                         result))))
+                                                ((use-batch!)
+                                                 (if (and (= (length positionals) 1)
+                                                          (list? (car positionals)))
+                                                     (let unwrap ((payload (car positionals)))
+                                                       (if (and (= (length payload) 1)
+                                                                (list? (car payload))
+                                                                (or (null? (car payload))
+                                                                    (not (and (pair? (caar payload))
+                                                                              (symbol? (caaar payload))))))
+                                                           (unwrap (car payload))
+                                                           (append payload keywords)))
+                                                     (error 'argument-error
+                                                            "Use named arguments for use-batch!")))
+                                                ((retrieve-batch pin-batch! unpin-batch! prune-batch!)
                                                  (let ((result
                                                         (cond
                                                          ((pair? positionals)
@@ -558,12 +1047,11 @@
                                                          (else
                                                           (error 'argument-error
                                                                  "~S requires paths" method)))))
-                                                   (if (and (memq method
-                                                                  '(get-batch resolve-batch))
+                                                   (if (and (eq? method 'retrieve-batch)
                                                             (not (assoc 'expression? result)))
                                                        (cons '(expression? #t) result)
                                                        result)))
-                                                ((call!)
+                                                ((run!)
                                                  (cond
                                                   ((>= (length positionals) 2)
                                                    (append
@@ -575,8 +1063,8 @@
                                                    keywords)
                                                   (else
                                                    (error 'argument-error
-                                                          "call! requires a path and arguments list"))))
-                                                ((pin! unpin! delete-bridge!)
+                                                          "run! requires a path and arguments list"))))
+                                                ((pin! unpin! prune! delete-bridge!)
                                                  (if (null? positionals)
                                                      (error 'argument-error
                                                             "~S requires one argument" method))
@@ -587,6 +1075,19 @@
                                                   keywords))
                                                 (else
                                                  (cond
+                                                  ((and (eq? method 'put!)
+                                                        (>= (length positionals) 2))
+                                                   (append
+                                                    `((path ,(car positionals))
+                                                      (value ,(cadr positionals))
+                                                      (expression? #t))
+                                                    keywords))
+                                                  ((and (eq? method 'use!)
+                                                        (pair? positionals))
+                                                   (append
+                                                    `((path ,(car positionals))
+                                                      (expression? #t))
+                                                    keywords))
                                                   ((null? positionals) keywords)
                                                   ((and (= (length positionals) 1)
                                                         (list? (car positionals)))
@@ -661,16 +1162,16 @@
                                           (let ((call-arguments (arg 'arguments)))
                                             (if (not (safe-program-datum? program))
                                                 (error 'value-error
-                                                       "call! program contains a captured evaluator object"))
+                                                       "run! program contains a captured evaluator object"))
                                             (if (forbidden-program-symbol? program)
                                                 (error 'value-error
-                                                       "call! program names a forbidden evaluator binding"))
+                                                       "run! program names a forbidden evaluator binding"))
                                             (if (not (proper-list? call-arguments))
                                                 (error 'argument-error
-                                                       "call! arguments must be a proper list"))
+                                                       "run! arguments must be a proper list"))
                                             (if (not (safe-program-datum? call-arguments))
                                                 (error 'value-error
-                                                       "call! arguments contain an evaluator capability"))
+                                                       "run! arguments contain an evaluator capability"))
                                             (let* ((environment (inlet))
                                                    (root-environment (rootlet))
                                                    (capabilities
@@ -722,27 +1223,38 @@
                                                                 (error 'value-error
                                                                        "Journal arguments cannot expose capabilities"))
                                                             (set! delegated? #t)
-                                                            (let ((result
-                                                                   (sync-call
-                                                                    (with-auth
-                                                                     `((function ,method)
-                                                                       (arguments
-                                                                        ,call-arguments)))
-                                                                    #t)))
+                                                            (let* ((request
+                                                                    `((function ,method)
+                                                                      (arguments ,call-arguments)))
+                                                                   (request
+                                                                    (if (or invocation delegation)
+                                                                        (append
+                                                                         request
+                                                                         `((delegation
+                                                                            ((principal ,caller)
+                                                                             (context ,context)
+                                                                             (function ,method)
+                                                                             (arguments ,call-arguments)
+                                                                             (proof
+                                                                              ,(delegation-proof
+                                                                                caller context method
+                                                                                call-arguments))))))
+                                                                        (with-auth request)))
+                                                                   (result (sync-call request #t)))
                                                               (if (and (pair? result)
                                                                        (eq? (car result) 'error))
                                                                   (apply error (cdr result))
                                                                   result)))))))
                                                 (if (not (procedure? procedure))
                                                     (error 'value-error
-                                                           "call! path must contain a procedure"))
+                                                           "run! path must contain a procedure"))
                                                 (set! delegated? #t)
                                                 (let ((result
                                                        (apply procedure
                                                               (cons journal call-arguments))))
                                                   (if (not (safe-result? result))
                                                       (error 'value-error
-                                                             "call! result cannot expose capabilities")
+                                                             "run! result cannot expose capabilities")
                                                       result))))))
 					(define (config-view path)
   (if (not (and (pair? path) (eq? (car path) 'private)))
@@ -752,11 +1264,6 @@
          ((federation 'config)
           (cons (if (eq? (cadr path) 'bridge) 'peers 'retired)
                 (cddr path))))
-        ((bridge-identity)
-         (let* ((alias (and (pair? (cddr path)) (caddr path)))
-                (active ((federation 'config) `(peers ,alias identity-id))))
-           (if (null? active)
-               ((federation 'config) `(retired ,alias identity-id)) active)))
         ((bridge-preapproval)
          ((ledger 'config) (cons 'peer-preapproval (cddr path))))
         (else '()))))
@@ -769,52 +1276,42 @@
 										     ,@(if (assoc 'history-indexes arguments)
 											   `((history-indexes ,(arg 'history-indexes))) '())
 										     ,@(if (assoc 'history-head-index arguments) `((history-head-index
-																    ,(arg 'history-head-index))) '())
-										     (roots ,(or (arg 'roots) '())))))
+																    ,(arg 'history-head-index))) '()))))
 								((size) ((ledger 'size)))
 								((info) ((ledger 'descriptor) -1))
 								((synchronize!) ((federation 'synchronize!) ledger arguments))
 								(else
                                                                  (if (memq function
-                                                                           '(get-batch resolve-batch
-                                                                             pin-batch! unpin-batch!
+                                                                           '(retrieve-batch pin-batch! unpin-batch!
                                                                              trace-batch))
                                                                      (case function
-                                                                       ((get-batch)
-                                                                        (let* ((paths (arg 'paths))
-                                                                               (auth
-                                                                                (authorize-batch
-                                                                                 paths 'get))
-                                                                               (ancestors (cadr auth))
-                                                                               (values
-                                                                                ((ledger 'get-batch)
-                                                                                 paths)))
-                                                                          (let loop ((paths paths)
-                                                                                     (values values)
-                                                                                     (ancestors ancestors)
-                                                                                     (results '()))
-                                                                            (if (null? paths)
-                                                                                `((results
-                                                                                   ,(reverse results)))
-                                                                                (loop
-                                                                                 (cdr paths)
-                                                                                 (cdr values)
-                                                                                 (cdr ancestors)
-                                                                                 (cons
-                                                                                  `((path ,(car paths))
-                                                                                    (content
-                                                                                     ,(stage-directory
-                                                                                       (decode
-                                                                                        (car values)
-                                                                                        (arg 'expression?))
-                                                                                       (car ancestors))))
-                                                                                  results))))))
-                                                                       ((resolve-batch)
-                                                                        (let* ((paths (arg 'paths))
+                                                                       ((retrieve-batch)
+                                                                        (let* ((requested-paths (arg 'paths))
+                                                                               (preauthenticated
+                                                                                (and retained-provider?
+                                                                                     (authenticate)))
+                                                                               (paths (arg 'paths))
                                                                                (groups
-                                                                                (committed-groups paths))
+                                                                                (if retained-provider?
+                                                                                    (let loop ((paths paths)
+                                                                                               (index 0)
+                                                                                               (items '()))
+                                                                                      (if (null? paths)
+                                                                                          `(((route ()) (history ())
+                                                                                             (items ,(reverse items))))
+                                                                                          (loop
+                                                                                           (cdr paths) (+ index 1)
+                                                                                           (cons
+                                                                                            `((index ,index)
+                                                                                              (path ,(car paths))
+                                                                                              (selected
+                                                                                               ,(retained-path
+                                                                                                 (car paths))))
+                                                                                            items))))
+                                                                                    (committed-groups paths)))
                                                                                (principal
-                                                                                (authenticate))
+                                                                                (or preauthenticated
+                                                                                    (authenticate)))
                                                                                (slots
                                                                                 (make-vector
                                                                                  (length paths) #f))
@@ -836,7 +1333,7 @@
                                                                                           principal
                                                                                           (arg-from item
                                                                                                     'path)
-                                                                                          'resolve))
+                                                                                          'retrieve))
                                                                                         (error
                                                                                          'authorization-error
                                                                                          "Not authorized")))
@@ -860,6 +1357,38 @@
                                                                                         (arg-from item
                                                                                                   'path))
                                                                                       items))
+                                                                                    (group-methods
+                                                                                     (and (arg 'methods)
+                                                                                          (map (lambda (item)
+                                                                                                 (car (list-tail
+                                                                                                       (arg 'methods)
+                                                                                                       (arg-from item 'index))))
+                                                                                               items)))
+                                                                                    (group-arguments
+                                                                                     (and (arg 'arguments)
+                                                                                          (map (lambda (item)
+                                                                                                 (car (list-tail
+                                                                                                       (arg 'arguments)
+                                                                                                       (arg-from item 'index))))
+                                                                                               items)))
+                                                                                    (group-request
+                                                                                     (let ((request
+                                                                                            (set-alist arguments 'paths
+                                                                                                       (map
+                                                                                                        (lambda (item)
+                                                                                                          (arg-from
+                                                                                                           (arg-from item 'selected)
+                                                                                                           'path))
+                                                                                                        items))))
+                                                                                       (if group-methods
+                                                                                           (set! request
+                                                                                                 (set-alist request 'methods
+                                                                                                            group-methods)))
+                                                                                       (if group-arguments
+                                                                                           (set! request
+                                                                                                 (set-alist request 'arguments
+                                                                                                            group-arguments)))
+                                                                                       request))
                                                                                     (ancestors
                                                                                      (if (pair? route)
                                                                                          (map
@@ -872,7 +1401,7 @@
                                                                                                    (authorize-path
                                                                                                     principal
                                                                                                     path
-                                                                                                    'resolve)))
+                                                                                                    'retrieve)))
                                                                                               (if (not decision)
                                                                                                   (error
                                                                                                    'authorization-error
@@ -885,24 +1414,17 @@
                                                                                          ((federation
                                                                                            'invoke-batch)
                                                                                           ledger
-                                                                                          (set-alist
-                                                                                           arguments
-                                                                                           'paths
-                                                                                           (map
-                                                                                            (lambda (item)
-                                                                                              (arg-from
-                                                                                               (arg-from item
-                                                                                                         'selected)
-                                                                                               'path))
-                                                                                            items))
+                                                                                          group-request
                                                                                           route history
                                                                                           (origin-identity
                                                                                            principal)
                                                                                           (transient-key
                                                                                            'sync-web/interface-signing-key/v1
-                                                                                           (request-secret)))
+                                                                                           (request-secret))
+                                                                                          (or internal-proof?
+                                                                                              (arg 'index?)))
                                                                                          ((ledger
-                                                                                           'resolve-batch)
+                                                                                           'retrieve-batch)
                                                                                           group-paths #f
                                                                                           (and auth-head
                                                                                                (map
@@ -910,14 +1432,25 @@
                                                                                                   auth-head)
                                                                                                 group-paths))
                                                                                           ancestors
-                                                                                          internal-proof?)))
+                                                                                          internal-proof?
+                                                                                          group-methods group-arguments)))
+                                                                                    (returned-proof
+                                                                                     (and (list? values)
+                                                                                          (assoc 'proof values)
+                                                                                          (cadr (assoc 'proof values))))
+                                                                                    (indexes
+                                                                                     (and
+                                                                                      (arg 'index?)
+                                                                                      (committed-indexes
+                                                                                       (arg-from
+                                                                                        (car items)
+                                                                                        'selected)
+                                                                                       returned-proof)))
                                                                                     (group-proof
                                                                                      (and internal-proof?
-                                                                                          (cadr
-                                                                                           (assoc 'proof
-                                                                                                  values))))
+                                                                                          returned-proof))
                                                                                     (values
-                                                                                     (if group-proof
+                                                                                     (if returned-proof
                                                                                          (cadr
                                                                                           (assoc 'results
                                                                                                  values))
@@ -936,12 +1469,24 @@
                                                                                         (arg-from
                                                                                          (car items)
                                                                                          'index)
-                                                                                        (car values))
+                                                                                        (if indexes
+                                                                                            (set-alist
+                                                                                             (car values)
+                                                                                             'indexes
+                                                                                             (if retained-provider?
+                                                                                                 (committed-indexes
+                                                                                                  (arg-from
+                                                                                                   (car items)
+                                                                                                   'selected)
+                                                                                                  returned-proof)
+                                                                                                 indexes))
+                                                                                            (car values)))
                                                                                        (loop
                                                                                         (cdr items)
                                                                                         (cdr values)))))))
                                                                            groups)
                                                                           (let loop ((paths paths)
+                                                                                     (requested-paths requested-paths)
                                                                                      (index 0)
                                                                                      (results '()))
                                                                             (if (null? paths)
@@ -950,26 +1495,42 @@
                                                                                   ,@(if proof
                                                                                         `((proof ,proof))
                                                                                         '()))
-                                                                                (let ((content
-                                                                                       (decode
-                                                                                        (cadr
-                                                                                         (assoc
-                                                                                          'content
-                                                                                          (vector-ref
-                                                                                           slots index)))
-                                                                                        (arg
-                                                                                         'expression?))))
+                                                                                (let* ((slot
+                                                                                        (vector-ref
+                                                                                         slots index))
+                                                                                       (content
+                                                                                        (let ((value
+                                                                                               (decode
+                                                                                                (cadr
+                                                                                                 (assoc
+                                                                                                  'content
+                                                                                                  slot))
+                                                                                                (arg
+                                                                                                 'expression?))))
+                                                                                          (if (or (arg 'methods)
+                                                                                                  (arg 'arguments))
+                                                                                              (resource-result
+                                                                                               value
+                                                                                               (arg 'expression?))
+                                                                                              value))))
                                                                                   (loop
                                                                                    (cdr paths)
+                                                                                   (cdr requested-paths)
                                                                                    (+ index 1)
                                                                                    (cons
-                                                                                    `((path ,(car paths))
+                                                                                    `((path ,(car requested-paths))
                                                                                       (content ,content)
                                                                                       ,@(if (arg 'pinned?)
                                                                                             `((pinned?
                                                                                                ,((ledger
                                                                                                   'pinned?)
                                                                                                  (car paths))))
+                                                                                            '())
+                                                                                      ,@(if (arg 'index?)
+                                                                                            `((indexes
+                                                                                               ,(arg-from
+                                                                                                 slot
+                                                                                                 'indexes)))
                                                                                             '()))
                                                                                     results)))))))
                                                                        ((pin-batch!)
@@ -990,7 +1551,7 @@
                                                                                        #f))
                                                                                      (proof-groups '())
                                                                                      (remote? #f))
-                                                                                ;; Resolve every remote proof group in
+                                                                                ;; Retrieve every remote proof group in
                                                                                 ;; this read-only phase. A blocking
                                                                                 ;; self-call performs the later atomic
                                                                                 ;; retention mutation.
@@ -1008,7 +1569,7 @@
                                                                                      (if (pair? route)
                                                                                          (let* ((_ (set! remote?
                                                                                                          #t))
-                                                                                                (resolved
+                                                                                                (retrieved
                                                                                                  ((federation
                                                                                                    'invoke-batch)
                                                                                                   ledger
@@ -1036,12 +1597,12 @@
                                                                                                     ,(cadr
                                                                                                       (assoc
                                                                                                        'proof
-                                                                                                       resolved)))
+                                                                                                       retrieved)))
                                                                                                    (index
                                                                                                     ,(cadr
                                                                                                       (assoc
                                                                                                        'proof-index
-                                                                                                       resolved)))))
+                                                                                                       retrieved)))))
                                                                                                 (slot
                                                                                                  (length
                                                                                                   proof-groups)))
@@ -1104,7 +1665,7 @@
                                                                                (assoc
                                                                                 'proof
                                                                                 ((ledger
-                                                                                  'resolve-batch)
+                                                                                  'retrieve-batch)
                                                                                  paths #f
                                                                                  (and (arg 'head)
                                                                                       (map
@@ -1117,115 +1678,281 @@
                                                                        (else
                                                                         (error 'api-error
                                                                                "Unknown batch function")))
-								 (let ((selected (and (memq function '(resolve pin! unpin!))
-								                      (committed-path (arg 'path)))))
+								 (let* ((preauthenticated
+                                                                         (and retained-provider?
+                                                                              (authenticate)))
+                                                                        (selected
+                                                                         (and
+                                                                          (memq function
+                                                                                '(retrieve pin! unpin! prune!))
+                                                                          ((if retained-provider?
+                                                                               retained-path committed-path)
+                                                                           (arg 'path)))))
 								   (cond
-								    ((and (eq? function 'resolve) (pair? (arg-from selected 'route)))
-								     (committed-invoke 'resolve (authenticate) selected arguments))
+								    ((and (eq? function 'retrieve) (not retained-provider?)
+                                                                          (pair? (arg-from selected 'route)))
+                                                                     (let ((result
+                                                                            (committed-invoke
+                                                                             'retrieve (authenticate)
+                                                                             selected arguments
+                                                                             (arg 'index?))))
+                                                                       (if (arg 'index?)
+                                                                           (indexed-result result selected)
+                                                                           result)))
 								    ((and (eq? function 'pin!) (pair? (arg-from selected 'route)))
 								     (let ((principal (authorize)))
 								       (if prepared ((ledger 'pin!) (arg 'path) prepared)
-								           (let* ((resolve-arguments
+								           (let* ((retrieve-arguments
 								                   (set-alist (set-alist arguments 'proof? #t) 'pinned? #f))
-								                  (resolved (committed-invoke 'resolve principal selected
-								                                              resolve-arguments #t))
-								                  (proof (and (list? resolved) (assoc 'proof resolved)
-								                              (cadr (assoc 'proof resolved))))
+								                  (retrieved (committed-invoke 'retrieve principal selected
+								                                              retrieve-arguments #t))
+								                  (proof (and (list? retrieved) (assoc 'proof retrieved)
+								                              (cadr (assoc 'proof retrieved))))
 								                  (proof-index
-								                   (and (list? resolved) (assoc 'proof-index resolved)
-								                        (cadr (assoc 'proof-index resolved)))))
+								                   (and (list? retrieved) (assoc 'proof-index retrieved)
+								                        (cadr (assoc 'proof-index retrieved)))))
 								             (if (not (and proof (integer? proof-index)))
-								                 (error 'integrity-error "Federated resolve did not return indexed proof"))
+								                 (error 'integrity-error "Federated retrieve did not return indexed proof"))
 								             (failure
 								              (self-call `((proof ,proof) (index ,proof-index))))))))
 								    ((and (eq? function 'unpin!) (pair? (arg-from selected 'route)))
 								     (authorize)
 								     ((ledger 'unpin!) (arg 'path)))
 								    (else
-                                                                     (authorize)
-								     (case function ((get) (stage-directory
-													 (decode ((ledger 'get) (arg 'path)) (arg 'expression?))))
-											((set!)
+                                                                     (authorize preauthenticated)
+								     (case function ((put!)
+                                                                                         (let* ((object? (not (not (arg 'object?))))
+                                                                                                (expected
+                                                                                                 (assoc 'expected arguments)))
+                                                                                           ((ledger 'put!)
+                                                                                            (arg 'path)
+                                                                                            (if object?
+                                                                                                (arg 'value)
+                                                                                                (encode (arg 'value)
+                                                                                                        (arg 'expression?)))
+                                                                                            object?
+                                                                                            (if expected #t #f)
+                                                                                            (and expected
+                                                                                                 (if object?
+                                                                                                     (cadr expected)
+                                                                                                     (encode
+                                                                                                      (cadr expected)
+                                                                                                      (arg 'expression?)))))))
+                                                                                        ((use!)
+                                                                                         (let* ((method (arg 'method))
+                                                                                                (use-arguments
+                                                                                                 (or (arg 'arguments) '()))
+                                                                                                (value
+                                                                                                 ((ledger 'use!)
+                                                                                                  (arg 'path) method
+                                                                                                  use-arguments
+                                                                                                  (not (not (arg 'read-only?))))))
+                                                                                           (if (and (not method)
+                                                                                                    (null? use-arguments)
+                                                                                                    (not (and (list? value)
+                                                                                                              (pair? value)
+                                                                                                              (pair? (car value))
+                                                                                                              (assoc 'class value)
+                                                                                                              (assoc 'object-hash value)
+                                                                                                              (assoc 'code-hash value))))
+                                                                                               (stage-directory
+                                                                                                (decode value (arg 'expression?)))
+                                                                                               (resource-result
+                                                                                                (decode value (arg 'expression?))
+                                                                                                (arg 'expression?)))))
+                                                                                        ((copy!)
                                                                                          (let ((expected
                                                                                                 (assoc 'expected arguments)))
-                                                                                           ((ledger 'set!)
+                                                                                           ((ledger 'copy!)
+                                                                                            (arg 'source)
                                                                                             (arg 'path)
-                                                                                            (encode (arg 'value)
-                                                                                                    (arg 'expression?))
                                                                                             (if expected #t #f)
                                                                                             (and expected
                                                                                                  (encode
                                                                                                   (cadr expected)
                                                                                                   (arg 'expression?))))))
-											((set-batch!)
-                                                                                         (let* ((paths (arg 'paths))
-                                                                                                (values (arg 'values))
+                                                                                        ((copy-batch!)
+                                                                                         (let* ((sources (arg 'sources))
+                                                                                                (paths (arg 'paths))
                                                                                                 (expected-entry
                                                                                                  (assoc 'expected arguments))
                                                                                                 (expected
                                                                                                  (and expected-entry
                                                                                                       (cadr expected-entry))))
                                                                                            (if (not
-                                                                                                (and (list? paths)
-                                                                                                     (list? values)
-                                                                                                     (= (length paths)
-                                                                                                        (length values))
+                                                                                                (and (list? sources)
+                                                                                                     (list? paths)
+                                                                                                     (= (length sources)
+                                                                                                        (length paths))
                                                                                                      (or (not expected-entry)
                                                                                                          (and (list? expected)
                                                                                                               (= (length paths)
                                                                                                                  (length expected))))))
                                                                                                (error
                                                                                                 'argument-error
-                                                                                                "Batch paths, values, and expected values must have equal lengths"))
-                                                                                           ((ledger 'set-batch!)
+                                                                                                "Copy sources, paths, and expected values must have equal lengths"))
+                                                                                           ((ledger 'copy-batch!)
+                                                                                            sources paths
+                                                                                            (if expected-entry #t #f)
                                                                                             (if expected-entry
                                                                                                 (map
-                                                                                                 (lambda (path value old)
-                                                                                                   (list
-                                                                                                    path
-                                                                                                    (encode value
-                                                                                                            (arg 'expression?))
-                                                                                                    (encode old
-                                                                                                            (arg 'expression?))))
-                                                                                                 paths values expected)
+                                                                                                 (lambda (old)
+                                                                                                   (encode old
+                                                                                                           (arg 'expression?)))
+                                                                                                 expected)
+                                                                                                '()))))
+											((put-batch!)
+                                                                                         (let* ((paths (arg 'paths))
+                                                                                                (values (arg 'values))
+                                                                                                (expected-entry
+                                                                                                 (assoc 'expected arguments))
+                                                                                                (expected
+                                                                                                 (and expected-entry
+                                                                                                      (cadr expected-entry)))
+                                                                                                (object-entry (arg 'object?))
+                                                                                                (objects
+                                                                                                 (cond ((list? object-entry) object-entry)
+                                                                                                       ((boolean? object-entry)
+                                                                                                        (make-list (length paths)
+                                                                                                                   object-entry))
+                                                                                                       ((not object-entry)
+                                                                                                        (make-list (length paths) #f))
+                                                                                                       (else #f))))
+                                                                                           (if (not
+                                                                                                (and (list? paths)
+                                                                                                     (list? values)
+                                                                                                     (list? objects)
+                                                                                                     (= (length paths)
+                                                                                                        (length values)
+                                                                                                     )
+                                                                                                     (= (length paths)
+                                                                                                        (length objects))
+                                                                                                     (not (member #f
+                                                                                                                  (map boolean?
+                                                                                                                       objects)))
+                                                                                                     (or (not expected-entry)
+                                                                                                         (and (list? expected)
+                                                                                                              (= (length paths)
+                                                                                                                 (length expected))))))
+                                                                                               (error
+                                                                                                'argument-error
+                                                                                                "Batch paths, values, object flags, and expected values must have equal lengths"))
+                                                                                           ((ledger 'put-batch!)
+                                                                                            (if expected-entry
                                                                                                 (map
-                                                                                                 (lambda (path value)
-                                                                                                   (list
-                                                                                                    path
-                                                                                                    (encode value
-                                                                                                            (arg 'expression?))))
-                                                                                                 paths values)))))
-                                                                                         ((call!)
+                                                                                                 (lambda (path value object? old)
+                                                                                                   (list path
+                                                                                                         (if object? value
+                                                                                                             (encode value
+                                                                                                                     (arg 'expression?)))
+                                                                                                         object?
+                                                                                                         (if object? old
+                                                                                                             (encode old
+                                                                                                                     (arg 'expression?)))))
+                                                                                                 paths values objects expected)
+                                                                                                (map
+                                                                                                 (lambda (path value object?)
+                                                                                                   (list path
+                                                                                                         (if object? value
+                                                                                                             (encode value
+                                                                                                                     (arg 'expression?)))
+                                                                                                         object?))
+                                                                                                 paths values objects)))))
+                                                                                        ((use-batch!)
+                                                                                         (let* ((paths (arg 'paths))
+                                                                                                (methods (or (arg 'methods)
+                                                                                                             (make-list (length paths) #f)))
+                                                                                                (batch-arguments
+                                                                                                 (or (arg 'arguments)
+                                                                                                     (make-list (length paths) '()))))
+                                                                                           (if (not (and (list? paths)
+                                                                                                         (list? methods)
+                                                                                                         (list? batch-arguments)
+                                                                                                         (= (length paths) (length methods))
+                                                                                                         (= (length paths)
+                                                                                                            (length batch-arguments))))
+                                                                                               (error 'argument-error
+                                                                                                      "Use batch fields must have equal lengths"))
+                                                                                           (map
+                                                                                            (lambda (value method arguments)
+                                                                                              (if (and (not method)
+                                                                                                       (null? arguments)
+                                                                                                       (not (and (list? value)
+                                                                                                                 (pair? value)
+                                                                                                                 (pair? (car value))
+                                                                                                                 (assoc 'class value)
+                                                                                                                 (assoc 'object-hash value)
+                                                                                                                 (assoc 'code-hash value))))
+                                                                                                  (decode value (arg 'expression?))
+                                                                                                  (resource-result
+                                                                                                   (decode value (arg 'expression?))
+                                                                                                   (arg 'expression?))))
+                                                                                            ((ledger 'use-batch!)
+                                                                                             (map list paths methods
+                                                                                                  batch-arguments)
+                                                                                             (not (not (arg 'read-only?))))
+                                                                                            methods batch-arguments)))
+                                                                                         ((run!)
                                                                                           (call-program
-                                                                                           (decode ((ledger 'get)
-                                                                                                    (arg 'path)) #t)))
-											((resolve) (let* ((path (arg 'path)) (head (or (arg 'head) auth-head))
-													  (attempt ((ledger 'resolve) path #f #f head ancestor?))
-													  (head (if (and (not head) (equal? attempt '(unknown))
-															 (pair? path)
-															 (let ((segment (if (integer? (car path))
-																	    (cadr path) (car path))))
-															   (or (eq? segment '*bridge*)
-															       (and (symbol? segment) (not (memq segment
-																				 '(*state* *transition* *crypto*)))))))
-														    (hydrate path) head)))
-												     (decode ((ledger 'resolve) path (arg 'pinned?) (arg 'proof?)
-													      head ancestor?)
-													     (arg 'expression?))))
-											((trace) (let* ((path (arg 'path)) (index (or (arg 'index) -1))
-													(trace-path (cons index path))
-													(head (arg 'head)))
-												   (if head ((ledger 'trace) path head)
-												       (let* ((resolve-path (if (and (pair? path) (integer? (car path)))
-													 path (cons index path)))
-											  (attempt ((ledger 'resolve) resolve-path)))
-													 (if (equal? attempt '(unknown)) ((ledger 'trace) path
-																	  (hydrate path index))
-													     ((ledger 'trace) trace-path))))))
-											((pin!)
+                                                                                           (decode ((ledger 'use!)
+                                                                                                    (arg 'path) #f '() #t) #t)))
+                                                                                         ((truncate!)
+                                                                                          ((ledger 'truncate!)
+                                                                                           (arg 'index)))
+                                                                                         ((prune!) ((ledger 'prune!) (arg 'path)))
+                                                                                         ((prune-batch!)
+                                                                                          (begin (committed-groups (arg 'paths))
+                                                                                                 ((ledger 'prune-batch!) (arg 'paths))))
+											((retrieve)
+ (let* ((path (arg 'path))
+        (method (arg 'method))
+        (resource-arguments (or (arg 'arguments) '()))
+        (head (or (arg 'head) auth-head))
+        (attempt ((ledger 'retrieve) path #f #f head ancestor? method resource-arguments))
+        (active? (or (assoc 'method arguments) (assoc 'arguments arguments)))
+        (head
+         (cond
+          ((and (not head) (equal? attempt '(unknown)) active?)
+           (let* ((index (if (and (pair? path) (integer? (car path)))
+                             (car path) -1))
+                  (serialization
+                   ((ledger '~trace) index
+                    (if (and (pair? path) (integer? (car path)))
+                        (cdr path) path)
+                    #f method resource-arguments #t))
+                  (evidence ((standard 'deserialize) serialization)))
+             `((index ,(if (< index 0) (+ ((ledger 'size)) index) index))
+               (object ,evidence))))
+          ((and (not head) (equal? attempt '(unknown)) (pair? path)
+                (let ((segment (if (integer? (car path)) (cadr path) (car path))))
+                  (or (eq? segment '*bridge*)
+                      (and (symbol? segment)
+                           (not (memq segment '(*state* *transition* *crypto*)))))))
+           (hydrate path))
+          (else head)))
+        (result ((ledger 'retrieve) path (arg 'pinned?) (arg 'proof?) head
+                 ancestor? method resource-arguments))
+        (result (if (or method (pair? resource-arguments) (sync-node? attempt))
+                    (resource-result result (arg 'expression?))
+                    (decode result (arg 'expression?)))))
+   (if (arg 'index?) (indexed-result result selected) result)))
+((trace)
+ (let* ((path (arg 'path))
+        (index (or (arg 'index) -1))
+        (trace-path (cons index path))
+        (head (arg 'head)))
+   (if head
+       ((ledger 'trace) path head)
+       (let* ((retrieve-path (if (and (pair? path) (integer? (car path)))
+                                path (cons index path)))
+              (attempt ((ledger 'retrieve) retrieve-path)))
+         (if (equal? attempt '(unknown))
+             ((ledger 'trace) path (hydrate path index))
+             ((ledger 'trace) trace-path))))))
+((pin!)
 											 (if prepared ((ledger 'pin!) (arg 'path) prepared)
 											     (let* ((path (arg 'path))
-											            (attempt ((ledger 'resolve) path)))
+											            (attempt ((ledger 'retrieve) path)))
 											       (if (not (equal? attempt '(unknown)))
 											           ((ledger 'pin!) path #f)
 											           (failure
@@ -1236,9 +1963,7 @@
 											((bridge!) (federation-call 'bridge! (list (arg 'name)
 																   `((interface ,(arg 'interface))
 																     (remote-name ,(arg 'remote-name))))))
-											((delete-bridge!) ((authorization 'deauthorize!)
-													   `((principal-prefix (,(arg 'name)))))
-											 ((federation 'delete-bridge!) ledger (arg 'name)))
+											((delete-bridge!) ((federation 'delete-bridge!) ledger (arg 'name)))
 											((authorizations) ((authorization 'authorizations) (arg 'user)))
 											((authorize!) ((authorization 'authorize!)
 												       `((user ,(arg 'user)) (rule ,(arg 'rule))
@@ -1266,15 +1991,12 @@
                            ((ledger 'update-config!)
                             `((path (public interface public-key))
                               (value ,public-key)))))
-                                          ((*admins-get*) ((root 'get) '(interface admins)))
-											((*admins-set*) (if (not (let loop ((in (arg 'admins))) (or (null? in)
-																		    (and (pair? (car in)) (eq? (caar in) '*state*)
-																			 (pair? (cdar in))
-																			 (symbol? (cadar in))
-																			 (null? (cddar in))
-																			 (loop (cdr in))))))
-													    (error 'argument-error "Admins must be local"))
-											 ((root 'set!) '(interface admins) (arg 'admins)))
+                                          ((*admins-get*)
+                                           (admin-principals->map
+                                            ((root 'get) '(interface admins))))
+                                          ((*admins-set*)
+                                           ((root 'set!) '(interface admins)
+                                            (admin-map->principals (arg 'admins))))
 											((*window-set*) ((ledger 'update-config!)
 													 `((path (public window)) (value ,(arg 'value)))))
 											(else (error 'api-error "Unknown Interface function")))))))))))
@@ -1296,12 +2018,11 @@
                                               ((root 'get) '(root object ledger))))
                               (federation (module 'local ((root 'get) '(root class federation))
                                                   ((root 'get) '(root object federation))))
-                              (identity ((ledger 'config) '(public identity)))
-                              (id (cadr (assoc 'id identity)))
+                              (salt ((ledger 'config) '(public key-derivation-salt)))
                               (continuation-key
                                (crypto-generate
                                 (expression->byte-vector
-                                 (list 'sync-web/federation-continuation-signing-key/v1 id
+                                 (list 'sync-web/federation-continuation-signing-key/v1 salt
                                        (sync-hash (expression->byte-vector secret)))))))
                          (define (self query blocking?) (sync-call `(*step* ,secret ,query) blocking?))
 			 (define (run method operands data query) (let* ((input (if data
@@ -1315,14 +2036,14 @@
                          (define (commit report?)
                            (let* ((before ((ledger 'size)))
                                   (keys (crypto-generate (expression->byte-vector
-                                                         (list 'sync-web/journal-signing-key/v1 id
+                                                         (list 'sync-web/journal-signing-key/v1 salt
                                                                (sync-hash (expression->byte-vector secret))))))
                                   (size ((ledger 'step!) `((unix-time ,(system-time-unix))
                                                            (public-key ,(car keys))
                                                            (secret-key ,(cdr keys))))))
                              (if report?
                                  (list size (> size before)
-                                       (not (equal? ((ledger 'get) '(*state* *periodic*))
+                                       (not (equal? ((ledger 'use!) '(*state* *periodic*) #f '() #t)
                                                     '(nothing))))
                                  size)))
                          (let* ((query (if (null? query) '(ledger-step) query))
@@ -1338,7 +2059,7 @@
                                                                                  (if (and (cadr commit-result)
                                                                                           (caddr commit-result))
                                                                                      (sync-call
-                                                                                      `((function call!)
+                                                                                      `((function run!)
                                                                                         (arguments
                                                                                          ((path (*state* *periodic*))
                                                                                           (arguments (,(- size 1)))))
@@ -1357,4 +2078,16 @@
                                  ((root 'set!) '(root object federation) (federation))))
 			   result))))
   (set-step step-once)
+  (if (not fresh?)
+      (call
+       `(lambda (root)
+          ;; Replace every built-in class changed since the preceding release.
+          ((root 'set!) '(root class standard-module) ',standard-source)
+          ((root 'set!) '(root class standard) ',standard-class)
+          ((root 'set!) '(root class chain) ',chain)
+          ((root 'set!) '(root class tree) ',tree)
+          ((root 'set!) '(root class ledger) ',ledger)
+          ((root 'set!) '(root class federation) ',federation)
+          ((root 'set!) '(root class authorization) ',authorization)
+          #t)))
   "Installed interface")

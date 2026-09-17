@@ -37,7 +37,7 @@ In practice, this means teams can iterate on application semantics at the Lisp l
 ### Dynamic Peer Topologies
 
 The distributed model is usage-driven: peer relationships can be introduced and updated at runtime.
-Reciprocal bridges synchronize signed heads and provide exact committed routes for resolving remote state. Bridges establish identity and proof reachability, not application access; the terminal journal applies explicit local policy to signed scalar/dedicated-batch Stage access and committed `resolve` calls.
+Reciprocal bridges synchronize signed heads and provide exact committed routes for retrieving remote state. Bridges establish identity and proof reachability, not application access; the terminal journal applies explicit local policy to signed scalar/dedicated-batch Stage access and committed `retrieve` calls.
 This gives a practical notion of independently committed state across space, not just within one process or database.
 This topology flexibility is useful in real systems where trust boundaries and communication patterns change over time.
 

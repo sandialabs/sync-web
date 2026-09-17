@@ -12,25 +12,20 @@
         `(*call* ,(journal 'root-secret)
           (lambda (root)
             (let* ((ledger (sync-eval ((root 'get) '(root object ledger))))
-                   (identity-id
-                    (cadr
-                     (assoc 'id
-                            (cadr
-                             (assoc 'identity
-                                    (cadr
-                                     (assoc 'public ((ledger 'config)))))))))
+                   (key-derivation-salt
+                    ((ledger 'config) '(public key-derivation-salt)))
                    (keys
                     (crypto-generate
                      (expression->byte-vector
                       (list 'sync-web/journal-signing-key/v1
-                            identity-id
+                            key-derivation-salt
                             (sync-hash
                              (expression->byte-vector
                               ,(journal 'root-secret))))))))
               (let loop ((i 0))
                 (if (< i ,count)
                     (begin
-                      ((ledger 'set!) '(*state* bootstrap tick)
+                      ((ledger 'put!) '(*state* bootstrap tick)
                        (expression->byte-vector i))
                       ((ledger 'step!)
                        `((unix-time ,i)
@@ -45,15 +40,15 @@
     (test-submit (bulk-advance journal-2 8) :expect 8)
     (test-report)
 
-    (test-submit ((*journal* journal-1 'set!) '(*state* alice local) "origin") :expect #t)
-    (test-submit ((*journal* journal-2 'set!) '(*state* alice data private key) "v8") :expect #t)
-    (test-submit ((*journal* journal-2 'set!) '(*state* bob data public key) "b8") :expect #t)
+    (test-submit ((*journal* journal-1 'put!) '(*state* alice local) "origin") :expect #t)
+    (test-submit ((*journal* journal-2 'put!) '(*state* alice data private key) "v8") :expect #t)
+    (test-submit ((*journal* journal-2 'put!) '(*state* bob data public key) "b8") :expect #t)
     (test-submit
       ((*journal* journal-2 'authorize!)
        '((user (*state* alice))
          (rule ((principal (journal-1 *state* alice))
                 (key-index (-20 -1)) (path (data))
-                (get #t) (set! #t) (resolve #t)))))
+                (use! ((read-only? #t))) (put! #t) (retrieve #t)))))
       :expect #t)
     (test-submit ((*journal* journal-1 'step!)) :expect 9)
     (test-submit ((*journal* journal-2 'step!)) :expect 9)
@@ -67,7 +62,7 @@
     (test-submit ((*journal* journal-1 'step!)) :expect 10)
     (test-report)
     (test-submit
-      ((alice journal-1 journal-2 'resolve :history '(9 -1))
+      ((alice journal-1 journal-2 'retrieve :history '(9 -1))
        '(-1 *state*) :pinned? #f :proof? #f)
       :expect directory?)
     (test-report)
@@ -79,7 +74,7 @@
     (test-report)
 
     (test-submit
-      ((alice journal-1 journal-2 'resolve :history '(9 -1))
+      ((alice journal-1 journal-2 'retrieve :history '(9 -1))
        '(-1 *state*) :pinned? #f :proof? #f)
       :expect directory?)
     (test-report)
@@ -90,7 +85,7 @@
     (test-submit (bulk-advance journal-2 8) :expect 18)
     (test-report)
     (test-submit
-      ((alice journal-1 journal-2 'get) '(*state* alice data private key))
+      ((alice journal-1 journal-2 'use!) '(*state* alice data private key))
       :expect "v8")
     (test-report)
 
@@ -103,7 +98,7 @@
       :expect #t)
     (test-submit (bulk-advance journal-1 1) :expect 17)
     (test-submit
-      ((*journal* journal-1 'resolve)
+      ((*journal* journal-1 'retrieve)
        '(14 *state* bootstrap tick) :pinned? #t :proof? #f)
       :expect '((content 4) (pinned? #t)))
     (test-report)
@@ -119,20 +114,20 @@
       :expect #t)
     (test-submit (bulk-advance journal-1 1) :expect 257)
     (test-submit
-      ((*journal* journal-1 'resolve)
+      ((*journal* journal-1 'retrieve)
        '(249 *state* bootstrap tick) :pinned? #t :proof? #f)
       :expect '((content 233) (pinned? #t)))
     (test-submit ((*journal* journal-1 'unpin!) '(249 *state* bootstrap tick))
       :expect #t)
     (test-submit
-      ((*journal* journal-1 'resolve)
+      ((*journal* journal-1 'retrieve)
        '(249 *state* bootstrap tick) :pinned? #t :proof? #f)
       :expect '(unknown))
     (test-submit ((*journal* journal-1 '*window-set*) '((value 16)))
       :expect #t)
     (test-submit (bulk-advance journal-1 20) :expect 276)
     (test-submit
-      ((*journal* journal-1 'resolve)
+      ((*journal* journal-1 'retrieve)
        '(249 *state* bootstrap tick) :pinned? #f :proof? #f)
       :expect '(unknown))
     (test-report)))

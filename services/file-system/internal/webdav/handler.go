@@ -626,11 +626,7 @@ func writeGatewayError(w http.ResponseWriter, err error) {
 
 func isExpiredFederatedHistory(body any) bool {
 	payload, ok := body.(map[string]any)
-	if !ok || payload["error"] != "bridge-error" {
-		return false
-	}
-	message, ok := payload["message"].(string)
-	return ok && strings.HasPrefix(message, "Bridge is not committed at the selected local index:")
+	return ok && payload["error"] == "bridge-index-error"
 }
 
 func joinHref(base, name string) string {

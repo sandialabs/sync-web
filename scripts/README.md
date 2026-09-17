@@ -30,7 +30,7 @@ The initial interface intentionally has no lifecycle or destructive operations. 
 
 ## `benchmark-batch-records`
 
-`benchmark-batch-records` runs the deterministic Records scalar-versus-batch matrix without containers through the required verified Wasmer AOT. Each arm uses a fresh scenario, an optimized release binary, fixed counts `1`, `32`, and `1024`, and counterbalanced ordering. The default two-pair run covers staged `get`, committed `resolve`, and proof-bearing `trace`; complete `/usr/bin/time -v` outputs, generated scenarios, hashes, JSON, and a Markdown table are written under ignored `target/batch-records-benchmark/`.
+`benchmark-batch-records` runs the deterministic Records scalar-versus-batch matrix without containers through the required verified Wasmer AOT. Each arm uses a fresh scenario, an optimized release binary, fixed counts `1`, `32`, and `1024`, and counterbalanced ordering. The default two-pair run covers staged read-only `use!`, committed `retrieve`, and proof-bearing `trace`; complete `/usr/bin/time -v` outputs, generated scenarios, hashes, JSON, and a Markdown table are written under ignored `target/batch-records-benchmark/`.
 
 ```bash
 scripts/benchmark-batch-records --plan

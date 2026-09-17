@@ -14,19 +14,19 @@
 
     ;; Commit the first terminal value and its authorization before establishing
     ;; the reciprocal relationship.
-    (test-submit ((*journal* journal-1 'set!) '(*state* alice seed) "origin") :expect #t)
-    (test-submit ((*journal* journal-2 'set!) '(*state* bob document) "version-1") :expect #t)
+    (test-submit ((*journal* journal-1 'put!) '(*state* alice seed) "origin") :expect #t)
+    (test-submit ((*journal* journal-2 'put!) '(*state* bob document) "version-1") :expect #t)
     (test-submit
       ((*journal* journal-2 'authorize!)
        `((user (*state* bob))
          (rule ((principal ,alice-principal) (key-index (-10 -1))
-                (path (document)) (get #t) (set! #t) (resolve #t)))))
+                (path (document)) (use! ((read-only? #t))) (put! #t) (retrieve #t)))))
       :expect #t)
     (test-submit
       ((*journal* journal-2 'authorize!)
        `((user (*state* bob))
          (rule ((principal ,bob-principal) (key-index (-10 -1))
-                (path (document)) (get #t) (set! #t) (resolve #t)))))
+                (path (document)) (use! ((read-only? #t))) (put! #t) (retrieve #t)))))
       :expect #t)
     (test-submit ((*journal* journal-1 'step!)) :expect 1)
     (test-submit ((*journal* journal-2 'step!)) :expect 1)
@@ -42,20 +42,48 @@
     (test-submit ((*journal* journal-1 'step!)) :expect 2)
     (test-report)
 
-    (test-submit ((alice journal-1 journal-2 'get) '(*state* bob document)) :schedule '(2 1 0 1) :expect "version-1")
+    (test-submit ((alice journal-1 journal-2 'use!) '(*state* bob document)) :schedule '(2 1 0 1) :expect "version-1")
     (test-submit
-      ((alice journal-1 journal-2 'resolve)
+      ((alice journal-1 journal-2 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(1 2 1 0) :expect "version-1")
+    (test-submit
+      ((alice journal-1 journal-2 'retrieve)
+       '(-1 *state* bob document) :pinned? #f :proof? #f :index? #t)
+      :schedule '(1 2 1 0)
+      :expect '((content "version-1") (indexes (1 1))))
+    (test-submit
+      ((alice journal-1 journal-2 'retrieve)
+       '(-1 *state* bob document) :pinned? #f :proof? #t :index? #t)
+      :schedule '(1 2 1 0)
+      :expect (lambda (result)
+                (and (equal? (map car result) '(content pinned? proof indexes))
+                     (equal? (cadr (assoc 'content result)) "version-1")
+                     (not (assoc 'proof-index result))
+                     (list? (cadr (assoc 'proof result)))
+                     (equal? (cadr (assoc 'indexes result)) '(1 1)))))
+    (let* ((plain
+            (collect
+             ((alice journal-1 journal-2 'retrieve)
+              '(-1 *state* bob document) :pinned? #f :proof? #t)
+             '(1 2 1 0)))
+           (indexed
+            (collect
+             ((alice journal-1 journal-2 'retrieve)
+              '(-1 *state* bob document) :pinned? #f :proof? #t :index? #t)
+             '(1 2 1 0))))
+      (if (not (equal? (cadr (assoc 'proof plain))
+                       (cadr (assoc 'proof indexed))))
+          (error 'proof-error "index? changed one-hop retrieve proof bytes")))
     (test-report)
 
     ;; The terminal can advance independently. Stage reads see its live value,
     ;; while the origin's committed route continues resolving version 1.
-    (test-submit ((*journal* journal-2 'set!) '(*state* bob document) "version-2") :expect #t)
+    (test-submit ((*journal* journal-2 'put!) '(*state* bob document) "version-2") :expect #t)
     (test-submit ((*journal* journal-2 'step!)) :expect 3)
-    (test-submit ((alice journal-1 journal-2 'get) '(*state* bob document)) :schedule '(2 1 0 1) :expect "version-2")
+    (test-submit ((alice journal-1 journal-2 'use!) '(*state* bob document)) :schedule '(2 1 0 1) :expect "version-2")
     (test-submit
-      ((alice journal-1 journal-2 'resolve)
+      ((alice journal-1 journal-2 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(1 2 1 0) :expect "version-1")
     (test-report)
@@ -68,28 +96,28 @@
     (test-report)
 
     (test-submit
-      ((alice journal-1 journal-2 'resolve)
+      ((alice journal-1 journal-2 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(2 1 0 1) :expect "version-2")
     (test-submit
-      ((alice journal-1 journal-2 'resolve :history '(2 1))
+      ((alice journal-1 journal-2 'retrieve :history '(2 1))
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(1 3 1 0) :expect "version-1")
 
-    ;; An exact historical resolve remains stable while an unrelated origin
+    ;; An exact historical retrieve remains stable while an unrelated origin
     ;; commit and its scheduled synchronization complete first.
     (test-submit
-      ((alice journal-1 journal-2 'resolve :history '(2 1))
+      ((alice journal-1 journal-2 'retrieve :history '(2 1))
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(4 2 1 0) :expect "version-1")
-    (test-submit ((*journal* journal-1 'set!) '(*state* alice marker) "after-resolve") :tick 1 :expect #t)
+    (test-submit ((*journal* journal-1 'put!) '(*state* alice marker) "after-retrieve") :tick 1 :expect #t)
     (test-submit ((*journal* journal-1 'step!)) :schedule '(1 2) :tick 1 :expect 4)
     (test-report)
 
     ;; The proof is selected from origin index 3 and terminal index 1. Advance
     ;; the origin once more before pinning to exercise retained-history anchoring.
     (let ((path '(3 journal-2 1 *state* bob document)))
-      (test-submit ((*journal* journal-1 'set!) '(*state* alice marker-2) "before-pin") :expect #t)
+      (test-submit ((*journal* journal-1 'put!) '(*state* alice marker-2) "before-pin") :expect #t)
       (test-submit ((*journal* journal-1 'step!)) :schedule '(1 2) :tick 1 :expect 5)
       (test-submit
         ((bob journal-1 journal-2 'pin! :history '(3 1))
@@ -97,36 +125,36 @@
         :schedule '(2 1 1 0) :tick 1 :expect #t)
       (test-report)
       (test-submit
-        ((bob journal-1 journal-2 'resolve :history '(3 1))
+        ((bob journal-1 journal-2 'retrieve :history '(3 1))
          '(-1 *state* bob document) :pinned? #t :proof? #f)
         :expect '((content "version-1") (pinned? #t)))
       (test-submit ((bob journal-1 'unpin!) path) :expect #t)
       (test-submit
-        ((bob journal-1 journal-2 'resolve :history '(3 1))
+        ((bob journal-1 journal-2 'retrieve :history '(3 1))
          '(-1 *state* bob document) :pinned? #t :proof? #f)
         :expect '((content "version-1") (pinned? #f)))
       (test-submit
-        ((*journal* journal-2 'resolve)
+        ((*journal* journal-2 'retrieve)
          '(1 *state* bob document) :pinned? #t :proof? #f)
         :expect (lambda (result)
                   (and (equal? (cadr (assoc 'content result)) "version-1")
                        (not (cadr (assoc 'pinned? result))))))
       (test-report))
 
-    ;; A third terminal version and a delayed old-view resolve overlap normal
-    ;; synchronization. Until the origin steps, resolve still selects version 2.
-    (test-submit ((*journal* journal-2 'set!) '(*state* bob document) "version-3") :expect #t)
+    ;; A third terminal version and a delayed old-view retrieve overlap normal
+    ;; synchronization. Until the origin steps, retrieve still selects version 2.
+    (test-submit ((*journal* journal-2 'put!) '(*state* bob document) "version-3") :expect #t)
     (test-submit ((*journal* journal-2 'step!)) :expect 4)
     (test-report)
     (test-submit
-      ((alice journal-1 journal-2 'resolve)
+      ((alice journal-1 journal-2 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(4 2 1 0) :expect "version-2")
     (test-submit ((*journal* journal-1 'bridge!) journal-2) :schedule '(1 3) :tick 1 :expect #t)
     (test-report)
     (test-submit ((*journal* journal-1 'step!)) :expect 6)
     (test-submit
-      ((alice journal-1 journal-2 'resolve)
+      ((alice journal-1 journal-2 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(2 1 0 1) :tick 1 :expect "version-3")
 
@@ -147,20 +175,20 @@
       '(journal-5 journal-4 *state* bob))
 
     (test-report)
-    (test-submit ((*journal* journal-4 'set!) '(*state* alice seed) "origin") :expect #t)
-    (test-submit ((*journal* journal-5 'set!) '(*state* alice seed) "middle") :expect #t)
-    (test-submit ((*journal* journal-6 'set!) '(*state* bob document) "multi-v1") :expect #t)
+    (test-submit ((*journal* journal-4 'put!) '(*state* alice seed) "origin") :expect #t)
+    (test-submit ((*journal* journal-5 'put!) '(*state* alice seed) "middle") :expect #t)
+    (test-submit ((*journal* journal-6 'put!) '(*state* bob document) "multi-v1") :expect #t)
     (test-submit
       ((*journal* journal-6 'authorize!)
        `((user (*state* bob))
          (rule ((principal ,alice-principal) (key-index (-20 -1))
-                (path (document)) (get #t) (set! #f) (resolve #t)))))
+                (path (document)) (use! ((read-only? #t))) (put! #f) (retrieve #t)))))
       :expect #t)
     (test-submit
       ((*journal* journal-6 'authorize!)
        `((user (*state* bob))
          (rule ((principal ,bob-principal) (key-index (-20 -1))
-                (path (document)) (get #t) (set! #f) (resolve #t)))))
+                (path (document)) (use! ((read-only? #t))) (put! #f) (retrieve #t)))))
       :expect #t)
     (for-each
       (lambda (journal) (test-submit ((*journal* journal 'step!)) :expect 1))
@@ -186,13 +214,60 @@
     (test-report)
 
     (test-submit
-      ((alice journal-4 journal-5 journal-6 'resolve)
+      ((alice journal-4 journal-5 journal-6 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(2 1 2 0 1 2) :expect "multi-v1")
+    (test-submit
+      ((alice journal-4 journal-5 journal-6 'retrieve)
+       '(-1 *state* bob document) :pinned? #f :proof? #f :index? #t)
+      :schedule '(2 1 2 0 1 2)
+      :expect '((content "multi-v1") (indexes (1 2 1))))
+    (test-submit
+      ((alice journal-4 journal-5 journal-6 'retrieve)
+       '(-1 *state* bob document) :pinned? #f :proof? #t :index? #t)
+      :schedule '(2 1 2 0 1 2)
+      :expect (lambda (result)
+                (and (equal? (map car result) '(content pinned? proof indexes))
+                     (equal? (cadr (assoc 'content result)) "multi-v1")
+                     (not (assoc 'proof-index result))
+                     (list? (cadr (assoc 'proof result)))
+                     (equal? (cadr (assoc 'indexes result)) '(1 2 1)))))
+    (let* ((plain
+            (collect
+             ((alice journal-4 journal-5 journal-6 'retrieve)
+              '(-1 *state* bob document) :pinned? #f :proof? #t)
+             '(2 1 2 0 1 2)))
+           (indexed
+            (collect
+             ((alice journal-4 journal-5 journal-6 'retrieve)
+              '(-1 *state* bob document) :pinned? #f :proof? #t :index? #t)
+             '(2 1 2 0 1 2))))
+      (if (not (equal? (cadr (assoc 'proof plain))
+                       (cadr (assoc 'proof indexed))))
+          (error 'proof-error "index? changed two-hop retrieve proof bytes")))
+    (test-submit
+      ((alice journal-4 journal-5 journal-6 'retrieve :history '(1 2 1))
+       '(-1 *state* bob document) :pinned? #f :proof? #f)
+      :schedule '(1 2 2 1 1 0) :expect "multi-v1")
+    (test-submit
+      ((alice journal-4 'retrieve-batch)
+       '((-1 *state* alice seed)
+         (-1 journal-5 -1 journal-6 -1 *state* bob document)
+         (-1 journal-5 -1 journal-6 -1 *state* bob document))
+       :pinned? #f :index? #t)
+      :schedule '(2 1 2 0 1 2)
+      :expect
+      '((results
+         (((path (-1 *state* alice seed))
+           (content "origin") (indexes (1)))
+          ((path (-1 journal-5 -1 journal-6 -1 *state* bob document))
+           (content "multi-v1") (indexes (1 2 1)))
+          ((path (-1 journal-5 -1 journal-6 -1 *state* bob document))
+           (content "multi-v1") (indexes (1 2 1)))))))
 
     ;; The terminal advances to version 2, then the newer view propagates through
     ;; both bridge histories. Explicit older hop indexes still select version 1.
-    (test-submit ((*journal* journal-6 'set!) '(*state* bob document) "multi-v2") :expect #t)
+    (test-submit ((*journal* journal-6 'put!) '(*state* bob document) "multi-v2") :expect #t)
     (test-submit ((*journal* journal-6 'step!)) :expect 3)
     (test-report)
     (test-submit ((*journal* journal-5 'bridge!) journal-6) :schedule '(2 1) :expect #t)
@@ -204,18 +279,27 @@
     (test-report)
 
     (test-submit
-      ((alice journal-4 journal-5 journal-6 'resolve)
+      ((alice journal-4 journal-5 journal-6 'retrieve)
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(2 1 0 2 1 0) :expect "multi-v2")
     (test-submit
-      ((alice journal-4 journal-5 journal-6 'resolve :history '(2 2 0))
+      ((alice journal-4 journal-5 journal-6 'retrieve :history '(1 2 1))
+       '(-1 *state* bob document) :pinned? #f :proof? #f)
+      :schedule '(1 3 2 1 1 0) :expect "multi-v1")
+    (test-submit
+      ((alice journal-4 journal-5 journal-6 'retrieve :history '(2 2 0))
        '(-1 *state* bob document) :pinned? #f :proof? #f)
       :schedule '(1 3 1 0 2 1) :expect "multi-v1")
+    (test-submit
+      ((alice journal-4 journal-5 journal-6 'retrieve :history '(2 2 0))
+       '(-1 *state* bob document) :pinned? #f :proof? #f :index? #t)
+      :schedule '(1 3 1 0 2 1)
+      :expect '((content "multi-v1") (indexes (2 2 0))))
     (test-report)
 
     (let ((path '(2 journal-5 2 journal-6 0
                   *state* bob document)))
-      (test-submit ((*journal* journal-4 'set!) '(*state* alice marker) "after-proof") :expect #t)
+      (test-submit ((*journal* journal-4 'put!) '(*state* alice marker) "after-proof") :expect #t)
       (test-submit ((*journal* journal-4 'step!)) :schedule '(1 2) :tick 1 :expect 4)
       (test-submit
         ((bob journal-4 journal-5 journal-6 'pin! :history '(2 2 0))
@@ -223,12 +307,12 @@
         :schedule '(2 1 2 0 1 0) :tick 1 :expect #t)
       (test-report)
       (test-submit
-        ((bob journal-4 journal-5 journal-6 'resolve :history '(2 2 0))
+        ((bob journal-4 journal-5 journal-6 'retrieve :history '(2 2 0))
          '(-1 *state* bob document) :pinned? #t :proof? #f)
         :expect '((content "multi-v1") (pinned? #t)))
       (test-submit ((bob journal-4 'unpin!) path) :expect #t)
       (test-submit
-        ((bob journal-4 journal-5 journal-6 'resolve :history '(2 2 0))
+        ((bob journal-4 journal-5 journal-6 'retrieve :history '(2 2 0))
          '(-1 *state* bob document) :pinned? #t :proof? #f)
         :expect '((content "multi-v1") (pinned? #f))))
 
@@ -245,9 +329,9 @@
     (let loop ((version 0))
       (if (< version 3)
           (begin
-            (test-submit ((*journal* journal-8 'set!) '(*state* retained unpinned) version) :expect #t)
+            (test-submit ((*journal* journal-8 'put!) '(*state* retained unpinned) version) :expect #t)
             (test-submit
-              ((*journal* journal-8 'set!)
+              ((*journal* journal-8 'put!)
                '(*state* retained pinned)
                (append "p" (number->string version)))
               :expect #t)
@@ -257,30 +341,34 @@
 
     (test-submit ((*journal* journal-8 'pin!) '(0 *state* retained pinned)) :expect #t)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained pinned) :pinned? #t :proof? #f)
       :expect '((content "p0") (pinned? #t)))
     (test-submit ((*journal* journal-8 '*window-set*) '((value 2))) :expect #t)
     (test-report)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained unpinned) :pinned? #f :proof? #f)
       :expect '(unknown))
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
+       '(0 *state* retained unpinned) :pinned? #f :proof? #f :index? #t)
+      :expect '((content (unknown)) (indexes (0))))
+    (test-submit
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained pinned) :pinned? #t :proof? #f)
       :expect '((content "p0") (pinned? #t)))
-    (test-submit ((*journal* journal-8 'resolve) '(2 *state* retained unpinned) :pinned? #f :proof? #f) :expect 2)
+    (test-submit ((*journal* journal-8 'retrieve) '(2 *state* retained unpinned) :pinned? #f :proof? #f) :expect 2)
     (test-report)
 
     (test-submit ((*journal* journal-8 '*window-set*) '((value 10))) :expect #t)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained unpinned) :pinned? #f :proof? #f)
       :expect '(unknown))
-    (test-submit ((*journal* journal-8 'resolve) '(2 *state* retained unpinned) :pinned? #f :proof? #f) :expect 2)
+    (test-submit ((*journal* journal-8 'retrieve) '(2 *state* retained unpinned) :pinned? #f :proof? #f) :expect 2)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained pinned) :pinned? #t :proof? #f)
       :expect '((content "p0") (pinned? #t)))
     (test-report)
@@ -291,17 +379,17 @@
       ((*journal* journal-8 'update-config!)
        '((path (public window)) (value #f))) :expect #t)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained unpinned) :pinned? #f :proof? #f)
       :expect '(unknown))
-    (test-submit ((*journal* journal-8 'resolve) '(2 *state* retained unpinned) :pinned? #f :proof? #f) :expect 2)
+    (test-submit ((*journal* journal-8 'retrieve) '(2 *state* retained unpinned) :pinned? #f :proof? #f) :expect 2)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained pinned) :pinned? #t :proof? #f)
       :expect '((content "p0") (pinned? #t)))
     (test-submit ((*journal* journal-8 'unpin!) '(0 *state* retained pinned)) :expect #t)
     (test-submit
-      ((*journal* journal-8 'resolve)
+      ((*journal* journal-8 'retrieve)
        '(0 *state* retained pinned) :pinned? #t :proof? #f)
       :expect '(unknown))
 

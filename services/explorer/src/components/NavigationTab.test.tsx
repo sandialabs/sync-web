@@ -46,7 +46,7 @@ describe('NavigationTab', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('state')).toBeInTheDocument();
+      expect(screen.getByText('State')).toBeInTheDocument();
       expect(screen.getByText('bridge')).toBeInTheDocument();
     });
   });
@@ -99,10 +99,10 @@ describe('NavigationTab', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('state')).toBeInTheDocument();
+      expect(screen.getByText('State')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('state'));
+    fireEvent.click(screen.getByText('State'));
 
     expect(onPathSelect).toHaveBeenCalledWith(['*state*']);
   });
@@ -176,6 +176,61 @@ describe('NavigationTab', () => {
 
     // Verify parseDirectoryEntries was called
     expect(JournalService.parseDirectoryEntries).toHaveBeenCalled();
+  });
+
+  it('keeps legitimate Error-prefixed labels interactive', async () => {
+    const appState = createAppState();
+    const onPathSelect = jest.fn();
+    (mockJournalService.get as jest.Mock).mockResolvedValue({ content: ['directory'] });
+    (JournalService.parseDirectoryEntries as jest.Mock).mockReturnValue([
+      { name: 'Error: quarterly notes', type: 'value' },
+    ]);
+
+    const NavigationHarness = () => {
+      const [expandedNodes, setExpandedNodes] = React.useState(new Set<string>());
+      return (
+        <NavigationTab
+          appState={{ ...appState, expandedNodes }}
+          journalService={mockJournalService}
+          onPathSelect={onPathSelect}
+          onExpandedNodesChange={setExpandedNodes}
+        />
+      );
+    };
+    render(<NavigationHarness />);
+    const state = screen.getByText('State').parentElement!;
+    fireEvent.click(state.querySelector('.tree-node-icon')!);
+    const label = await screen.findByText('Error: quarterly notes');
+    fireEvent.click(label);
+
+    expect(onPathSelect).toHaveBeenCalledWith(['*state*', 'Error: quarterly notes']);
+    expect(label).not.toHaveClass('tree-node-error');
+  });
+
+  it('marks generated load failures as noninteractive explicitly', async () => {
+    const appState = createAppState();
+    const onPathSelect = jest.fn();
+    (mockJournalService.get as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    const NavigationHarness = () => {
+      const [expandedNodes, setExpandedNodes] = React.useState(new Set<string>());
+      return (
+        <NavigationTab
+          appState={{ ...appState, expandedNodes }}
+          journalService={mockJournalService}
+          onPathSelect={onPathSelect}
+          onExpandedNodesChange={setExpandedNodes}
+        />
+      );
+    };
+    render(<NavigationHarness />);
+    const state = screen.getByText('State').parentElement!;
+    fireEvent.click(state.querySelector('.tree-node-icon')!);
+    const label = await screen.findByText('Error: offline');
+    fireEvent.click(label);
+
+    expect(onPathSelect).not.toHaveBeenCalled();
+    expect(label).toHaveClass('tree-node-error');
   });
 
   it('should sort children alphabetically when expanding', async () => {

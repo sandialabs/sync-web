@@ -18,7 +18,7 @@ Read [`LANGUAGE.md`](LANGUAGE.md) before changing active record code.
   signatures, and anchored peer evidence.
 - `lisp/federation.scm` — reciprocal bridge operations, routing, networking,
   signed invocation transport/authentication, and peer operational state.
-- `lisp/authorization.scm` — path-scoped `get`, `set!`, and `resolve` policy.
+- `lisp/authorization.scm` — path-scoped blank read-only `use!`, `put!`/`put!`, `use!`, `run!`/`run!`, and `retrieve` policy.
 - `lisp/interface.scm` — fresh installation and the authenticated external API.
 
 `lisp/archive/` is historical reference material and is not installed by the
@@ -30,10 +30,12 @@ Use `deploy/compose/general/run.sh`, `deploy/compose/ledger/run.sh`, or the
 bundled `deploy/bin/ledger` executable. These entry points pass all active class
 forms to `interface.scm` in the required order.
 
-Sync Web 1.5 is fresh-install-only. The Interface rejects every nonempty root
-before mutation; the Compose runners additionally record and check the platform
-version in each fresh database volume. Preserve older databases with their exact
-runtime for read-only historical access rather than loading them with 1.5.
+Sync Web 1.6 supports fresh installation and one explicit update from exact
+version `1.5.0`. The Compose runners require `JOURNAL_UPDATE=1`, invoke the
+atomic Interface transition, and advance the database marker to `1.6.0` only
+after success. Missing switches, unsupported markers, malformed state, and
+Scheme or process failures leave the `1.5.0` marker unchanged and do not start
+the server.
 
 ## Object and execution boundaries
 
@@ -47,6 +49,10 @@ runtime for read-only historical access rather than loading them with 1.5.
   `sync-let` child boundaries.
 - User payloads are byte vectors stored directly by Tree. `expression?` is an
   Interface codec, not a durable metadata or Document wrapper.
+
+## Resource objects
+
+Ordinary Tree leaves may contain uninitialized Standard objects. `put!` stores inert content or, with `object? #t`, one `define-class` shell without running `*init*`. `use!` invokes an explicit method/argument list inside the existing shared-code boundary; mutating mode persists a changed successor while `read-only? #t` always discards it. Blank read-only inert use is the staged read operation, and blank object use returns class, object, and code digests. `retrieve` accepts the same active arguments for authenticated historical recalculation without persistence.
 
 ## Testing
 

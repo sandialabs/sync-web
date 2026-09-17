@@ -53,6 +53,33 @@
   (assert ((tree-1 'set!) '(a e f) 9) #t)
   (assert ((tree-1 'set!) '(a e g) 10) #t)
 
+  ;; Tree keys preserve integer, symbol, and Scheme-string identity.
+  (let ((numeric-symbol '|123|))
+    (assert ((tree-1 'set!) '(typed 123) 'integer-value) #t)
+    (assert ((tree-1 'set!) (list 'typed numeric-symbol) 'symbol-value) #t)
+    (assert ((tree-1 'set!) '(typed "123") 'string-value) #t)
+    (assert ((tree-1 'get) '(typed 123)) 'integer-value)
+    (assert ((tree-1 'get) (list 'typed numeric-symbol)) 'symbol-value)
+    (assert ((tree-1 'get) '(typed "123")) 'string-value)
+    (let ((entries (cadr ((tree-1 'get) '(typed)))))
+      (assert (not (not (member '(123 value) entries))) #t)
+      (assert (not (not (member (list numeric-symbol 'value) entries))) #t)
+      (assert (not (not (member '("123" value) entries))) #t)))
+
+  ;; Reader-opaque symbols cannot become durable Tree keys. Every public path
+  ;; operation uses the same admission, while non-symbol keys remain valid.
+  (let ((opaque (string->symbol "."))
+        (digest (sync-digest (tree-1))))
+    (assert (caught (lambda () ((tree-1 'set!) (list opaque) 'value)))
+            (lambda (result) (equal? result '(error read-error))))
+    (assert (equal? digest (sync-digest (tree-1))) #t)
+    (assert ((tree-1 'get) '())
+            (lambda (result) (and (pair? result) (eq? (car result) 'directory))))
+    (assert (caught (lambda () ((tree-1 'get) (list opaque))))
+            (lambda (result) (equal? result '(error read-error))))
+    (assert ((tree-1 'set!) '("." 1) 'non-symbol-value) #t)
+    (assert ((tree-1 'get) '("." 1)) 'non-symbol-value))
+
   (assert ((tree-1 'set!) '(a e f) '(nothing)) #t)
   (assert ((tree-1 'set!) '(a e) '(nothing)) #t)
 
@@ -109,6 +136,55 @@
   (assert ((tree-2 'merge!) (tree-3)) #t)
   (assert ((tree-2 'get) '(a b)) 2)
   (assert ((tree-2 'get) '(a* b)) 4)
+
+  ;; Ordered copy batches capture every raw source before mutation. Duplicate
+  ;; targets are last-write-wins, while overlapping sources retain snapshot data.
+  (let ((tree (sync-eval ((standard 'init) tree-src))))
+    ((tree 'set!) '(source-1) 'one)
+    ((tree 'set!) '(source-2) 'two)
+    ((tree 'set!) '(directory child) 'child)
+    ((tree 'set!) '(delete-me) 'old)
+    (assert ((tree 'copy-batch!)
+             '((source-1) (source-2) (directory) (missing))
+             '((duplicate) (duplicate) (directory nested) (delete-me))) #t)
+    (assert ((tree 'get) '(duplicate)) 'two)
+    (assert ((tree 'get) '(directory nested child)) 'child)
+    (assert ((tree 'get) '(delete-me)) '(nothing))
+    (assert ((tree 'copy-batch!) '() '()) #t)
+    (assert ((tree 'copy-batch!) (make-list 1024 '(source-1))
+             (make-list 1024 '(maximum))) #t)
+    (assert ((tree 'get) '(maximum)) 'one)
+    (let ((digest (sync-digest (tree))))
+      (assert (caught
+               (lambda ()
+                 ((tree 'copy-batch!) (make-list 1025 '(source-1))
+                  (make-list 1025 '(too-many)))))
+              (lambda (result) (equal? result '(error argument-error))))
+      (assert (equal? digest (sync-digest (tree))) #t)))
+
+  ;; A directory whose immediate map is known may still contain a deeper stub.
+  ;; Batch validation rejects it recursively before changing the target.
+  (let* ((full (sync-eval ((standard 'init) tree-src)))
+         (_ ((full 'set!) '(dir a x) 'x))
+         (_ ((full 'set!) '(dir a y) 'y))
+         (_ ((full 'set!) '(target) 'old))
+         (source-view (sync-eval (full)))
+         (target-view (sync-eval (full))))
+    ((source-view 'slice!) '(dir a x))
+    ((target-view 'slice!) '(target))
+    ((source-view 'merge!) (target-view))
+    (assert (caddr ((source-view 'get) '(dir))) #t)
+    (assert ((source-view 'get) '(dir a y)) '(unknown))
+    (let ((digest (sync-digest (source-view))))
+      (assert (caught
+               (lambda () ((source-view 'copy-batch!) '((dir)) '((target)))))
+              (lambda (result) (equal? result '(error availability-error))))
+      (assert (equal? digest (sync-digest (source-view))) #t)
+      (assert ((source-view 'get) '(target)) 'old))
+    ;; The preexisting scalar Tree copy! remains unchanged outside P2.
+    (assert ((source-view 'copy!) '(dir) '(legacy-copy)) #t)
+    (assert ((source-view 'get) '(legacy-copy a x)) 'x)
+    (assert ((source-view 'get) '(legacy-copy a y)) '(unknown)))
 
   ;; Batch validation happens before any write.
   (let ((tree (sync-eval ((standard 'init) tree-src))))

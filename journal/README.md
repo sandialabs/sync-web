@@ -70,7 +70,7 @@ Other basic modifications include:
 
 The Scheme record modules (`root`, `standard`, `tree`, `log-chain`, `ledger`, `federation`, `authorization`, and `interface`) live in `records/lisp/` at the repo root.
 
-Journal SDK 1.4 loads stored objects with exact one-argument `sync-eval`. Shared self-coded computation executes in fresh `sync-let` children cloned from a sealed request-local capability template; trusted host orchestration remains outside that boundary. Active-boundary and dynamic-evaluation helpers are internal rather than Scheme primitives. Staged `call!` orchestration belongs entirely to the Records Interface and is not a Journal primitive or `sync-let` capability. Journal SDK 1.4 does not expose or claim an execution meter or limit.
+Journal SDK 1.4 loads stored objects with exact one-argument `sync-eval`. Shared self-coded computation executes in fresh `sync-let` children cloned from a sealed request-local capability template; trusted host orchestration remains outside that boundary. Active-boundary and dynamic-evaluation helpers are internal rather than Scheme primitives. Staged `run!` orchestration belongs entirely to the Records Interface and is not a Journal primitive or `sync-let` capability. Journal SDK 1.4 does not expose or claim an execution meter or limit.
 
 ### Optional Wasmer isolation
 

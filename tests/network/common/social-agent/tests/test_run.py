@@ -35,7 +35,7 @@ class SocialAgentRunTests(unittest.TestCase):
     def test_get_activity_seconds_defaults_empty_to_a_controlled_interval(self):
         with patch.dict(os.environ, {"WORDS": "8", "NODE_NAME": "journal-0", "ACTIVITY": ""}, clear=False):
             run = _load_run_module()
-            self.assertEqual(run.get_activity_seconds(), 4.0)
+            self.assertEqual(run.get_activity_seconds(), 8.0)
 
     def test_get_activity_seconds_treats_zero_as_maximum_throughput(self):
         with patch.dict(os.environ, {"WORDS": "8", "NODE_NAME": "journal-0", "ACTIVITY": "0"}, clear=False):
@@ -274,17 +274,17 @@ class SocialAgentRunTests(unittest.TestCase):
             response = {"results": []}
             with patch.object(run.requests, "post", return_value=_FakeResponse(response)) as post:
                 self.assertEqual(
-                    run.call(nodes, "get-batch", payload, token="user-token"), response
+                    run.call(nodes, "use-batch", payload, token="user-token"), response
                 )
             self.assertEqual(
-                post.call_args.args[0], "http://router-0/api/v1/general/get-batch"
+                post.call_args.args[0], "http://router-0/api/v1/general/use-batch"
             )
-            self.assertEqual(post.call_args.kwargs["json"], payload)
+            self.assertEqual(post.call_args.kwargs["json"], {**payload, "read-only?": True})
             self.assertEqual(
                 post.call_args.kwargs["headers"]["authorization"], "Bearer user-token"
             )
             metrics.record_request.assert_called_once()
-            self.assertEqual(metrics.record_request.call_args.args[0], "get-batch")
+            self.assertEqual(metrics.record_request.call_args.args[0], "use-batch")
 
     def test_call_set_uses_direct_json_arguments(self):
         with patch.dict(
@@ -302,10 +302,10 @@ class SocialAgentRunTests(unittest.TestCase):
             nodes = {"journal-0": {"router_host": "router-0"}}
 
             with patch.object(run.requests, "post", return_value=_FakeResponse(True)) as mock_post:
-                result = run.call(nodes, "set", payload)
+                result = run.call(nodes, "put", payload)
 
             self.assertTrue(result)
-            self.assertEqual(mock_post.call_args.args[0], "http://router-0/api/v1/general/set")
+            self.assertEqual(mock_post.call_args.args[0], "http://router-0/api/v1/general/put")
             kwargs = mock_post.call_args.kwargs
             self.assertEqual(
                 kwargs["headers"],
@@ -333,9 +333,9 @@ class SocialAgentRunTests(unittest.TestCase):
             nodes = {"journal-0": {"router_host": "router-0"}}
 
             with patch.object(run.requests, "post", return_value=_FakeResponse({"ok": True})) as mock_post:
-                run.call(nodes, "get", {"path": ["*state*", "x"]})
+                run.call(nodes, "use", {"path": ["*state*", "x"]})
 
-            self.assertEqual(mock_post.call_args.args[0], "http://router.local/custom/general/get")
+            self.assertEqual(mock_post.call_args.args[0], "http://router.local/custom/general/use")
 
     def test_call_rewrites_indexed_get_to_resolve(self):
         with patch.dict(
@@ -350,14 +350,14 @@ class SocialAgentRunTests(unittest.TestCase):
             with patch.object(run.requests, "post", return_value=_FakeResponse({"*type/string*": "x"})) as mock_post:
                 result = run.call(
                     nodes,
-                    "get",
+                    "use",
                     {"path": [-1, "*state*", "data", "key-0"]},
                 )
 
             self.assertEqual(result, {"*type/string*": "x"})
             self.assertEqual(
                 mock_post.call_args.args[0],
-                "http://router-0/api/v1/general/resolve",
+                "http://router-0/api/v1/general/retrieve",
             )
             self.assertEqual(
                 mock_post.call_args.kwargs["json"],
@@ -408,10 +408,10 @@ class SocialAgentRunTests(unittest.TestCase):
                 "started": 100.0,
                 "requests_total": 30,
                 "requests_failed_total": 4,
-                "get_latency_sum": 12.0,
-                "get_latency_count": 20,
-                "set_latency_sum": 5.0,
-                "set_latency_count": 10,
+                "use_latency_sum": 12.0,
+                "use_latency_count": 20,
+                "put_latency_sum": 5.0,
+                "put_latency_count": 10,
                 "activity_cycles_total": 9,
                 "activity_requests_total": 14,
                 "activity_requests_success_total": 11,
@@ -424,8 +424,8 @@ class SocialAgentRunTests(unittest.TestCase):
                 "timestamp": 118.0,
                 "stats": {
                     "requests_total": 18,
-                    "get_latency_count": 12,
-                    "set_latency_count": 6,
+                    "use_latency_count": 12,
+                    "put_latency_count": 6,
                     "activity_cycles_total": 5,
                     "activity_requests_total": 9,
                     "activity_requests_success_total": 7,
@@ -438,15 +438,15 @@ class SocialAgentRunTests(unittest.TestCase):
 
             self.assertEqual(snapshot["node_name"], "journal-0")
             self.assertEqual(snapshot["requests_succeeded_total"], 26)
-            self.assertEqual(snapshot["get_latency_sum"], 12.0)
-            self.assertEqual(snapshot["get_latency_count"], 20)
-            self.assertEqual(snapshot["set_latency_sum"], 5.0)
-            self.assertEqual(snapshot["set_latency_count"], 10)
-            self.assertAlmostEqual(snapshot["average_get_latency_seconds"], 0.6)
-            self.assertAlmostEqual(snapshot["average_set_latency_seconds"], 0.5)
+            self.assertEqual(snapshot["use_latency_sum"], 12.0)
+            self.assertEqual(snapshot["use_latency_count"], 20)
+            self.assertEqual(snapshot["put_latency_sum"], 5.0)
+            self.assertEqual(snapshot["put_latency_count"], 10)
+            self.assertAlmostEqual(snapshot["average_use_latency_seconds"], 0.6)
+            self.assertAlmostEqual(snapshot["average_put_latency_seconds"], 0.5)
             self.assertAlmostEqual(snapshot["requests_per_second"], 6.0)
-            self.assertAlmostEqual(snapshot["get_requests_per_second"], 4.0)
-            self.assertAlmostEqual(snapshot["set_requests_per_second"], 2.0)
+            self.assertAlmostEqual(snapshot["use_requests_per_second"], 4.0)
+            self.assertAlmostEqual(snapshot["put_requests_per_second"], 2.0)
             self.assertAlmostEqual(snapshot["activity_cycles_per_second"], 2.0)
             self.assertAlmostEqual(snapshot["activity_requests_per_second"], 2.0)
             self.assertAlmostEqual(snapshot["activity_request_success_rate"], 80.0)
@@ -471,10 +471,10 @@ class SocialAgentRunTests(unittest.TestCase):
                 "started": 100.0,
                 "requests_total": 10,
                 "requests_failed_total": 1,
-                "get_latency_sum": 3.0,
-                "get_latency_count": 5,
-                "set_latency_sum": 2.0,
-                "set_latency_count": 5,
+                "use_latency_sum": 3.0,
+                "use_latency_count": 5,
+                "put_latency_sum": 2.0,
+                "put_latency_count": 5,
                 "activity_cycles_total": 4,
                 "activity_requests_total": 6,
                 "activity_requests_success_total": 5,
@@ -516,8 +516,8 @@ class SocialAgentRunTests(unittest.TestCase):
             written = json.loads(file_state["content"])
             self.assertEqual(written["node_name"], "journal-0")
             self.assertEqual(written["requests_total"], 10)
-            self.assertEqual(written["get_latency_sum"], 3.0)
-            self.assertEqual(written["set_latency_count"], 5)
+            self.assertEqual(written["use_latency_sum"], 3.0)
+            self.assertEqual(written["put_latency_count"], 5)
 
     def test_run_registers_bridges_with_wrapped_name_and_interface(self):
         with patch.dict(
@@ -591,6 +591,7 @@ class SocialAgentRunTests(unittest.TestCase):
                 post.call_args.kwargs["json"],
                 {
                     "path": ["*state*", "alice", "data", "public", "key-0"],
+                    "read-only?": True,
                     "$federation": {"route": ["journal-1"]},
                 },
             )
@@ -651,9 +652,9 @@ class SocialAgentRunTests(unittest.TestCase):
                 if operation == "authorize":
                     rules.append(arguments["rule"])
                     return True
-                if operation == "get" and client_id == "setup":
+                if operation == "use" and client_id == "setup":
                     return {"*type/byte-vector*": "6f6e652074776f"}
-                if operation == "get":
+                if operation == "use":
                     activity_gets.append(arguments)
                     raise KeyboardInterrupt()
                 raise AssertionError(f"Unexpected operation {operation}")
@@ -715,7 +716,7 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "get" and client_id == "setup":
+                if operation == "use" and client_id == "setup":
                     return {"*type/byte-vector*": "6f6e652074776f"}
                 activity_calls.append((operation, arguments))
                 if operation == "pin":
@@ -763,12 +764,12 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "get" and client_id == "setup":
+                if operation == "use" and client_id == "setup":
                     return run.text_to_byte_vector("one two")
                 calls.append((operation, arguments))
-                if operation == "get":
+                if operation == "use":
                     return run.text_to_byte_vector("one two")
-                if operation == "set":
+                if operation == "put":
                     raise KeyboardInterrupt()
                 raise AssertionError(f"Unexpected operation {operation}")
 
@@ -787,8 +788,8 @@ class SocialAgentRunTests(unittest.TestCase):
             self.assertEqual(
                 calls,
                 [
-                    ("get", {"path": state_path}),
-                    ("set", {
+                    ("use", {"path": state_path}),
+                    ("put", {
                         "path": state_path,
                         "value": run.text_to_byte_vector("changed two"),
                     }),
@@ -819,15 +820,15 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "get" and client_id == "setup":
+                if operation == "use" and client_id == "setup":
                     return run.text_to_byte_vector("one two")
                 activity_calls.append((operation, arguments))
-                if operation == "get-batch":
+                if operation == "use-batch":
                     return {"results": [
                         {"path": path, "content": run.text_to_byte_vector("one two")}
                         for path in paths
                     ]}
-                if operation == "set-batch":
+                if operation == "put-batch":
                     raise KeyboardInterrupt()
                 raise AssertionError(f"Unexpected operation {operation}")
 
@@ -854,10 +855,10 @@ class SocialAgentRunTests(unittest.TestCase):
             }
             self.assertEqual(
                 activity_calls[0],
-                ("get-batch", {"paths": paths, **federation}),
+                ("use-batch", {"paths": paths, **federation}),
             )
             operation, arguments = activity_calls[1]
-            self.assertEqual(operation, "set-batch")
+            self.assertEqual(operation, "put-batch")
             self.assertEqual(arguments["paths"], paths)
             self.assertEqual(arguments["$federation"], federation["$federation"])
             self.assertNotIn("expected", arguments)
@@ -892,7 +893,7 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "get" and client_id == "setup":
+                if operation == "use" and client_id == "setup":
                     return run.text_to_byte_vector("one two")
                 activity_calls.append((operation, arguments))
                 if operation == "pin-batch":
@@ -923,7 +924,7 @@ class SocialAgentRunTests(unittest.TestCase):
                     ("unpin-batch", {"paths": history_paths}),
                 ],
             )
-            self.assertNotIn("resolve-batch", [operation for operation, _ in activity_calls])
+            self.assertNotIn("retrieve-batch", [operation for operation, _ in activity_calls])
 
     def test_batch_fails_before_setup_when_access_group_is_too_small(self):
         with patch.dict(
@@ -962,16 +963,16 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call_side_effect(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "set":
+                if operation == "put":
                     set_calls["count"] += 1
                     if set_calls["count"] == 1:
                         return True
                     raise requests.HTTPError("boom")
-                if operation == "get":
+                if operation == "use":
                     if client_id == "setup":
                         return ["nothing"]
                     return {"*type/byte-vector*": "6f6e652074776f"}
-                if operation == "resolve":
+                if operation == "retrieve":
                     return {"proof": [["c", 0, "00"]]}
                 if operation in {"pin", "unpin"}:
                     raise KeyboardInterrupt()
@@ -1007,7 +1008,7 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "get":
+                if operation == "use":
                     return {"*type/byte-vector*": "6f6e652074776f"}
                 raise AssertionError(f"Unexpected operation {operation}")
 
@@ -1049,9 +1050,9 @@ class SocialAgentRunTests(unittest.TestCase):
                     return True
                 if operation == "set-admins":
                     return True
-                if operation == "get":
+                if operation == "use":
                     return {"*type/byte-vector*": "6f6e652074776f"}
-                if operation == "set":
+                if operation == "put":
                     set_calls["count"] += 1
                     return True
                 raise AssertionError(f"Unexpected operation {operation}")
@@ -1066,8 +1067,8 @@ class SocialAgentRunTests(unittest.TestCase):
                 rule for rule in authorization_rules if rule["principal"] == ["*public*"]
             )
             self.assertEqual(public_rule["path"], ["data", "public"])
-            self.assertTrue(public_rule["get"])
-            self.assertFalse(public_rule["set!"])
+            self.assertEqual(public_rule["use!"], {"read-only?": True})
+            self.assertFalse(public_rule["put!"])
             private_rules = [
                 rule for rule in authorization_rules if rule["principal"] != ["*public*"]
             ]
@@ -1104,9 +1105,9 @@ class SocialAgentRunTests(unittest.TestCase):
             def _call_side_effect(_nodes, operation, arguments=None, client_id=None, token=None):
                 if operation in {"authorize", "set-admins"}:
                     return True
-                if operation == "get":
+                if operation == "use":
                     return {"*type/byte-vector*": "6f6e652074776f"}
-                if operation == "set":
+                if operation == "put":
                     raise AssertionError("restart setup must not overwrite an existing fixture key")
                 raise AssertionError(f"Unexpected operation {operation}")
 

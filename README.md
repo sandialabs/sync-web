@@ -6,11 +6,11 @@ Full documentation: [sandialabs.github.io/sync-web](https://sandialabs.github.io
 
 ## Federation model
 
-Sync Web 1.5 uses reciprocal bridges for identity, proof reachability, and signed-head synchronization. A bridge grants no application-data access by itself. Remote application calls are delivered directly to the terminal journal, whose local policy may authorize staged `get`/`set!`, dedicated `get-batch`/`set-batch!`, and committed `resolve`; retention, bridge/configuration changes, access policy, and administration remain local to the origin journal. Ready routes retain their exact public reverse-key material across process boundaries and unchanged Journal restarts. See [`docs/ideas/federation.md`](docs/ideas/federation.md) for the protocol and trust model.
+Sync Web 1.6 uses reciprocal bridges for identity, proof reachability, and signed-head synchronization. A bridge grants no application-data access by itself. Remote application calls are delivered directly to the terminal journal, whose local policy may independently authorize staged blank read-only `use!`/`put!`, dedicated `use-batch!`/`put-batch!`, path-scoped staged `run!`, and committed `retrieve`. Namespace ownership and blank read-only `use!` do not imply `run!`; nested operations preserve and recheck the original caller. Retention, including administrator-only `prune!` / `prune-batch!` removal from temporary and permanent retained history, bridge/configuration changes, access policy, administration, secrets, windows, periodic configuration, and root-plane control remain local. Ready routes retain their exact public reverse-key material across process boundaries and unchanged Journal restarts. Optional `index?` metadata on committed resolution reports the exact absolute local and per-hop indexes selected without changing existing responses by default. An explicit `$federation.route` may also select one terminal responder for permanent-only retained `retrieve`/`retrieve-batch`; responder-local paths and structural Chain inventories expose exact retained evidence without provider search or contacting the attributed source, and each parent-relative `-1` selects the greatest materialized index in its containing permanent Chain. [`docs/ideas/federation.md`](docs/ideas/federation.md) is retained only as a historical, superseded design note; this README and the shipped documentation describe the current protocol and trust model.
 
 ## Isolated stored programs
 
-Local `call!` executes a staged Scheme procedure only for the root caller or a configured local Interface administrator. Interface evaluates it outside `sync-let` in a masked environment and supplies the only authenticated Journal capability. Namespace ownership and Authorization rules cannot grant it, and remote/federated principals are always denied. Sync Web 1.5 defines no execution meter, limit, budget, timeout, or meter configuration because those controls cannot yet be enforced reliably across s7 and nested host work. Every nested operation re-enters Interface authentication and administrator checks, execution remains local and non-replayable, and capabilities cannot escape. Shared self-coded object work separately runs through fresh `sync-let` children cloned from a sealed request-local capability template; no mutable child, result, proof, or application state is cached across boundaries.
+`run!` executes a staged Scheme procedure under root/configured-local-admin default authority or an independent recursive path-scoped Authorization rule. Interface evaluates it outside `sync-let` in a masked environment and supplies the authenticated Journal capability. Namespace ownership and blank read-only `use!` do not imply execution; authenticated local non-admin and federated route principals may receive `run!` explicitly. Sync Web 1.6 makes no deterministic execution-meter, limit, budget, timeout, or meter-configuration claim. Every nested operation preserves and rechecks the original caller, and capabilities cannot escape. Shared self-coded object work separately runs through fresh `sync-let` children cloned from a sealed request-local capability template; no mutable child, result, proof, or application state is cached across boundaries.
 
 ## Repository Layout
 
@@ -29,13 +29,13 @@ Local `call!` executes a staged Scheme procedure only for the root caller or a c
 The fastest way to run a local stack:
 
 ```sh
-COMPOSE_PROJECT_NAME=sync-local SYNC_WEB_VERSION=1.5.0 \
+COMPOSE_PROJECT_NAME=sync-local SYNC_WEB_VERSION=1.6.0 \
 SECRET=your-root-secret INTERFACE_SECRET=your-interface-secret \
 ADMIN_PASSWORD=your-login-password HTTP_PORT=8192 HTTPS_PORT=8193 \
 docker compose -f deploy/compose/general/compose.yaml up
 ```
 
-Use `podman-compose` or `podman compose` instead of `docker compose` if that is your container runtime. Sync Web 1.5 requires a fresh database: preserve a 1.4.x volume and its exact runtime for read-only historical access rather than opening it with 1.5. See `deploy/compose/general/README.md` for full configuration options, `tests/release-qa/README.md` for exact-image acceptance checks, and `docs/development-checks.md` for validation commands and tool dependencies.
+Use `podman-compose` or `podman compose` instead of `docker compose` if that is your container runtime. Sync Web 1.6 requires a fresh database: preserve a 1.5.x volume and its exact runtime for read-only historical access rather than opening it with 1.6. See `deploy/compose/general/README.md` for full configuration options, `tests/release-qa/README.md` for exact-image acceptance checks, and `docs/development-checks.md` for validation commands and tool dependencies.
 
 ## License
 

@@ -15,6 +15,16 @@
     ;;     integer: chain size.
     (byte-vector->expression (self '(1 0))))
 
+  (define-method (indices self)
+    ;; Return ascending materialized indexes and structural completeness.
+    (let ((size ((self 'size))))
+      (let loop ((index 0) (indexes '()) (complete? #t))
+        (if (= index size) `(chain ,(reverse indexes) ,complete?)
+            (let ((available? (not (equal? ((self 'get) index) '(unknown)))))
+              (loop (+ index 1)
+                    (if available? (cons index indexes) indexes)
+                    (and complete? available?)))))))
+
   (define-method (index self index~)
     ;; Normalize index with bounds checking.
     ;;   Args:
@@ -185,7 +195,7 @@
     ;;   Args:
     ;;     index (integer): oldest range endpoint to hide, inclusive.
     ;;   Returns:
-    ;;     sync node: resulting partial proof tree.
+    ;;     boolean: #t after mutation.
     (let* ((size ((self 'size)))
            (index ((self '~adjust) index size))
            (history-size (+ index 1)))
@@ -209,7 +219,7 @@
                                 (sync-cons (cut-range (sync-car node) start middle)
                                            (cut-range (sync-cdr node) middle end))))))
                      (loop-levels (sync-cdr node) (+ depth 1)))))))
-      (self '(1 1))))
+      #t))
 
   (define-method (~previous self index)
     ;; Helper method to calculate previous state.

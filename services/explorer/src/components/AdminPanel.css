@@ -270,17 +270,38 @@
   font-weight: 600;
 }
 
-.local-endpoint-block {
+.local-journal-identity {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.45fr) minmax(260px, 1.55fr);
+  gap: 12px;
   margin-bottom: 16px;
-  color: var(--text-secondary);
-  font-size: 13px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-elevated);
 }
 
-.local-endpoint-block summary {
-  width: fit-content;
-  margin-bottom: 8px;
-  cursor: pointer;
-  font-weight: 600;
+.local-journal-identity > div {
+  min-width: 0;
+}
+
+.local-journal-identity > div > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.local-journal-identity strong {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  overflow-wrap: anywhere;
 }
 
 .local-endpoint-row {
@@ -419,6 +440,7 @@
   }
 
   .admin-form.inline,
+  .local-journal-identity,
   .local-endpoint-row,
   .acceptance-options,
   .bridge-details div,
@@ -428,5 +450,50 @@
 
   .bridge-role {
     white-space: normal;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-panel {
+    padding: 10px;
+  }
+
+  .admin-header,
+  .admin-section,
+  .admin-message {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .admin-section {
+    margin-bottom: 12px;
+    padding: 12px;
+  }
+
+  .bridge-card,
+  .bridge-create-form,
+  .preapproval-form,
+  .preapproval-list,
+  .admin-row {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  .admin-form.inline,
+  .bridge-create-form,
+  .preapproval-form,
+  .preapproval-row {
+    gap: 12px;
+  }
+
+  .admin-form.inline > .button,
+  .bridge-create-form > .button,
+  .preapproval-form > .button,
+  .admin-row > .button {
+    width: 100%;
+  }
+
+  .admin-confirmation-backdrop {
+    padding: 10px;
   }
 }

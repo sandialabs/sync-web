@@ -34,7 +34,13 @@
   (define remote-context '((latest-index 10) (authentication-index 10)))
 
   (define (request function path)
-    `((function ,function) (arguments ((path ,path)))))
+    `((function ,function)
+      (arguments ((path ,path)
+                  ,@(if (eq? function 'use!) '((read-only? #t)) '())))))
+
+  (define (use-request path read-only?)
+    `((function use!)
+      (arguments ((path ,path) (read-only? ,read-only?)))))
 
   (define (trace-request index path)
     `((function trace) (arguments ((index ,index) (path ,path)))))
@@ -58,13 +64,13 @@
           (and (memq operation '(authorizations authorize! deauthorize!))
                (assoc 'user args)
                (equal? principal (cadr (assoc 'user args))))
-          (and (eq? operation 'set-batch!)
+          (and (eq? operation 'put-batch!)
                (let ((paths (cadr (assoc 'paths args))))
                  (and (pair? paths)
                       (let loop ((paths paths))
                         (or (null? paths)
                             (and (eq? ((auth 'authorized?)
-                                       principal context (car paths) 'set!)
+                                       principal context (car paths) 'put!)
                                       'direct)
                                  (loop (cdr paths))))))))
           (and (assoc 'path args)
@@ -76,7 +82,7 @@
                                     (not (integer? (car path)))))
                            (cons (cadr (assoc 'index args)) path) path)))
                  (not (not ((auth 'authorized?)
-                            principal context path operation))))))))
+                            principal context path operation args))))))))
 
   (define* (directory-projection? admins principal request latest-index
                                   (context '()))
@@ -88,31 +94,31 @@
                             `((authentication-index
                                ,(cadr (assoc 'authentication-index context))))
                             '()))))
-      (eq? ((auth 'authorized?) principal context path operation)
+      (eq? ((auth 'authorized?) principal context path operation args)
            'ancestor)))
 
   (define base-rule
     `((principal ,local-peer)
       (path (docs))
-      (get #t)
-      (set! #f)
-      (resolve #f)))
+      (use! ((read-only? #t)))
+      (put! #f)
+      (retrieve #f)))
 
   (define reordered-rule
-    `((resolve #f)
-      (set! #f)
-      (get #t)
+    `((retrieve #f)
+      (put! #f)
+      (use! ((read-only? #t)))
       (path (docs))
       (principal ,local-peer)))
 
   (assert ((auth 'authorizations) owner) '())
 
   ;; Owner and admins bypass explicit rules.
-  (assert (authorize? admins owner (request 'get '(*state* alice docs a)) 10) #t)
-  (assert (authorize? admins owner (request 'set! '(*state* alice docs a)) 10) #t)
-  (assert (authorize? admins '(*state* admin) (request 'set! '(*state* alice docs a)) 10) #t)
+  (assert (authorize? admins owner (request 'use! '(*state* alice docs a)) 10) #t)
+  (assert (authorize? admins owner (request 'put! '(*state* alice docs a)) 10) #t)
+  (assert (authorize? admins '(*state* admin) (request 'put! '(*state* alice docs a)) 10) #t)
   ;; Cross-user access is denied by default.
-  (assert (authorize? admins local-peer (request 'get '(*state* alice docs a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'use! '(*state* alice docs a)) 10) #f)
 
   ;; Shape-restricted bridge discovery is public protocol metadata inherited by
   ;; authenticated local and remote principals. It does not admit application
@@ -120,18 +126,18 @@
   (for-each
    (lambda (entry)
      (let ((principal (car entry)) (context (cadr entry)))
-       (assert (authorize? admins principal (request 'get '(*bridge*)) 10 context) #t)
-       (assert (authorize? admins principal (request 'resolve '(10 *bridge*)) 10 context) #t)
+       (assert (authorize? admins principal (request 'use! '(*bridge*)) 10 context) #t)
+       (assert (authorize? admins principal (request 'retrieve '(10 *bridge*)) 10 context) #t)
        (assert (authorize? admins principal (trace-request 10 '(*bridge* peer)) 10 context) #t)
        (assert (authorize? admins principal
-                (request 'get '(*bridge* peer *state* alice public)) 10 context)
+                (request 'use! '(*bridge* peer *state* alice public)) 10 context)
                #f)
-       (assert (authorize? admins principal (request 'set! '(*bridge*)) 10 context) #f)))
+       (assert (authorize? admins principal (request 'put! '(*bridge*)) 10 context) #f)))
    `((,public ()) (,local-peer ()) (,remote-peer ,remote-context)))
   (assert (authorize? admins '(journal-2 *state* admin)
-           (request 'get '(*bridge*)) 10 remote-context) #t)
+           (request 'use! '(*bridge*)) 10 remote-context) #t)
   (assert (authorize? admins '(journal-2 *state* admin)
-           (request 'set! '(*state* alice docs a)) 10 remote-context) #f)
+           (request 'put! '(*state* alice docs a)) 10 remote-context) #f)
 
   ;; authorize! normalizes and deduplicates rules.
   (assert (authorize! owner base-rule 10) #t)
@@ -139,65 +145,81 @@
   (assert ((auth 'authorizations) owner)
           `(((principal ,local-peer)
              (path (docs))
-             (get #t)
-             (set! #f)
-             (resolve #f))))
+             (put! #f)
+             (use! ((read-only? #t)))
+             (run! #f)
+             (retrieve #f))))
 
   ;; Rules are recursive path-prefix grants and function-specific.
-  (assert (authorize? admins local-peer (request 'get '(*state* alice docs a)) 10) #t)
-  (assert (authorize? admins local-peer (request 'get '(*state* alice other a)) 10) #f)
-  (assert (authorize? admins local-peer (request 'set! '(*state* alice docs a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'use! '(*state* alice docs a)) 10) #t)
+  (assert (authorize? admins local-peer
+           (use-request '(*state* alice docs a) #f) 10) #f)
+  (assert (authorize? admins local-peer (request 'use! '(*state* alice other a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'put! '(*state* alice docs a)) 10) #f)
+  (define full-use-rule
+    `((principal ,local-peer) (path (full))
+      (put! #f) (use! ((read-only? #f))) (run! #f) (retrieve #f)))
+  (assert (authorize! owner full-use-rule 10) #t)
+  (assert (authorize? admins local-peer
+           (use-request '(*state* alice full item) #t) 10) #t)
+  (assert (authorize? admins local-peer
+           (use-request '(*state* alice full item) #f) 10) #t)
+  (assert (deauthorize! owner full-use-rule) #t)
 
   ;; deauthorize! removes a normalized equivalent rule.
   (assert (deauthorize! owner reordered-rule) #t)
   (assert ((auth 'authorizations) owner) '())
-  (assert (authorize? admins local-peer (request 'get '(*state* alice docs a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'use! '(*state* alice docs a)) 10) #f)
 
-  ;; call! is an Interface-admin operation, not an Authorization permission.
-  ;; Owners and ordinary local principals cannot call, and new rules naming the
-  ;; removed field fail closed instead of creating an inert apparent grant.
-  (assert (authorize? admins owner (request 'call! '(*state* alice docs program)) 10) #f)
+  ;; run! is independently grantable. Namespace ownership and get permission
+  ;; do not imply it, while configured local administrators retain their bypass.
+  (assert (authorize? admins owner (request 'run! '(*state* alice docs program)) 10) #f)
   (assert (authorize? admins '(*state* admin)
-           (request 'call! '(*state* alice docs program)) 10) #t)
+           (request 'run! '(*state* alice docs program)) 10) #t)
   (define call-rule
     `((principal ,local-peer) (path (docs))
-      (get #t) (set! #f) (call! #t) (resolve #f)))
+       (put! #f) (run! #t) (retrieve #f)))
+  (assert (authorize! owner call-rule 10) #t)
+  (assert (authorize? admins local-peer
+           (request 'run! '(*state* alice docs program)) 10) #t)
+  (assert (authorize? admins local-peer
+           (request 'use! '(*state* alice docs program)) 10) #f)
+  (assert (deauthorize! owner call-rule) #t)
+  (assert (authorize? admins local-peer
+           (request 'run! '(*state* alice docs program)) 10) #f)
   (assert
    (catch #t
-          (lambda () (authorize! owner call-rule 10))
+          (lambda ()
+            (authorize! owner
+             '((principal (*public*)) (path (docs))
+                (put! #f) (run! #t) (retrieve #f))
+             10))
           (lambda args (list 'error (car args))))
    (lambda (x) (equal? x '(error authorization-error))))
-  (assert ((auth 'authorizations) owner) '())
-
-  ;; A pre-release policy table that already contains call! cannot grant it.
-  (set! (auth '(1))
-        (expression->byte-vector `((,owner (,call-rule)))))
-  (assert ((auth 'authorized?) local-peer '((latest-index 10))
-           '(*state* alice docs program) 'call!) #f)
-  (set! (auth '(1)) (expression->byte-vector '()))
 
   ;; Remote and public principals can be granted explicitly.
   (define remote-rule
     `((principal ,remote-peer)
       (key-index (0 -1))
       (path (shared))
-      (get #t)
-      (set! #t)
-      (resolve #t)))
+      (use! ((read-only? #t)))
+      (put! #t)
+      (run! #t)
+      (retrieve #t)))
   (assert (authorize! owner remote-rule 10) #t)
   (assert (authorize? admins remote-peer
-           (request 'get '(*state* alice shared x)) 10 remote-context) #t)
+           (request 'use! '(*state* alice shared x)) 10 remote-context) #t)
   (assert (authorize? admins remote-peer
-           (request 'set! '(*state* alice shared x)) 10 remote-context) #t)
+           (request 'put! '(*state* alice shared x)) 10 remote-context) #t)
   (assert (authorize? admins remote-peer
            (request 'pin! '(*state* alice shared x)) 10 remote-context) #f)
   (assert (authorize? admins remote-peer
            (request 'unpin! '(*state* alice shared x)) 10 remote-context) #f)
   (assert (authorize? admins remote-peer
-           (request 'call! '(*state* alice shared x)) 10 remote-context) #f)
+           (request 'run! '(*state* alice shared x)) 10 remote-context) #t)
   ;; A bridge principal in the admin list does not bypass scoped remote rules.
   (assert (authorize? (cons remote-peer admins) remote-peer
-           (request 'get '(*state* alice private x)) 10
+           (request 'use! '(*state* alice private x)) 10
            '((latest-index 10) (authentication-index 10)))
           #f)
   (assert (deauthorize! owner remote-rule) #t)
@@ -209,107 +231,107 @@
   (define looped-user '(journal-2 journal-1 journal-2 *state* alice))
   (define same-user-rule
     `((principal ,same-user) (key-index (0 -1)) (path (private))
-      (get #t) (set! #t) (resolve #t)))
+      (use! ((read-only? #t))) (put! #t) (retrieve #t)))
   (assert (authorize! owner same-user-rule 10) #t)
   (assert (authorize? admins same-user
-           (request 'get '(*state* alice private key)) 10
+           (request 'use! '(*state* alice private key)) 10
            '((latest-index 10) (authentication-index 10))) #t)
   (assert (authorize? admins different-user
-           (request 'get '(*state* alice private key)) 10
+           (request 'use! '(*state* alice private key)) 10
            '((latest-index 10) (authentication-index 10))) #f)
   (assert (authorize? admins looped-user
-           (request 'get '(*state* alice private key)) 10
+           (request 'use! '(*state* alice private key)) 10
            '((latest-index 10) (authentication-index 10))) #f)
 
   (define public-rule
     `((principal ,public)
       (path (published))
-      (get #f)
-      (set! #f)
-      (resolve #t)))
+
+      (put! #f)
+      (retrieve #t)))
   (assert (authorize! owner public-rule 10) #t)
   (assert (authorize? admins public (trace-request 5 '(*state* alice published doc)) 10) #t)
-  (assert (authorize? admins public (request 'get '(*state* alice published doc)) 10) #f)
+  (assert (authorize? admins public (request 'use! '(*state* alice published doc)) 10) #f)
 
   ;; Public grants apply to every principal. Ancestor traversal reveals ordinary
   ;; immediate child names, while opening each child is authorized independently.
   (define public-data-rule
     `((principal ,public)
       (path (data public))
-      (get #t)
-      (set! #f)
-      (resolve #t)))
+      (use! ((read-only? #t)))
+      (put! #f)
+      (retrieve #t)))
   (define private-data-rule
     `((principal ,remote-peer)
       (key-index (0 -1))
       (path (data journal-2))
-      (get #t)
-      (set! #t)
-      (resolve #t)))
+      (use! ((read-only? #t)))
+      (put! #t)
+      (retrieve #t)))
   (assert (authorize! owner public-data-rule 10) #t)
   (assert (authorize! owner private-data-rule 10) #t)
   (assert (authorize? admins remote-peer
-           (request 'get '(*state* alice data public key-0)) 10
+           (request 'use! '(*state* alice data public key-0)) 10
            '((latest-index 10) (authentication-index 10))) #t)
   (assert (authorize? admins local-peer
-           (request 'get '(*state* alice data public key-0)) 10) #t)
+           (request 'use! '(*state* alice data public key-0)) 10) #t)
   (assert (authorize? admins remote-peer
-           (request 'set! '(*state* alice data public key-0)) 10
+           (request 'put! '(*state* alice data public key-0)) 10
            '((latest-index 10) (authentication-index 10))) #f)
   (assert (authorize? admins local-peer
-           (request 'get '(*state* alice data journal-2 key-0)) 10) #f)
+           (request 'use! '(*state* alice data journal-2 key-0)) 10) #f)
   (assert (authorize? admins remote-peer
-           (request 'get '(*state* alice data journal-3 key-0)) 10
+           (request 'use! '(*state* alice data journal-3 key-0)) 10
            '((latest-index 10) (authentication-index 10))) #f)
   (assert (directory-projection? admins remote-peer
-           (request 'get '(*state* alice)) 10
+           (request 'use! '(*state* alice)) 10
            '((latest-index 10) (authentication-index 10))) #t)
   (assert (directory-projection? admins remote-peer
-           (request 'get '(*state* alice data)) 10
+           (request 'use! '(*state* alice data)) 10
            '((latest-index 10) (authentication-index 10))) #t)
   (assert (directory-projection? admins local-peer
-           (request 'get '(*state* alice data)) 10) #t)
+           (request 'use! '(*state* alice data)) 10) #t)
   ;; The user namespace root is itself an ancestor: a local owner or a
   ;; principal with any descendant grant can discover ordinary user folder
   ;; names, while opening each folder remains independently authorized.
   (assert (directory-projection? admins owner
-           (request 'get '(*state*)) 10) #t)
+           (request 'use! '(*state*)) 10) #t)
   (assert (directory-projection? admins remote-peer
-           (request 'get '(*state*)) 10
+           (request 'use! '(*state*)) 10
            '((latest-index 10) (authentication-index 10))) #t)
   (assert (directory-projection? admins public
-           (request 'resolve '(-1 *state*)) 10) #t)
+           (request 'retrieve '(-1 *state*)) 10) #t)
   (let* ((node ((standard 'init) authorization-src))
          (empty-auth ((standard 'local) authorization-src node)))
     (assert ((empty-auth 'authorized?) '(*state* mallory)
-             '((latest-index 10)) '(*state*) 'get)
+             '((latest-index 10)) '(*state*) 'use! '((read-only? #t)))
             'ancestor)
     (assert ((empty-auth 'authorized?)
              '(journal-2 *state* mallory)
              '((latest-index 10) (authentication-index 10))
-             '(*state*) 'get)
+             '(*state*) 'use! '((read-only? #t)))
             #f))
 
-  ;; Resolve #f, #t, and explicit ranges.
+  ;; Retrieve #f, #t, and explicit ranges.
   (define ranged-rule
     `((principal ,local-peer)
       (path (history))
-      (get #f)
-      (set! #f)
-      (resolve (5 -2))))
+
+      (put! #f)
+      (retrieve (5 -2))))
   (assert (authorize! owner ranged-rule 10) #t) ; -2 => 9 at latest index 10
-  (assert (authorize? admins local-peer (request 'resolve '(5 *state* alice history doc)) 10) #t)
-  (assert (authorize? admins local-peer (request 'resolve '(9 *state* alice history doc)) 10) #t)
-  (assert (authorize? admins local-peer (request 'resolve '(10 *state* alice history doc)) 10) #f)
+  (assert (authorize? admins local-peer (request 'retrieve '(5 *state* alice history doc)) 10) #t)
+  (assert (authorize? admins local-peer (request 'retrieve '(9 *state* alice history doc)) 10) #t)
+  (assert (authorize? admins local-peer (request 'retrieve '(10 *state* alice history doc)) 10) #f)
   (assert (authorize? admins local-peer (trace-request -2 '(*state* alice history doc)) 10) #t)
 
-  ;; Resolve requests require an explicit index for non-owner principals.
-  (assert (authorize? admins local-peer (request 'resolve '(*state* alice history doc)) 10) #f)
+  ;; Retrieve requests require an explicit index for non-owner principals.
+  (assert (authorize? admins local-peer (request 'retrieve '(*state* alice history doc)) 10) #f)
 
   ;; Shape-restricted bridge protocol metadata is inherited from public, while
   ;; application state tails remain subject to ordinary policy.
-  (assert (authorize? admins local-peer (request 'resolve '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
-  (assert (authorize? admins local-peer (request 'get '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'retrieve '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'use! '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
   (assert (authorize? admins local-peer (request 'trace '(-1 *bridge* journal-0)) 10) #t)
   (assert (authorize? admins local-peer (request 'trace '(-1 *bridge* journal-0 -1 *crypto* interface public-key)) 10) #t)
   ;; Retention remains origin-local, but a local owner may retain a verified
@@ -322,15 +344,15 @@
   (assert (authorize? admins local-peer (request 'unpin! '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
   (assert (authorize? admins owner
            (request 'pin! '(-1 *bridge* journal-0 -1 *crypto* interface public-key)) 10) #f)
-  (assert (authorize? admins local-peer (request 'set! '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
+  (assert (authorize? admins local-peer (request 'put! '(-1 *bridge* journal-0 -1 *state* alice docs a)) 10) #f)
 
-  ;; Rule shape, removed call grants, remote key windows, and ranges fail fast
+  ;; Rule shape, non-boolean call grants, remote key windows, and ranges fail fast
   ;; during configuration.
   (assert (catch #t
                  (lambda ()
                    (authorize! owner
                     '((principal (journal-2 *state* no-window))
-                      (path (x)) (get #t) (set! #f) (resolve #t))
+                      (path (x)) (use! ((read-only? #t))) (put! #f) (retrieve #t))
                     10))
                  (lambda args (list 'error (car args))))
           (lambda (x) (equal? x '(error authorization-error))))
@@ -341,7 +363,7 @@
              (lambda ()
                (authorize! owner
                 `((principal ,principal) (key-index (0 -1))
-                  (path (x)) (get #t) (set! #f) (resolve #t))
+                  (path (x)) (use! ((read-only? #t))) (put! #f) (retrieve #t))
                 10))
              (lambda args (list 'error (car args))))
       (lambda (x) (equal? x '(error authorization-error)))))
@@ -350,7 +372,7 @@
   ;; The same bare aliases are a valid concise multi-hop journal principal.
   (assert (authorize! owner
            '((principal (peer unexpected tail)) (key-index (0 -1))
-             (path (multi)) (get #t) (set! #f) (resolve #t))
+             (path (multi)) (use! ((read-only? #t))) (put! #f) (retrieve #t))
            10)
           #t)
   (assert
@@ -359,7 +381,7 @@
             (authorize! owner
              '((principal (*state* mallory))
                (principal (*public*))
-               (path (x)) (get #t) (set! #f) (resolve #f))
+               (path (x)) (use! ((read-only? #t))) (put! #f) (retrieve #f))
              10))
           (lambda args (list 'error (car args))))
    (lambda (x) (equal? x '(error authorization-error))))
@@ -368,7 +390,7 @@
           (lambda ()
             (authorize! owner
              '((principal (*state* mallory)) (path (x))
-               (get #t) (set! #f) (resolve #f) (surprise #t))
+               (use! ((read-only? #t))) (put! #f) (retrieve #f) (surprise #t))
              10))
           (lambda args (list 'error (car args))))
    (lambda (x) (equal? x '(error authorization-error))))
@@ -377,7 +399,7 @@
           (lambda ()
             (authorize! owner
              '((principal (*state* mallory)) (path (x))
-               (get #t) (set! #f) (call! inherited) (resolve #f))
+               (use! ((read-only? #t))) (put! #f) (run! inherited) (retrieve #f))
              10))
           (lambda args (list 'error (car args))))
    (lambda (x) (equal? x '(error authorization-error))))
@@ -385,22 +407,22 @@
   ;; Relative start + absolute end is invalid; other combinations are allowed if increasing.
   (assert (catch #t
                  (lambda () (authorize! owner
-                             `((principal ,local-peer) (path (bad)) (get #f) (set! #f) (resolve (-5 9)))
+                             `((principal ,local-peer) (path (bad))  (put! #f) (retrieve (-5 9)))
                              10))
                  (lambda args (list 'error (car args))))
           (lambda (x) (eq? (car x) 'error)))
   (assert (catch #t
                  (lambda () (authorize! owner
-                             `((principal ,local-peer) (path (bad)) (get #f) (set! #f) (resolve (9 5)))
+                             `((principal ,local-peer) (path (bad))  (put! #f) (retrieve (9 5)))
                              10))
                  (lambda args (list 'error (car args))))
           (lambda (x) (eq? (car x) 'error)))
   (assert (authorize! owner
-           `((principal ,local-peer) (path (recent)) (get #f) (set! #f) (resolve (-5 -1)))
+           `((principal ,local-peer) (path (recent))  (put! #f) (retrieve (-5 -1)))
            10)
           #t)
   (assert (authorize! owner
-           `((principal ,local-peer) (path (current)) (get #f) (set! #f) (resolve (10 -1)))
+           `((principal ,local-peer) (path (current))  (put! #f) (retrieve (10 -1)))
            10)
           #t)
   (for-each
@@ -410,7 +432,7 @@
              (lambda ()
                (authorize! owner
                 `((principal ,remote-peer) (key-index ,window)
-                  (path (bad-window)) (get #t) (set! #f) (resolve #t))
+                  (path (bad-window)) (use! ((read-only? #t))) (put! #f) (retrieve #t))
                 10))
              (lambda args (list 'error (car args))))
       (lambda (x) (equal? x '(error authorization-error)))))
@@ -421,12 +443,12 @@
   (assert (authorize? admins local-peer `((function authorize!) (arguments ((user ,owner)))) 10) #f)
   (assert (authorize? admins '(*state* admin) `((function authorize!) (arguments ((user ,owner)))) 10) #t)
 
-  ;; set-batch! remains owner/admin-only; an empty no-op does not authorize an
+  ;; put-batch! remains owner/admin-only; an empty no-op does not authorize an
   ;; otherwise unrelated principal.
-  (assert (authorize? admins local-peer '((function set-batch!) (arguments ((paths ((*state* alice docs)))))) 10) #f)
-  (assert (authorize? admins owner '((function set-batch!) (arguments ((paths ((*state* alice docs)))))) 10) #t)
+  (assert (authorize? admins local-peer '((function put-batch!) (arguments ((paths ((*state* alice docs)))))) 10) #f)
+  (assert (authorize? admins owner '((function put-batch!) (arguments ((paths ((*state* alice docs)))))) 10) #t)
   (assert (authorize? admins local-peer
-           '((function set-batch!) (arguments ((paths ()) (values ())))) 10)
+           '((function put-batch!) (arguments ((paths ()) (values ())))) 10)
           #f)
 
   #t)

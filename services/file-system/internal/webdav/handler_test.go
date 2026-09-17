@@ -139,8 +139,8 @@ func TestFederatedLedgerReadsSendCanonicalCommittedPath(t *testing.T) {
 func TestExpiredFederatedHistoryIsNotFoundWithoutHidingAuthorizationErrors(t *testing.T) {
 	expired := httptest.NewRecorder()
 	writeGatewayError(expired, gateway.Error{StatusCode: http.StatusBadRequest, Body: map[string]any{
-		"error":   "bridge-error",
-		"message": "Bridge is not committed at the selected local index: journal-1 -1",
+		"error":   "bridge-index-error",
+		"message": "wording is not part of the subtype",
 	}})
 	if expired.Code != http.StatusNotFound {
 		t.Fatalf("expired history status = %d, want 404", expired.Code)
@@ -154,16 +154,26 @@ func TestExpiredFederatedHistoryIsNotFoundWithoutHidingAuthorizationErrors(t *te
 	if denied.Code != http.StatusBadRequest {
 		t.Fatalf("authorization status = %d, want 400", denied.Code)
 	}
+
+	legacyMessage := httptest.NewRecorder()
+	writeGatewayError(legacyMessage, gateway.Error{StatusCode: http.StatusBadRequest, Body: map[string]any{
+		"error":   "bridge-error",
+		"message": "Bridge is not committed at the selected local index: journal-1 -1",
+	}})
+	if legacyMessage.Code != http.StatusBadRequest {
+		t.Fatalf("message-only history status = %d, want 400", legacyMessage.Code)
+	}
 }
 
 func TestPropfindHidesReservedStateSegments(t *testing.T) {
 	fake := newFakeGateway(t)
 	fake.values["*state*/*time*"] = "reserved"
+	fake.values["*state*/*directory*"] = map[string]any{"*type/byte-vector*": ""}
 	fake.values["*state*/admin/a.txt"] = map[string]any{"*type/byte-vector*": "68656c6c6f"}
 	h := Handler{Gateway: gateway.New(fake.url + "/api/v1"), MaxObjectBytes: 1024 * 1024}
 
 	body := request(t, h, "PROPFIND", "/webdav/stage/", "", 207)
-	if strings.Contains(body, "*time*") {
+	if strings.Contains(body, "*time*") || strings.Contains(body, "*directory*") {
 		t.Fatalf("reserved segment leaked in PROPFIND: %s", body)
 	}
 	if !strings.Contains(body, "admin") {
@@ -261,7 +271,7 @@ func (f *fakeGateway) handle(w http.ResponseWriter, r *http.Request) {
 	f.lastBody = body
 	key := pathKey(body["path"])
 	switch r.URL.Path {
-	case "/api/v1/general/set":
+	case "/api/v1/general/put":
 		value := body["value"]
 		if isNothingValue(value) {
 			delete(f.values, key)
@@ -269,7 +279,7 @@ func (f *fakeGateway) handle(w http.ResponseWriter, r *http.Request) {
 			f.values[key] = value
 		}
 		writeJSON(w, true)
-	case "/api/v1/general/get", "/api/v1/general/resolve":
+	case "/api/v1/general/use", "/api/v1/general/retrieve":
 		if value, ok := f.values[key]; ok {
 			writeJSON(w, value)
 			return

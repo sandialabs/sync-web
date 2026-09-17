@@ -2,69 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import './RightPane.css';
 import { AppState, JournalPath, HistoryEntry } from '../types';
 import { JournalService } from '../services/JournalService';
+import { buildVersionPath, getBasePath, getVersionAtTab } from '../utils/pathUtils';
 
 interface RightPaneProps {
   appState: AppState;
   journalService: JournalService | null;
   onPathUpdate: (path: JournalPath) => void;
 }
-
-/**
- * Build a path with a specific version offset for a given tab index
- */
-const buildVersionPath = (
-  basePath: JournalPath,
-  tabIndex: number,
-  versionOffset: number
-): JournalPath => {
-  if (tabIndex === 0) {
-    return typeof basePath[0] === 'number'
-      ? [versionOffset, ...basePath.slice(1)]
-      : [versionOffset, ...basePath];
-  }
-
-  // For bridged journals - update the appropriate index in the path
-  const modifiedPath = [...basePath];
-  let bridgeCount = 0;
-
-  for (let i = 0; i < modifiedPath.length; i++) {
-    if (typeof modifiedPath[i] === 'number') {
-      bridgeCount++;
-      if (bridgeCount === tabIndex + 1) {
-        modifiedPath[i] = versionOffset;
-        break;
-      }
-    }
-  }
-
-  return modifiedPath;
-};
-
-/**
- * Get the version index at a specific tab position in the path
- */
-const getVersionAtTab = (path: JournalPath, tabIndex: number): number | null => {
-  let indexCount = 0;
-  for (const segment of path) {
-    if (typeof segment === 'number') {
-      if (indexCount === tabIndex) {
-        return segment;
-      }
-      indexCount++;
-    }
-  }
-  return null;
-};
-
-/**
- * Extract the "base" path by removing version numbers, for comparison purposes.
- * This helps determine if we're looking at the same document or a different one.
- */
-const getBasePath = (path: JournalPath): string => {
-  // Filter out version numbers and stringify for comparison
-  const filtered = path.filter(segment => typeof segment !== 'number');
-  return JSON.stringify(filtered);
-};
 
 const RightPane: React.FC<RightPaneProps> = ({
   appState,

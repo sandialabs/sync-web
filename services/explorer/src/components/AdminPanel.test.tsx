@@ -26,6 +26,31 @@ describe('AdminPanel', () => {
     jest.restoreAllMocks();
   });
 
+  it('shows composed journal identity and truthful bridge metadata read-only', async () => {
+    const journalService = createJournalService({
+      getAdminConfig: jest.fn().mockResolvedValue({
+        admins: ['admin'],
+        bridges: [{ name: 'mystery', endpoint: 'https://peer/interface' }],
+        localName: 'journal-0', localEndpoint: 'http://journal-0/interface',
+        windowSize: 4, bridgeAccept: 'auto', bridgePreapprovals: {},
+      }),
+    } as Partial<JournalService>);
+    const { container } = render(
+      <AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />,
+    );
+
+    const identity = await screen.findByLabelText('Local journal identity');
+    expect(identity).toHaveTextContent('Journal name');
+    await waitFor(() => expect(identity).toHaveTextContent('journal-0'));
+    expect(identity).toHaveTextContent('http://journal-0/interface');
+    expect(identity.querySelector('input')).toBeNull();
+    const bridge = screen.getByText('mystery').closest('.bridge-card');
+    expect(bridge).toHaveTextContent('https://peer/interface');
+    expect(bridge).toHaveTextContent('Name at peerNot reported');
+    expect(bridge).toHaveTextContent('Direction not reported');
+    expect(container.textContent).not.toContain('Synchronizes here');
+  });
+
   it('prefills the reciprocal name and creates a bridge', async () => {
     const journalService = createJournalService();
     render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
@@ -48,6 +73,36 @@ describe('AdminPanel', () => {
     }));
   });
 
+  it('decodes the local name for display, reciprocal prefill, and cleared fallback', async () => {
+    const journalService = createJournalService({
+      getAdminConfig: jest.fn().mockResolvedValue({
+        admins: ['admin'], bridges: [], localName: 'local%20journal',
+        localEndpoint: 'http://local/interface', windowSize: 4,
+        bridgeAccept: 'auto', bridgePreapprovals: {},
+      }),
+    } as Partial<JournalService>);
+    render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
+
+    const identity = await screen.findByLabelText('Local journal identity');
+    await waitFor(() => expect(identity).toHaveTextContent('local journal'));
+    expect(identity).not.toHaveTextContent('local%20journal');
+    const remoteName = screen.getByPlaceholderText('Name peer uses for this journal');
+    await waitFor(() => expect(remoteName).toHaveValue('local journal'));
+
+    fireEvent.change(screen.getByPlaceholderText('peer'), { target: { value: 'beagle' } });
+    fireEvent.change(screen.getByPlaceholderText('https://peer.example/api/v1/journal/interface'), {
+      target: { value: 'https://beagle/interface' },
+    });
+    fireEvent.change(remoteName, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add bridge' }));
+
+    await waitFor(() => expect(journalService.saveBridge).toHaveBeenCalledWith({
+      name: 'beagle',
+      endpoint: 'https://beagle/interface',
+      remoteName: 'local journal',
+    }));
+  });
+
   it('shows and saves an allowed bridge when preapproval is required', async () => {
     const journalService = createJournalService({
       getAdminConfig: jest.fn().mockResolvedValue({
@@ -62,9 +117,9 @@ describe('AdminPanel', () => {
     } as Partial<JournalService>);
     render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
 
-    const journalId = 'ab'.repeat(32);
+    const signingKeyHash = 'ab'.repeat(32);
     fireEvent.change(await screen.findByPlaceholderText('64 hexadecimal characters'), {
-      target: { value: journalId },
+      target: { value: signingKeyHash },
     });
     const peerInputs = screen.getAllByPlaceholderText('peer');
     fireEvent.change(peerInputs[peerInputs.length - 1], { target: { value: 'beagle' } });
@@ -72,7 +127,7 @@ describe('AdminPanel', () => {
 
     await waitFor(() => expect(journalService.updateConfig).toHaveBeenCalledWith(
       ['private', 'bridge-preapproval', 'beagle'],
-      { '*type/byte-vector*': journalId },
+      { '*type/byte-vector*': signingKeyHash },
     ));
   });
 
@@ -225,6 +280,71 @@ describe('AdminPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add Admin' }));
     await waitFor(() => expect(journalService.setAdmins).toHaveBeenCalled());
     expect(admin).toHaveValue('alice');
+  });
+
+  it('replaces zero, one, and two-admin lists through add and remove actions', async () => {
+    const config = (admins: string[]) => ({
+      admins, bridges: [], localName: 'journal-0',
+      localEndpoint: 'http://journal-0/interface', windowSize: 4,
+      bridgeAccept: 'auto' as const, bridgePreapprovals: {},
+    });
+    const getAdminConfig = jest.fn()
+      .mockResolvedValueOnce(config([]))
+      .mockResolvedValueOnce(config(['alice']))
+      .mockResolvedValueOnce(config(['alice', 'bob']))
+      .mockResolvedValueOnce(config(['bob']));
+    const setAdmins = jest.fn().mockResolvedValue(true);
+    const journalService = createJournalService({ getAdminConfig, setAdmins } as Partial<JournalService>);
+    render(<AdminPanel journalService={journalService} currentUser="root" refreshKey={0} />);
+
+    const input = await screen.findByPlaceholderText('Username');
+    fireEvent.change(input, { target: { value: 'alice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Admin' }));
+    await waitFor(() => expect(setAdmins).toHaveBeenLastCalledWith(['alice']));
+    await screen.findByText('Added administrator alice.');
+
+    fireEvent.change(input, { target: { value: 'bob' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Admin' }));
+    await waitFor(() => expect(setAdmins).toHaveBeenLastCalledWith(['alice', 'bob']));
+    await screen.findByText('Added administrator bob.');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+    await waitFor(() => expect(setAdmins).toHaveBeenLastCalledWith(['bob']));
+  });
+
+  it('confirms self-removal when another administrator remains', async () => {
+    const config = (admins: string[]) => ({
+      admins, bridges: [], localName: 'journal-0',
+      localEndpoint: 'http://journal-0/interface', windowSize: 4,
+      bridgeAccept: 'auto' as const, bridgePreapprovals: {},
+    });
+    const getAdminConfig = jest.fn()
+      .mockResolvedValueOnce(config(['alice', 'bob']))
+      .mockResolvedValueOnce(config(['bob']));
+    const setAdmins = jest.fn().mockResolvedValue(true);
+    const journalService = createJournalService({ getAdminConfig, setAdmins } as Partial<JournalService>);
+    render(<AdminPanel journalService={journalService} currentUser="alice" refreshKey={0} />);
+
+    const removeButtons = await screen.findAllByRole('button', { name: 'Remove' });
+    fireEvent.click(removeButtons[0]);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Remove your own administrator access for alice? Another administrator will remain configured.',
+    );
+    expect(setAdmins).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(setAdmins).toHaveBeenCalledWith(['bob']));
+    await screen.findByText('Removed administrator alice.');
+  });
+
+  it('prevents removal of the final administrator', async () => {
+    const journalService = createJournalService();
+    render(<AdminPanel journalService={journalService} currentUser="admin" refreshKey={0} />);
+
+    const remove = await screen.findByRole('button', { name: 'Remove' });
+    expect(remove).toBeDisabled();
+    fireEvent.click(remove);
+    expect(journalService.setAdmins).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('does not let a late successful refresh erase a localized mutation failure', async () => {

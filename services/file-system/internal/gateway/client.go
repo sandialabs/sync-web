@@ -24,15 +24,15 @@ func New(baseURL string) *Client {
 }
 
 func (c *Client) Get(ctx context.Context, r *http.Request, path []paths.Segment) (any, error) {
-	return c.post(ctx, r, "/general/get", map[string]any{"path": JSONPath(path)})
+	return c.post(ctx, r, "/general/use", map[string]any{"path": JSONPath(path), "read-only?": true})
 }
 
 func (c *Client) Resolve(ctx context.Context, r *http.Request, path []paths.Segment) (any, error) {
-	return c.post(ctx, r, "/general/resolve", map[string]any{"path": JSONPath(path)})
+	return c.post(ctx, r, "/general/retrieve", map[string]any{"path": JSONPath(path)})
 }
 
 func (c *Client) Set(ctx context.Context, r *http.Request, path []paths.Segment, value any) error {
-	_, err := c.post(ctx, r, "/general/set", map[string]any{"path": JSONPath(path), "value": value})
+	_, err := c.post(ctx, r, "/general/put", map[string]any{"path": JSONPath(path), "value": value})
 	return err
 }
 

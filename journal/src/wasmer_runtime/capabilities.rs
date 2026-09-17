@@ -1,4 +1,20 @@
 use super::*;
+use crate::evaluator::lisp2json;
+
+pub(super) fn parse_scheme_string(text: &str) -> Result<String, String> {
+    let value = lisp2json(text).map_err(|_| "expected one Scheme string".to_string())?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "expected one Scheme string".to_string())?;
+    if object.len() != 1 {
+        return Err("expected one Scheme string".to_string());
+    }
+    object
+        .get("*type/string*")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "expected one Scheme string".to_string())
+}
 
 pub(super) struct DetachedLease(u64);
 
@@ -325,12 +341,6 @@ pub(super) fn capability(
         }
         Ok(quoted)
     };
-    let unquote = |text: &str| -> Result<String, String> {
-        text.strip_prefix('"')
-            .and_then(|text| text.strip_suffix('"'))
-            .map(str::to_string)
-            .ok_or_else(|| "expected quoted string".to_string())
-    };
     match operation {
         1 if request.len() == SIZE => {
             let record: Word = request.try_into().unwrap();
@@ -449,17 +459,14 @@ pub(super) fn capability(
             let rest =
                 std::str::from_utf8(&request[second_end..]).map_err(|_| "capability encoding")?;
             let (url, body, method) = if operation == 6 {
-                (unquote(first)?, second.to_string(), "post".to_string())
+                (parse_scheme_string(first)?, second.to_string(), "post".to_string())
             } else {
                 if scenario.is_some() {
                     return Err("sync-http is not supported by the scenario harness".into());
                 }
                 (
-                    unquote(second)?,
-                    rest.strip_prefix('"')
-                        .and_then(|text| text.strip_suffix('"'))
-                        .unwrap_or(rest)
-                        .to_string(),
+                    parse_scheme_string(second)?,
+                    parse_scheme_string(rest).unwrap_or_else(|_| rest.to_string()),
                     first.to_lowercase(),
                 )
             };

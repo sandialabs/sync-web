@@ -1,4 +1,5 @@
 import React from 'react';
+import { decodeSafeName } from '../utils/nameCodec';
 
 interface WorkingRouteBarProps {
   route: string[];
@@ -29,7 +30,7 @@ const WorkingRouteBar: React.FC<WorkingRouteBarProps> = ({
             onClick={() => onSelectHop(index)}
             aria-current={index === names.length - 1 ? 'location' : undefined}
           >
-            {name}
+            {index === 0 ? name : decodeSafeName(name)}
           </button>
         </div>
       </React.Fragment>
@@ -40,7 +41,7 @@ const WorkingRouteBar: React.FC<WorkingRouteBarProps> = ({
           <button className="route-action" onClick={onClosePeerPicker}>×</button>
           <div className="peer-rail"><div className="peer-rail-scroll">
             {peerChoices.length > 0 ? peerChoices.map((name) => (
-              <button key={name} className="peer-pill" onClick={() => onChoosePeer(name)}>{name}</button>
+              <button key={name} className="peer-pill" onClick={() => onChoosePeer(name)}>{decodeSafeName(name)}</button>
             )) : <div className="peer-rail-empty">No bridges available</div>}
           </div></div>
         </div>

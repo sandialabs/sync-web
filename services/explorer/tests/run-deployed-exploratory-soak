@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime=${CONTAINER_RUNTIME:-}
+if [[ -z "$runtime" ]]; then
+  if command -v podman >/dev/null 2>&1; then
+    runtime=podman
+  elif command -v docker >/dev/null 2>&1; then
+    runtime=docker
+  else
+    echo "Set CONTAINER_RUNTIME or install Podman/Docker" >&2
+    exit 2
+  fi
+fi
+
+for name in EXPLORER_ORIGIN EXPLORER_USERNAME EXPLORER_PASSWORD EXPLORER_FIRST_PEER; do
+  if [[ -z "${!name:-}" ]]; then
+    echo "$name is required" >&2
+    exit 2
+  fi
+done
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+network_args=(--network host)
+mount_suffix=:ro
+if [[ "$runtime" == podman ]]; then
+  mount_suffix=:ro,Z
+elif [[ "$(uname -s)" != Linux ]]; then
+  network_args=()
+fi
+
+"$runtime" run --rm "${network_args[@]}" \
+  -e EXPLORER_ORIGIN \
+  -e EXPLORER_USERNAME \
+  -e EXPLORER_PASSWORD \
+  -e EXPLORER_FIRST_PEER \
+  -e EXPLORER_SOAK_SECONDS \
+  -v "$script_dir/deployed-exploratory-soak.mjs:/work/deployed-exploratory-soak.mjs$mount_suffix" \
+  -v "${PLAYWRIGHT_NODE_MODULES:?Set PLAYWRIGHT_NODE_MODULES to a host directory containing Playwright 1.55.0}:/work/node_modules$mount_suffix" \
+  -w /work \
+  mcr.microsoft.com/playwright:v1.55.0-noble \
+  node deployed-exploratory-soak.mjs

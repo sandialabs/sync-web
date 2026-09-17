@@ -37,7 +37,7 @@ METRICS_PATH = os.environ.get(
 BENCHMARK_OUTPUT_PATH = os.environ.get("BENCHMARK_OUTPUT", "")
 BENCHMARK_INTERVAL_SECONDS = 1.0
 DEFAULT_SIZE = 32
-DEFAULT_ACTIVITY = 4.0
+DEFAULT_ACTIVITY = 8.0
 DEFAULT_USERS = 1
 DEFAULT_SEGMENTS = 2
 LOG_VALUE_LIMIT = 160
@@ -57,10 +57,10 @@ class Metrics:
         self.started = time.time()
         self.requests_total = 0
         self.requests_failed_total = 0
-        self.get_latency_sum = 0.0
-        self.get_latency_count = 0
-        self.set_latency_sum = 0.0
-        self.set_latency_count = 0
+        self.use_latency_sum = 0.0
+        self.use_latency_count = 0
+        self.put_latency_sum = 0.0
+        self.put_latency_count = 0
         self.activity_cycles_total = 0
         self.activity_requests_total = 0
         self.activity_requests_success_total = 0
@@ -75,12 +75,12 @@ class Metrics:
             self.requests_total += 1
             if not success:
                 self.requests_failed_total += 1
-            if function in {"get", "get-batch"}:
-                self.get_latency_sum += duration
-                self.get_latency_count += 1
-            elif function in {"set!", "set", "set-batch"}:
-                self.set_latency_sum += duration
-                self.set_latency_count += 1
+            if function in {"use", "use-batch"}:
+                self.use_latency_sum += duration
+                self.use_latency_count += 1
+            elif function in {"put", "put-batch"}:
+                self.put_latency_sum += duration
+                self.put_latency_count += 1
 
     def record_cycle(
         self, username, requests_succeeded, requests_total,
@@ -129,10 +129,10 @@ class Metrics:
                 "started": self.started,
                 "requests_total": self.requests_total,
                 "requests_failed_total": self.requests_failed_total,
-                "get_latency_sum": self.get_latency_sum,
-                "get_latency_count": self.get_latency_count,
-                "set_latency_sum": self.set_latency_sum,
-                "set_latency_count": self.set_latency_count,
+                "use_latency_sum": self.use_latency_sum,
+                "use_latency_count": self.use_latency_count,
+                "put_latency_sum": self.put_latency_sum,
+                "put_latency_count": self.put_latency_count,
                 "activity_cycles_total": self.activity_cycles_total,
                 "activity_requests_total": self.activity_requests_total,
                 "activity_requests_success_total": self.activity_requests_success_total,
@@ -448,18 +448,18 @@ def write_metrics():
         "# HELP social_agent_requests_failed_total Total journal interface requests that failed.",
         "# TYPE social_agent_requests_failed_total counter",
         f"social_agent_requests_failed_total {stats['requests_failed_total']}",
-        "# HELP social_agent_get_latency_seconds_sum Accumulated latency in seconds for get requests.",
-        "# TYPE social_agent_get_latency_seconds_sum counter",
-        f"social_agent_get_latency_seconds_sum {stats['get_latency_sum']}",
-        "# HELP social_agent_get_latency_seconds_count Total get requests observed for latency tracking.",
-        "# TYPE social_agent_get_latency_seconds_count counter",
-        f"social_agent_get_latency_seconds_count {stats['get_latency_count']}",
-        "# HELP social_agent_set_latency_seconds_sum Accumulated latency in seconds for set requests.",
-        "# TYPE social_agent_set_latency_seconds_sum counter",
-        f"social_agent_set_latency_seconds_sum {stats['set_latency_sum']}",
-        "# HELP social_agent_set_latency_seconds_count Total set requests observed for latency tracking.",
-        "# TYPE social_agent_set_latency_seconds_count counter",
-        f"social_agent_set_latency_seconds_count {stats['set_latency_count']}",
+        "# HELP social_agent_use_latency_seconds_sum Accumulated latency in seconds for read-only use requests.",
+        "# TYPE social_agent_use_latency_seconds_sum counter",
+        f"social_agent_use_latency_seconds_sum {stats['use_latency_sum']}",
+        "# HELP social_agent_use_latency_seconds_count Total use requests observed for latency tracking.",
+        "# TYPE social_agent_use_latency_seconds_count counter",
+        f"social_agent_use_latency_seconds_count {stats['use_latency_count']}",
+        "# HELP social_agent_put_latency_seconds_sum Accumulated latency in seconds for put requests.",
+        "# TYPE social_agent_put_latency_seconds_sum counter",
+        f"social_agent_put_latency_seconds_sum {stats['put_latency_sum']}",
+        "# HELP social_agent_put_latency_seconds_count Total put requests observed for latency tracking.",
+        "# TYPE social_agent_put_latency_seconds_count counter",
+        f"social_agent_put_latency_seconds_count {stats['put_latency_count']}",
         "# HELP social_agent_activity_cycles_total Total activity cycles attempted.",
         "# TYPE social_agent_activity_cycles_total counter",
         f"social_agent_activity_cycles_total {stats['activity_cycles_total']}",
@@ -550,14 +550,14 @@ def make_benchmark_snapshot(stats, now, previous=None):
         "activity_path_operations_success_total",
         stats["activity_requests_success_total"],
     )
-    get_latency_avg = (
-        stats["get_latency_sum"] / stats["get_latency_count"]
-        if stats["get_latency_count"] > 0
+    use_latency_avg = (
+        stats["use_latency_sum"] / stats["use_latency_count"]
+        if stats["use_latency_count"] > 0
         else 0.0
     )
-    set_latency_avg = (
-        stats["set_latency_sum"] / stats["set_latency_count"]
-        if stats["set_latency_count"] > 0
+    put_latency_avg = (
+        stats["put_latency_sum"] / stats["put_latency_count"]
+        if stats["put_latency_count"] > 0
         else 0.0
     )
 
@@ -569,20 +569,20 @@ def make_benchmark_snapshot(stats, now, previous=None):
         "requests_failed_total": stats["requests_failed_total"],
         "requests_succeeded_total": stats["requests_total"]
         - stats["requests_failed_total"],
-        "get_requests_total": stats["get_latency_count"],
-        "set_requests_total": stats["set_latency_count"],
-        "get_latency_sum": stats["get_latency_sum"],
-        "get_latency_count": stats["get_latency_count"],
-        "set_latency_sum": stats["set_latency_sum"],
-        "set_latency_count": stats["set_latency_count"],
+        "use_requests_total": stats["use_latency_count"],
+        "put_requests_total": stats["put_latency_count"],
+        "use_latency_sum": stats["use_latency_sum"],
+        "use_latency_count": stats["use_latency_count"],
+        "put_latency_sum": stats["put_latency_sum"],
+        "put_latency_count": stats["put_latency_count"],
         "activity_cycles_total": stats["activity_cycles_total"],
         "activity_requests_total": stats["activity_requests_total"],
         "activity_requests_success_total": stats["activity_requests_success_total"],
         "activity_path_operations_total": path_operations_total,
         "activity_path_operations_success_total": path_operations_success_total,
         "user_activity": stats.get("user_activity", {}),
-        "average_get_latency_seconds": get_latency_avg,
-        "average_set_latency_seconds": set_latency_avg,
+        "average_use_latency_seconds": use_latency_avg,
+        "average_put_latency_seconds": put_latency_avg,
         "requests_per_second_lifetime": (
             stats["requests_total"] / uptime_seconds if uptime_seconds > 0 else 0.0
         ),
@@ -607,8 +607,8 @@ def make_benchmark_snapshot(stats, now, previous=None):
         snapshot.update(
             {
                 "requests_per_second": 0.0,
-                "get_requests_per_second": 0.0,
-                "set_requests_per_second": 0.0,
+                "use_requests_per_second": 0.0,
+                "put_requests_per_second": 0.0,
                 "activity_cycles_per_second": 0.0,
                 "activity_requests_per_second": 0.0,
                 "activity_request_success_rate": 100.0,
@@ -632,12 +632,12 @@ def make_benchmark_snapshot(stats, now, previous=None):
             "requests_per_second": (
                 (stats["requests_total"] - previous_stats["requests_total"]) / elapsed
             ),
-            "get_requests_per_second": (
-                (stats["get_latency_count"] - previous_stats["get_latency_count"])
+            "use_requests_per_second": (
+                (stats["use_latency_count"] - previous_stats["use_latency_count"])
                 / elapsed
             ),
-            "set_requests_per_second": (
-                (stats["set_latency_count"] - previous_stats["set_latency_count"])
+            "put_requests_per_second": (
+                (stats["put_latency_count"] - previous_stats["put_latency_count"])
                 / elapsed
             ),
             "activity_cycles_per_second": (
@@ -723,7 +723,7 @@ def wait_for_federation_ready(nodes, checks, token):
         "authorization": f"Bearer {token}",
         "content-type": "application/json",
     }
-    url = f"{local_gateway_base(nodes)}/get"
+    url = f"{local_gateway_base(nodes)}/use"
     for username, route, path in checks:
         user_token = token[username] if isinstance(token, dict) else token
         headers["authorization"] = f"Bearer {user_token}"
@@ -734,6 +734,7 @@ def wait_for_federation_ready(nodes, checks, token):
                     headers=headers,
                     json={
                         "path": path,
+                        "read-only?": True,
                         "$federation": {"route": route},
                     },
                     timeout=REQUEST_TIMEOUT_SECONDS,
@@ -762,18 +763,17 @@ def call(nodes, operation, arguments=None, client_id=None, token=None):
         public_operations = {"size", "info", "synchronize", "trace"}
         get_only_operations = {"size", "info"}
         effective_operation = operation
-        body = arguments if arguments is not None else {}
-        if operation == "get" and isinstance(body, dict):
-            path = body.get("path")
-            if is_indexed_path(path):
-                effective_operation = "resolve"
-                body = {
-                    "path": path,
-                    "pinned?": False,
-                    "proof?": False,
-                }
-                if "expression?" in arguments:
-                    body["expression?"] = arguments["expression?"]
+        body = dict(arguments) if isinstance(arguments, dict) else {}
+        if operation in {"use", "use-batch"}:
+            body["read-only?"] = True
+        if operation == "use" and is_indexed_path(body.get("path")):
+            effective_operation = "retrieve"
+            body = {
+                "path": body["path"],
+                "pinned?": False,
+                "proof?": False,
+                **({"expression?": body["expression?"]} if "expression?" in body else {}),
+            }
 
         url = f"{local_gateway_base(nodes)}/{effective_operation}"
 
@@ -877,7 +877,12 @@ def run(nodes, edges):
                 break
             time.sleep(1)
 
-    call(nodes, "set-admins", {"admins": [["*state*", "admin"]]}, client_id="setup")
+    call(
+        nodes,
+        "set-admins",
+        {"admins": {"admin": ["*state*", "admin"]}},
+        client_id="setup",
+    )
 
     for username in usernames:
         owner = ["*state*", username]
@@ -889,9 +894,10 @@ def run(nodes, edges):
                 "rule": {
                     "principal": ["*public*"],
                     "path": ["data", "public"],
-                    "get": True,
-                    "set!": False,
-                    "resolve": True,
+                    "put!": False,
+                    "use!": {"read-only?": True},
+                    "run!": False,
+                    "retrieve": True,
                 },
             },
             client_id="setup",
@@ -906,9 +912,10 @@ def run(nodes, edges):
                         "principal": route_principal(route, username),
                         "key-index": [0, -1],
                         "path": ["data", "private"],
-                        "get": True,
-                        "set!": True,
-                        "resolve": True,
+                        "put!": True,
+                        "use!": {"read-only?": True},
+                        "run!": False,
+                        "retrieve": True,
                     },
                 },
                 client_id="setup",
@@ -917,11 +924,11 @@ def run(nodes, edges):
         for bucket in layout:
             for key in bucket["keys"]:
                 path = ["*state*", username, *bucket["path"], key]
-                existing = call(nodes, "get", {"path": path}, client_id="setup")
+                existing = call(nodes, "use", {"path": path}, client_id="setup")
                 if byte_vector_text(existing) is None:
                     call(
                         nodes,
-                        "set",
+                        "put",
                         {
                             "path": path,
                             "value": text_to_byte_vector(" ".join(choice(WORDS, NUM_WORDS))),
@@ -1007,7 +1014,7 @@ def run(nodes, edges):
                         total_requests += 1
                         total_path_operations += 1
                         result = call(
-                            nodes, "get", {"path": state_path, **federation},
+                            nodes, "use", {"path": state_path, **federation},
                             client_id=client_id, token=token,
                         )
                         text = byte_vector_text(result)
@@ -1023,7 +1030,7 @@ def run(nodes, edges):
                         total_path_operations += 1
                         if call(
                             nodes,
-                            "set",
+                            "put",
                             {
                                 "path": state_path,
                                 "value": text_to_byte_vector(" ".join(words)),
@@ -1071,7 +1078,7 @@ def run(nodes, edges):
                     total_requests += 1
                     total_path_operations += batch
                     result = call(
-                        nodes, "get-batch", {"paths": state_paths, **federation},
+                        nodes, "use-batch", {"paths": state_paths, **federation},
                         client_id=client_id, token=token,
                     )
                     contents = ordered_batch_contents(result, state_paths)
@@ -1093,7 +1100,7 @@ def run(nodes, edges):
                     total_path_operations += batch
                     if call(
                         nodes,
-                        "set-batch",
+                        "put-batch",
                         {"paths": state_paths, "values": values, **federation},
                         client_id=client_id,
                         token=token,

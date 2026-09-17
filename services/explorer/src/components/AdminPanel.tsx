@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { JournalService } from '../services/JournalService';
 import { AdminConfig } from '../types';
+import { decodeSafeName, encodeSafeName } from '../utils/nameCodec';
 import './AdminPanel.css';
 
 interface AdminPanelProps {
@@ -52,6 +53,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
   const [isSaving, setIsSaving] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const localEndpoint = config.localEndpoint || `${window.location.origin}/api/v1/journal/interface`;
+  const localDisplayName = config.localName ? decodeSafeName(config.localName) : null;
 
   const requestConfirmation = (message: string): Promise<boolean> => {
     if (confirmationPendingRef.current) return Promise.resolve(false);
@@ -104,7 +106,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
       if (forceWindow || !windowInputDirtyRef.current) {
         setWindowInput(next.windowSize?.toString() ?? '');
       }
-      setBridgeRemoteName((value) => value || next.localName || '');
+      setBridgeRemoteName((value) => value || (next.localName ? decodeSafeName(next.localName) : ''));
       if (!mutationFailureRef.current) setError(null);
       return true;
     } catch (cause) {
@@ -151,10 +153,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
 
   const createBridge = async (event: FormEvent) => {
     event.preventDefault();
-    const name = bridgeName.trim();
+    const name = bridgeName;
     const endpoint = bridgeEndpoint.trim();
-    const remoteName = bridgeRemoteName.trim() || config.localName || name;
-    if (!name || /\s/.test(name)) return setError('Bridge names cannot contain whitespace.');
+    const remoteName = bridgeRemoteName || localDisplayName || name;
+    if (!name) return setError('Bridge name cannot be empty.');
     if (!validEndpoint(endpoint)) return setError('Peer endpoint must be an HTTP or HTTPS URL.');
     if (await run(
       () => journalService.saveBridge({ name, endpoint, remoteName }),
@@ -169,7 +171,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     if (mutationPendingRef.current || confirmationPendingRef.current) return;
     const bridgeGeneration = loadGenerationRef.current;
     if (!await requestConfirmation(
-      `Delete bridge ${name}? This removes its bridge configuration and cascades deletion of alias-scoped authorization state.`,
+      `Delete bridge ${decodeSafeName(name)}? This removes its bridge configuration and cascades deletion of alias-scoped authorization state.`,
     )) return;
     if (loadGenerationRef.current !== bridgeGeneration
         || !authoritativeConfigRef.current.bridges.some((bridge) => bridge.name === name)) {
@@ -178,7 +180,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     }
     await run(
       () => journalService.deleteBridge(name),
-      `Deleted bridge ${name}.`,
+      `Deleted bridge ${decodeSafeName(name)}.`,
     );
   };
 
@@ -191,14 +193,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
 
   const addPreapproval = async (event: FormEvent) => {
     event.preventDefault();
-    const name = preapprovalName.trim();
+    const name = preapprovalName;
     const key = preapprovalKey.trim();
     if (!name || !/^[0-9a-f]{64}$/i.test(key)) {
-      return setError('Preapproval requires a bridge name and a 32-byte hexadecimal journal ID.');
+      return setError('Preapproval requires a bridge name and a 32-byte hexadecimal signing-key hash.');
     }
     if (await run(
       () => journalService.updateConfig(
-        ['private', 'bridge-preapproval', name],
+        ['private', 'bridge-preapproval', encodeSafeName(name)],
         { '*type/byte-vector*': key },
       ),
       `Preapproved ${name}.`,
@@ -212,7 +214,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     if (mutationPendingRef.current || confirmationPendingRef.current) return;
     const preapprovalGeneration = loadGenerationRef.current;
     const rawPreapproval = authoritativeConfigRef.current.bridgePreapprovals[name];
-    if (!await requestConfirmation(`Remove incoming bridge preapproval for ${name}?`)) return;
+    if (!await requestConfirmation(`Remove incoming bridge preapproval for ${decodeSafeName(name)}?`)) return;
     if (loadGenerationRef.current !== preapprovalGeneration
         || authoritativeConfigRef.current.bridgePreapprovals[name] !== rawPreapproval) {
       setError('Preapproval state changed during confirmation; review it before removing it.');
@@ -220,7 +222,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     }
     await run(
       () => journalService.updateConfig(['private', 'bridge-preapproval', name], []),
-      `Removed preapproval for ${name}.`,
+      `Removed preapproval for ${decodeSafeName(name)}.`,
     );
   };
 
@@ -268,6 +270,31 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
     )) setAdminName('');
   };
 
+  const removeAdmin = async (name: string) => {
+    if (mutationPendingRef.current || confirmationPendingRef.current) return;
+    const admins = authoritativeConfigRef.current.admins;
+    if (admins.length <= 1) {
+      setError('The final administrator cannot be removed.');
+      return;
+    }
+    if (name === currentUser) {
+      const generation = loadGenerationRef.current;
+      if (!await requestConfirmation(
+        `Remove your own administrator access for ${name}? Another administrator will remain configured.`,
+      )) return;
+      if (loadGenerationRef.current !== generation
+          || authoritativeConfigRef.current.admins.length !== admins.length
+          || authoritativeConfigRef.current.admins.some((admin, index) => admin !== admins[index])) {
+        setError('Administrator state changed during confirmation; review it before removing yourself.');
+        return;
+      }
+    }
+    await run(
+      () => journalService.setAdmins(admins.filter((admin) => admin !== name)),
+      `Removed administrator ${name}.`,
+    );
+  };
+
   const mutationLocked = isSaving || confirmation !== null;
 
   return (
@@ -288,23 +315,33 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
 
       <section className="admin-section bridges-section">
         <div className="admin-section-header"><h2>Bridges</h2></div>
-        <details className="local-endpoint-block">
-          <summary>This journal&apos;s bridge endpoint</summary>
-          <div className="local-endpoint-row">
-            <code>{localEndpoint}</code>
-            <button className="icon-button" onClick={() => void navigator.clipboard.writeText(localEndpoint)} aria-label="Copy bridge endpoint">⧉</button>
+        <div className="local-journal-identity" aria-label="Local journal identity">
+          <div>
+            <span>Journal name</span>
+            <strong>{localDisplayName || 'Not advertised'}</strong>
           </div>
-        </details>
+          <div>
+            <span>Bridge endpoint</span>
+            <div className="local-endpoint-row">
+              <code>{localEndpoint}</code>
+              <button className="icon-button" onClick={() => void navigator.clipboard.writeText(localEndpoint)} aria-label="Copy bridge endpoint">⧉</button>
+            </div>
+          </div>
+        </div>
         <div className="bridge-list">
           {config.bridges.length === 0 ? <div className="admin-empty">No bridges configured.</div> : config.bridges.map((bridge) => (
             <article className="bridge-card" key={bridge.name}>
               <div className="bridge-card-header">
-                <strong>{bridge.name}</strong>
-                <span className="bridge-role">{bridge.initiation === 'local' ? 'Synchronizes here' : 'Synchronizes at peer'}</span>
+                <strong>{decodeSafeName(bridge.name)}</strong>
+                <span className="bridge-role">{
+                  bridge.initiation === 'local' ? 'Initiated here'
+                    : bridge.initiation === 'remote' ? 'Initiated at peer'
+                      : 'Direction not reported'
+                }</span>
               </div>
               <dl className="bridge-details">
                 <div><dt>Endpoint</dt><dd><code>{bridge.endpoint}</code></dd></div>
-                <div><dt>Name at peer</dt><dd>{bridge.remoteName || 'Not reported'}</dd></div>
+                <div><dt>Name at peer</dt><dd>{bridge.remoteName ? decodeSafeName(bridge.remoteName) : 'Not reported'}</dd></div>
                 {(bridge.lastIndex !== undefined || bridge.remoteIndex !== undefined) && (
                   <div><dt>Progress</dt><dd>
                     {bridge.lastIndex !== undefined ? `Received ${bridge.lastIndex}` : 'Not received'}
@@ -330,21 +367,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
         <p className="admin-section-description">Choose whether unknown journals can create a bridge or must be allowed here first.</p>
         <div className="acceptance-options">
           <label><input type="radio" checked={config.bridgeAccept === 'auto'} onChange={() => void setAcceptance('auto')} disabled={mutationLocked} /> <span><strong>Automatically accept</strong><small>Allow any journal with a valid signed head.</small></span></label>
-          <label><input type="radio" checked={config.bridgeAccept === 'preapproved'} onChange={() => void setAcceptance('preapproved')} disabled={mutationLocked} /> <span><strong>Require preapproval</strong><small>Only allow the names and journal IDs listed below.</small></span></label>
+          <label><input type="radio" checked={config.bridgeAccept === 'preapproved'} onChange={() => void setAcceptance('preapproved')} disabled={mutationLocked} /> <span><strong>Require preapproval</strong><small>Only allow the names and signing-key hashes listed below.</small></span></label>
         </div>
         {config.bridgeAccept === 'preapproved' && (
           <div className="preapproval-panel">
             <form className="admin-form preapproval-form" onSubmit={addPreapproval}>
               <h3>Allow an incoming bridge</h3>
               <label><span>Bridge name</span><input className="input" value={preapprovalName} onChange={(event) => setPreapprovalName(event.target.value)} placeholder="peer" disabled={mutationLocked} /></label>
-              <label><span>Journal ID</span><input className="input" value={preapprovalKey} onChange={(event) => setPreapprovalKey(event.target.value)} placeholder="64 hexadecimal characters" disabled={mutationLocked} /></label>
+              <label><span>Signing-key hash</span><input className="input" value={preapprovalKey} onChange={(event) => setPreapprovalKey(event.target.value)} placeholder="64 hexadecimal characters" disabled={mutationLocked} /></label>
               <button className="button button-primary" type="submit" disabled={mutationLocked}>Allow bridge</button>
             </form>
             <div className="preapproval-list">
               <h3>Allowed bridges</h3>
               {Object.keys(config.bridgePreapprovals).length === 0 ? <div className="admin-empty">No incoming bridges are allowed yet.</div> : Object.keys(config.bridgePreapprovals).sort().map((name) => (
                 <div className="preapproval-row" key={name}>
-                  <strong>{name}</strong>
+                  <strong>{decodeSafeName(name)}</strong>
                   <code title={preapprovalKeyText(config.bridgePreapprovals[name])}>{preapprovalKeyText(config.bridgePreapprovals[name])}</code>
                   <button className="button button-secondary" disabled={mutationLocked} onClick={() => void removePreapproval(name)}>Remove</button>
                 </div>
@@ -366,9 +403,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ journalService, currentUser, re
         <div className="admin-section-header"><h2>Admin Users</h2></div>
         <div className="admin-list">
           {sortedAdmins.map((name) => (
-            <div className="admin-row" key={name}><span>{name}</span><button className="button button-secondary" disabled={mutationLocked || name === currentUser} onClick={() => void run(
-              () => journalService.setAdmins(config.admins.filter((admin) => admin !== name)), `Removed administrator ${name}.`,
-            )}>Remove</button></div>
+            <div className="admin-row" key={name}><span>{name}</span><button className="button button-secondary" disabled={mutationLocked || config.admins.length <= 1} onClick={() => void removeAdmin(name)}>Remove</button></div>
           ))}
         </div>
         <form className="admin-form inline" onSubmit={addAdmin}>

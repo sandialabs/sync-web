@@ -24,6 +24,7 @@ dependencies = [
  "time",
  "toml",
  "ureq",
+ "url",
 ]
 
 [[package]]

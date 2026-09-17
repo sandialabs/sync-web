@@ -59,8 +59,8 @@ $ API_TOKEN=sync-... locust --host=http://localhost:8192 --web-port=8090
 
 The load test performs the following actions:
 - Generates random key-value pairs
-- Sends authenticated POST requests to `/api/v1/general/set` through the gateway
-- Each request sets `(*state* locust <key>)` to a random string value via `set!`
+- Sends authenticated POST requests to `/api/v1/general/put` through the gateway
+- Each request sets `(*state* locust <key>)` to a random string value via `put!`
 - Logs both request and response (truncated to 80 characters each)
 
 ## Expected Output

@@ -3,16 +3,18 @@ import './App.css';
 import ToolBar from './components/ToolBar';
 import ExplorerTree from './components/ExplorerTree';
 import ExplorerContent from './components/ExplorerContent';
+import PutResourceModal from './components/PutResourceModal';
 import LedgerRouteBar from './components/LedgerRouteBar';
 import WorkingRouteBar from './components/WorkingRouteBar';
 import AccessPanel from './components/AccessPanel';
 import AdminPanel from './components/AdminPanel';
-import { GatewayChangeEvent, JournalService } from './services/JournalService';
+import { GatewayChangeEvent, JournalService, ResourcePutInput } from './services/JournalService';
 import { AppState, ExplorerMode, ExplorerSelection, FederationContext, JournalPath, LedgerHop } from './types';
 import {
   LEDGER_LATEST,
-  buildLedgerStateRootPath,
+  buildLedgerRouteBasePath,
   normalizeSnapshotInput,
+  retainedLedgerRootPath,
   stepSnapshotValue,
 } from './utils/ledgerRoute';
 import {
@@ -20,6 +22,7 @@ import {
   getInitialLedgerHops,
   parseFragmentHash,
 } from './utils/projectedFragments';
+import { pathSegmentIdentity } from './utils/pathUtils';
 
 const getEnvVar = (key: string): string => {
   // @ts-ignore
@@ -58,19 +61,24 @@ const buildUserHomePath = (username: string): JournalPath => (
 
 const buildHopsForWorkingRoute = (previous: LedgerHop[], route: string[]): LedgerHop[] => [
   {
+    ...previous[0],
     key: 'local-0',
     kind: 'local',
     name: 'Self',
     snapshot: previous[0]?.snapshot ?? LEDGER_LATEST,
   },
-  ...route.map((name, index) => ({
-    key: `${name}-${index + 1}`,
-    kind: 'bridge' as const,
-    name,
-    snapshot: previous[index + 1]?.name === name
-      ? previous[index + 1].snapshot
-      : LEDGER_LATEST,
-  })),
+  ...route.map((name, index) => {
+    const retained = previous[index + 1]?.name === name
+      ? previous[index + 1]
+      : null;
+    return {
+      ...retained,
+      key: `${name}-${index + 1}`,
+      kind: 'bridge' as const,
+      name,
+      snapshot: retained?.snapshot ?? LEDGER_LATEST,
+    };
+  }),
 ];
 
 const buildFederationContext = (
@@ -93,9 +101,44 @@ const buildFederationContext = (
   };
 };
 
+export const resolveLedgerHopIndexes = async (
+  endpoint: string,
+  hops: LedgerHop[],
+  refreshAll: boolean,
+): Promise<LedgerHop[]> => {
+  const resolved = hops.map((hop) => ({ ...hop }));
+  const local = new JournalService(endpoint);
+  if (refreshAll || resolved[0]?.maximum === undefined
+      || resolved[0]?.snapshot.trim().toLowerCase() === LEDGER_LATEST) {
+    const maximum = Math.max(0, (await local.getLocalSize()) - 1);
+    resolved[0] = {
+      ...resolved[0],
+      snapshot: normalizeSnapshotInput(resolved[0]?.snapshot ?? String(maximum), maximum),
+      maximum,
+    };
+  }
+
+  for (let index = 1; index < resolved.length; index += 1) {
+    if (!refreshAll && resolved[index].maximum !== undefined
+        && resolved[index].snapshot.trim().toLowerCase() !== LEDGER_LATEST) continue;
+    const route = resolved.slice(1, index + 1).map((hop) => hop.name);
+    const probeHops = resolved.slice(0, index + 1);
+    probeHops[index] = { ...probeHops[index], snapshot: LEDGER_LATEST };
+    const provider = new JournalService(endpoint);
+    provider.setFederationContext(buildFederationContext(route, probeHops, Number(resolved[0].snapshot)));
+    const maximum = Math.max(0, (await provider.getSize()) - 1);
+    resolved[index] = {
+      ...resolved[index],
+      snapshot: normalizeSnapshotInput(resolved[index].snapshot, maximum),
+      maximum,
+    };
+  }
+  return resolved;
+};
+
 const rebaseLedgerSelection = (
   selection: ExplorerSelection | null,
-  hops: LedgerHop[],
+  _hops: LedgerHop[],
   rootIndex: number,
 ): ExplorerSelection | null => {
   if (!selection) return null;
@@ -103,10 +146,7 @@ const rebaseLedgerSelection = (
   if (stateIndex < 0) return null;
   return {
     ...selection,
-    path: [
-      ...buildLedgerStateRootPath(hops, rootIndex),
-      ...selection.path.slice(stateIndex + 1),
-    ],
+    path: [rootIndex, '*state*', ...selection.path.slice(stateIndex + 1)],
   };
 };
 
@@ -130,25 +170,44 @@ export const accessibleRemoteSelection = async (
 };
 
 export const terminalRootSelections = async (
-  service: Pick<JournalService, 'get' | 'setFederationContext'>,
+  providerService: Pick<JournalService, 'get' | 'setFederationContext'>,
+  requesterService: Pick<JournalService, 'get'>,
   route: string[],
   hops: LedgerHop[],
   rootIndex: number,
 ): Promise<{ stage: ExplorerSelection; ledger: ExplorerSelection }> => {
   const stage: ExplorerSelection = { path: STAGE_ROOT_PATH, type: 'directory' };
   const ledger: ExplorerSelection = {
-    path: buildLedgerStateRootPath(hops, rootIndex),
+    path: [rootIndex, '*state*'],
     type: 'directory',
   };
 
-  service.setFederationContext(buildFederationContext(route, hops, rootIndex));
-  await service.get(stage.path, { pinned: false, proof: false });
-  await service.get(ledger.path, { pinned: false, proof: false });
+  providerService.setFederationContext(buildFederationContext(route, hops, rootIndex));
+  const providerAdmission = providerService.get(stage.path, { pinned: false, proof: false });
+  const requesterAdmission = requesterService.get(ledger.path, { pinned: false, proof: false })
+    .then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+  await providerAdmission;
+  const requesterResult = await requesterAdmission;
+  if (!requesterResult.ok) throw requesterResult.error;
   return { stage, ledger };
 };
 
 export const isStageNamespaceRoot = (selection: ExplorerSelection | null): boolean =>
   selection?.path.length === 1 && selection.path[0] === '*state*';
+
+const isJournalPath = (value: unknown): value is JournalPath => Array.isArray(value)
+  && value.every((segment) => {
+    if (typeof segment === 'string') return true;
+    if (typeof segment === 'number') return Number.isFinite(segment) && Number.isInteger(segment);
+    if (typeof segment !== 'object' || segment === null || Array.isArray(segment)) return false;
+    const keys = Object.keys(segment);
+    return keys.length === 1
+      && keys[0] === '*type/string*'
+      && typeof (segment as Record<string, unknown>)['*type/string*'] === 'string';
+  });
 
 const isPathWithin = (candidate: JournalPath, ancestor: JournalPath): boolean => {
   if (ancestor.length > candidate.length) {
@@ -178,7 +237,9 @@ const stagePathToTreeNodeId = (path: JournalPath): string => {
   }
 
   const suffix = path.slice(1);
-  return suffix.length > 0 ? `stage/${suffix.join('/')}` : 'stage';
+  return suffix.length > 0
+    ? `stage/${suffix.map(pathSegmentIdentity).join('/')}`
+    : 'stage';
 };
 
 export const treeAncestorNodeIds = (
@@ -192,8 +253,22 @@ export const treeAncestorNodeIds = (
 
   const suffix = selectedPath.slice(rootPath.length);
   const ancestors = new Set<string>();
+  if (mode === 'ledger') {
+    const ids: string[] = ['ledger'];
+    suffix.forEach((segment, index) => {
+      if (index === 0 && segment === '*state*') ids.push('state');
+      else if (index === 0 && typeof segment !== 'number' && segment !== '*bridge*') {
+        ids.push('bridges', pathSegmentIdentity(segment));
+      } else if (segment === '*bridge*') ids.push('bridges');
+      else if (segment === '*state*') ids.push('state');
+      else if (typeof segment === 'number') ids.push(String(segment));
+      else ids.push(pathSegmentIdentity(segment));
+      if (index < suffix.length - 1) ancestors.add(ids.join('/'));
+    });
+    return ancestors;
+  }
   for (let length = 1; length < suffix.length; length += 1) {
-    ancestors.add(`${mode}/${suffix.slice(0, length).join('/')}`);
+    ancestors.add(`${mode}/${suffix.slice(0, length).map(pathSegmentIdentity).join('/')}`);
   }
   return ancestors;
 };
@@ -218,10 +293,12 @@ const App: React.FC = () => {
   const [sessionName, setSessionName] = useState<string>('');
   const [appState, setAppState] = useState<AppState>(createInitialAppState);
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
-  const [mode, setMode] = useState<ExplorerMode>('ledger');
+  const [mode, setMode] = useState<ExplorerMode>('stage');
   const [journalService, setJournalService] = useState<JournalService | null>(null);
   const [adminStatus, setAdminStatus] = useState<'checking' | 'admin' | 'not-admin'>('checking');
-  const [stageSelection, setStageSelection] = useState<ExplorerSelection | null>(null);
+  const [stageSelection, setStageSelection] = useState<ExplorerSelection | null>({
+    path: STAGE_ROOT_PATH, type: 'directory',
+  });
   const [ledgerSelection, setLedgerSelection] = useState<ExplorerSelection | null>(null);
   const [stageExpandedNodes, setStageExpandedNodes] = useState<Set<string>>(new Set());
   const [ledgerExpandedNodes, setLedgerExpandedNodes] = useState<Set<string>>(new Set());
@@ -230,14 +307,24 @@ const App: React.FC = () => {
   const [ledgerHops, setLedgerHops] = useState<LedgerHop[]>(getInitialLedgerHops(-1));
   const [ledgerView, setLedgerView] = useState<'content' | 'proof'>('content');
   const [stageRefreshKey, setStageRefreshKey] = useState(0);
+  const [stageTreeRefreshKey, setStageTreeRefreshKey] = useState(0);
   const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0);
   const [adminRefreshKey, setAdminRefreshKey] = useState(0);
   const [accessRefreshKey, setAccessRefreshKey] = useState(0);
+  const [putParentPath, setPutParentPath] = useState<JournalPath | null>(null);
   const isApplyingHashRef = useRef(false);
   const federationContextRef = useRef('');
   const eventRefreshTimerRef = useRef<number | null>(null);
+  const stageContentRefreshPendingRef = useRef(false);
+  const stageSelectionRef = useRef(stageSelection);
   const navigationTransitionRef = useRef(0);
+  const peerPickerRequestRef = useRef(0);
   const ledgerHopsRef = useRef<LedgerHop[]>(getInitialLedgerHops(-1));
+
+  const closeWorkingPeerPicker = useCallback(() => {
+    peerPickerRequestRef.current += 1;
+    setWorkingPeerChoices(null);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -278,6 +365,10 @@ const App: React.FC = () => {
   };
 
   useLayoutEffect(() => {
+    stageSelectionRef.current = stageSelection;
+  }, [stageSelection]);
+
+  useLayoutEffect(() => {
     ledgerHopsRef.current = ledgerHops;
     if (!journalService) return;
     const context = buildFederationContext(workingRoute, ledgerHops, appState.rootIndex);
@@ -316,7 +407,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [journalService, workingRoute]);
+  }, [journalService]);
 
   useEffect(() => {
     if (adminStatus === 'not-admin' && mode === 'admin') {
@@ -334,16 +425,15 @@ const App: React.FC = () => {
       setLoadingState(true, null);
     }
     try {
-      const size = await journalService.getSize();
-      const latestIndex = Math.max(0, size - 1);
-      const updatedHops = ledgerHops.map((hop, index) =>
-        index === 0 && !options.preserveDeepLink ? { ...hop, snapshot: LEDGER_LATEST } : hop,
+      const updatedHops = await resolveLedgerHopIndexes(
+        appState.endpoint, ledgerHops, !options.preserveDeepLink,
       );
+      const latestIndex = Number.parseInt(updatedHops[0]?.snapshot ?? '0', 10);
       let nextSelection = ledgerSelection;
       if (!options.preserveDeepLink) {
-        const rootPath = buildLedgerStateRootPath(updatedHops, latestIndex);
+        const rootPath: JournalPath = [latestIndex, '*state*'];
         nextSelection = await accessibleRemoteSelection(
-          journalService,
+          new JournalService(appState.endpoint),
           rebaseLedgerSelection(ledgerSelection, updatedHops, latestIndex),
           rootPath,
         );
@@ -355,10 +445,8 @@ const App: React.FC = () => {
         isLoading: options.quiet ? prev.isLoading : false,
         error: null,
       }));
-      if (!options.preserveDeepLink) {
-        setLedgerHops(updatedHops);
-        setLedgerSelection(nextSelection);
-      }
+      setLedgerHops(updatedHops);
+      if (!options.preserveDeepLink) setLedgerSelection(nextSelection);
       setLedgerRefreshKey((prev) => prev + 1);
     } catch (error) {
       if (!options.quiet && transition === navigationTransitionRef.current) {
@@ -369,7 +457,7 @@ const App: React.FC = () => {
         }));
       }
     }
-  }, [journalService, ledgerHops, ledgerSelection]);
+  }, [journalService, ledgerHops, ledgerSelection, appState.endpoint]);
 
   useEffect(() => {
     if (journalService && appState.rootIndex < 0) {
@@ -387,6 +475,15 @@ const App: React.FC = () => {
     }
 
     const scheduleRefresh = (event: GatewayChangeEvent) => {
+      if (mode === 'stage') {
+        const eventPath = isJournalPath(event.path) ? event.path : null;
+        const selectionPath = stageSelectionRef.current?.path;
+        if (!eventPath || !selectionPath
+            || isPathWithin(eventPath, selectionPath)
+            || isPathWithin(selectionPath, eventPath)) {
+          stageContentRefreshPendingRef.current = true;
+        }
+      }
       if (eventRefreshTimerRef.current !== null) {
         window.clearTimeout(eventRefreshTimerRef.current);
       }
@@ -401,7 +498,11 @@ const App: React.FC = () => {
           return;
         }
         if (mode === 'stage') {
-          setStageRefreshKey((prev) => prev + 1);
+          setStageTreeRefreshKey((prev) => prev + 1);
+          if (stageContentRefreshPendingRef.current) {
+            stageContentRefreshPendingRef.current = false;
+            setStageRefreshKey((prev) => prev + 1);
+          }
           return;
         }
         setLedgerRefreshKey((prev) => prev + 1);
@@ -422,16 +523,38 @@ const App: React.FC = () => {
         window.clearTimeout(eventRefreshTimerRef.current);
         eventRefreshTimerRef.current = null;
       }
+      stageContentRefreshPendingRef.current = false;
     };
   }, [journalService, sessionStatus, mode, synchronizeLedger]);
 
   const ledgerRootPath = useMemo(
-    () => buildLedgerStateRootPath(
-      ledgerHops,
-      appState.rootIndex >= 0 ? appState.rootIndex : 0,
-    ),
+    () => buildLedgerRouteBasePath(ledgerHops.slice(0, 1), appState.rootIndex),
     [ledgerHops, appState.rootIndex],
   );
+  const retainedRootPath = useMemo(
+    () => retainedLedgerRootPath(ledgerHops, appState.rootIndex),
+    [ledgerHops, appState.rootIndex],
+  );
+  const requesterJournalService = useMemo(
+    () => journalService ? new JournalService(appState.endpoint) : null,
+    [journalService, appState.endpoint],
+  );
+  const ledgerReadPath = useMemo<JournalPath | null>(() => {
+    if (!ledgerSelection) return null;
+    const requesterStateRoot: JournalPath = [...ledgerRootPath, '*state*'];
+    if (ledgerHops.length <= 1 || !isPathWithin(ledgerSelection.path, requesterStateRoot)) {
+      return ledgerSelection.path;
+    }
+    return [...retainedRootPath, ...ledgerSelection.path.slice(ledgerRootPath.length)];
+  }, [ledgerHops, ledgerRootPath, ledgerSelection, retainedRootPath]);
+  const contentJournalService = useMemo(() => {
+    if (mode !== 'ledger' || !ledgerSelection || !requesterJournalService) {
+      return journalService;
+    }
+    const requesterStateRoot: JournalPath = [...ledgerRootPath, '*state*'];
+    return isPathWithin(ledgerSelection.path, requesterStateRoot) && ledgerHops.length <= 1
+      ? requesterJournalService : journalService;
+  }, [journalService, ledgerHops, ledgerRootPath, ledgerSelection, mode, requesterJournalService]);
   const stageRootPath = STAGE_ROOT_PATH;
   useEffect(() => {
     const applyHash = () => {
@@ -441,6 +564,7 @@ const App: React.FC = () => {
       }
 
       isApplyingHashRef.current = true;
+      closeWorkingPeerPicker();
       setMode(parsed.mode);
       setAppState((prev) => ({ ...prev, error: null }));
       navigationTransitionRef.current += 1;
@@ -491,17 +615,21 @@ const App: React.FC = () => {
     applyHash();
     window.addEventListener('hashchange', applyHash);
     return () => window.removeEventListener('hashchange', applyHash);
-  }, []);
+  }, [closeWorkingPeerPicker]);
 
   const navigateWorkingRoute = async (nextRoute: string[], nextMode?: ExplorerMode) => {
-    if (!journalService) return;
+    closeWorkingPeerPicker();
+    if (!journalService || !requesterJournalService) return;
     const transition = ++navigationTransitionRef.current;
     const nextHops = buildHopsForWorkingRoute(ledgerHops, nextRoute);
-    const nextRootIndex = appState.rootIndex >= 0 ? appState.rootIndex : 0;
+    const nextRootIndex = Number.parseInt(
+      nextHops[0]?.snapshot ?? String(appState.rootIndex), 10,
+    );
     let roots: { stage: ExplorerSelection; ledger: ExplorerSelection };
     try {
       roots = await terminalRootSelections(
-        new JournalService(appState.endpoint), nextRoute, nextHops, nextRootIndex,
+        new JournalService(appState.endpoint), requesterJournalService,
+        nextRoute, nextHops, nextRootIndex,
       );
     } catch (error) {
       if (transition === navigationTransitionRef.current) {
@@ -526,24 +654,57 @@ const App: React.FC = () => {
   };
 
   const handleModeChange = (nextMode: ExplorerMode) => {
-    if (nextMode === 'stage' || nextMode === 'ledger') {
-      setMode(nextMode);
-      if (nextMode === 'stage') {
-        setStageSelection((prev) => prev ?? { path: stageRootPath, type: 'directory' });
-      } else {
-        setLedgerSelection((prev) => prev ?? { path: ledgerRootPath, type: 'directory' });
-        setLedgerView('content');
+    if (nextMode === 'admin' && adminStatus !== 'admin') return;
+    closeWorkingPeerPicker();
+    const transition = ++navigationTransitionRef.current;
+    setWorkingRoute([]);
+    setStageExpandedNodes(new Set());
+    setLedgerExpandedNodes(new Set());
+    setLedgerView('content');
+
+    if (nextMode === 'stage') {
+      const local = getInitialLedgerHops(appState.rootIndex);
+      if (appState.rootIndex >= 0) {
+        local[0] = { ...local[0], snapshot: String(appState.rootIndex), maximum: appState.rootIndex };
       }
+      setLedgerHops(local);
+      setStageSelection({ path: STAGE_ROOT_PATH, type: 'directory' });
+      setMode('stage');
       setAppState((prev) => ({ ...prev, error: null }));
       return;
     }
-    if (workingRoute.length > 0 && (nextMode === 'access' || nextMode === 'admin')) {
+
+    if (nextMode === 'ledger') {
+      setMode('ledger');
+      setLedgerSelection(null);
+      setLoadingState(true, null);
+      void resolveLedgerHopIndexes(
+        appState.endpoint, getInitialLedgerHops(appState.rootIndex), false,
+      ).then(async (nextHops) => {
+        const nextRootIndex = Number.parseInt(nextHops[0].snapshot, 10);
+        const nextSelection = await accessibleRemoteSelection(
+          new JournalService(appState.endpoint), null, [nextRootIndex, '*state*'],
+        );
+        if (transition !== navigationTransitionRef.current) return;
+        setLedgerHops(nextHops);
+        setLedgerSelection(nextSelection);
+        setAppState((prev) => ({
+          ...prev, rootIndex: nextRootIndex, isLoading: false, error: null,
+        }));
+      }).catch((error) => {
+        if (transition === navigationTransitionRef.current) {
+          setAppState((prev) => ({
+            ...prev,
+            isLoading: false,
+            error: `Synchronization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }));
+        }
+      });
       return;
     }
-    if (nextMode === 'admin' && adminStatus !== 'admin') {
-      return;
-    }
+
     setMode(nextMode);
+    setLedgerHops(getInitialLedgerHops(appState.rootIndex));
     if (nextMode === 'admin') setAdminRefreshKey((prev) => prev + 1);
     setAppState((prev) => ({ ...prev, error: null }));
   };
@@ -634,35 +795,20 @@ const App: React.FC = () => {
     return value.trim();
   };
 
-  const handleStageCreateFile = async (path: JournalPath) => {
-    if (!journalService) {
-      return;
-    }
-    const name = promptForName('Enter document name:');
-    if (!name) {
-      return;
-    }
-    try {
-      const createdPath = buildStageChildPath(path, name);
-      await journalService.createFile(path, name);
-      setStageSelection({
-        path: createdPath,
-        type: 'file',
-      });
-      setStageExpandedNodes((prev) => {
-        const next = new Set(prev);
-        next.add(stagePathToTreeNodeId(path));
-        next.add(stagePathToTreeNodeId(createdPath));
-        return next;
-      });
-      setStageRefreshKey((prev) => prev + 1);
-      setAppState((prev) => ({ ...prev, error: null }));
-    } catch (error) {
-      setAppState((prev) => ({
-        ...prev,
-        error: `Create document failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      }));
-    }
+  const handleStagePut = async (name: string, input: ResourcePutInput) => {
+    if (!journalService || !putParentPath) throw new Error('Put location is unavailable');
+    const createdPath = buildStageChildPath(putParentPath, name);
+    const created = await journalService.putResource(createdPath, input);
+    if (!created) throw new Error('Create conflict: the target already exists');
+    setStageSelection({ path: createdPath, type: 'file' });
+    setStageExpandedNodes((prev) => {
+      const next = new Set(prev);
+      next.add(stagePathToTreeNodeId(putParentPath));
+      next.add(stagePathToTreeNodeId(createdPath));
+      return next;
+    });
+    setStageRefreshKey((prev) => prev + 1);
+    setAppState((prev) => ({ ...prev, error: null }));
   };
 
   const handleStageCreateDirectory = async (path: JournalPath) => {
@@ -727,11 +873,14 @@ const App: React.FC = () => {
     if (!journalService) return;
     const transition = ++navigationTransitionRef.current;
     const rootIndex = appState.rootIndex >= 0 ? appState.rootIndex : 0;
-    const rootPath = buildLedgerStateRootPath(nextHops, rootIndex);
+    const rootPath: JournalPath = [
+      ...buildLedgerRouteBasePath(nextHops.slice(0, 1), rootIndex),
+      '*state*',
+    ];
     try {
       const nextSelection = await accessibleRemoteSelection(
-        journalService,
-        rebaseLedgerSelection(ledgerSelection, nextHops, rootIndex),
+        requesterJournalService ?? journalService,
+        rebaseLedgerSelection(ledgerSelection, nextHops, rootPath[0] as number),
         rootPath,
       );
       if (transition !== navigationTransitionRef.current) return;
@@ -752,40 +901,36 @@ const App: React.FC = () => {
 
   const handleLedgerSnapshotChange = (index: number, value: string) => {
     const nextHops = ledgerHops.map((hop, hopIndex) =>
-      hopIndex === index ? { ...hop, snapshot: value } : hop,
+      hopIndex === index
+        ? { ...hop, snapshot: normalizeSnapshotInput(value, hop.maximum ?? appState.rootIndex) }
+        : hop,
     );
     void applyLedgerHops(nextHops);
   };
 
   const handleLedgerStepSnapshot = (index: number, direction: 'older' | 'newer') => {
-    const nextHops = ledgerHops.map((hop, hopIndex) => {
-      if (hopIndex !== index) return hop;
-      if (index > 0) {
-        return { ...hop, snapshot: stepSnapshotValue(hop.snapshot, direction) };
-      }
-
-      const current = hop.snapshot.trim().toLowerCase() === LEDGER_LATEST
-        ? appState.rootIndex
-        : Number.parseInt(hop.snapshot, 10);
-      const safeCurrent = Number.isNaN(current) ? appState.rootIndex : current;
-      if (direction === 'older') {
-        return { ...hop, snapshot: String(Math.max(0, safeCurrent - 1)) };
-      }
-      return safeCurrent + 1 >= appState.rootIndex
-        ? { ...hop, snapshot: LEDGER_LATEST }
-        : { ...hop, snapshot: String(safeCurrent + 1) };
-    });
+    const nextHops = ledgerHops.map((hop, hopIndex) => hopIndex === index
+      ? {
+          ...hop,
+          snapshot: stepSnapshotValue(
+            hop.snapshot, hop.maximum ?? appState.rootIndex, direction,
+          ),
+        }
+      : hop);
     void applyLedgerHops(nextHops);
   };
 
   const handleOpenWorkingPeerPicker = async () => {
     if (!journalService) return;
+    const request = ++peerPickerRequestRef.current;
     try {
       const peers = await journalService.getBridges(
         workingRoute.length > 0 ? 'working' : undefined,
       );
+      if (request !== peerPickerRequestRef.current) return;
       setWorkingPeerChoices(peers.map((peer) => peer.name));
     } catch (error) {
+      if (request !== peerPickerRequestRef.current) return;
       setAppState((prev) => ({
         ...prev,
         error: `Bridge lookup failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -794,34 +939,21 @@ const App: React.FC = () => {
   };
 
   const handleChooseWorkingPeer = async (peerName: string) => {
+    closeWorkingPeerPicker();
     const transition = ++navigationTransitionRef.current;
-    let originIndex = appState.rootIndex;
-    const originLatest = ledgerHops[0]?.snapshot.trim().toLowerCase() === LEDGER_LATEST;
-    if (originLatest) {
-      if (!journalService) return;
-      try {
-        originIndex = Math.max(0, (await journalService.getLocalSize()) - 1);
-        if (transition !== navigationTransitionRef.current) return;
-        setAppState((prev) => ({ ...prev, rootIndex: originIndex, error: null }));
-      } catch (error) {
-        if (transition === navigationTransitionRef.current) {
-          setAppState((prev) => ({
-            ...prev,
-            error: `Synchronization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          }));
-        }
-        return;
-      }
-    }
-
     const nextRoute = [...workingRoute, peerName];
-    const nextHops = buildHopsForWorkingRoute(ledgerHops, nextRoute);
-    const nextRootIndex = originIndex >= 0 ? originIndex : 0;
-    if (!journalService) return;
+    if (!journalService || !requesterJournalService) return;
+    let nextHops = buildHopsForWorkingRoute(ledgerHops, nextRoute);
+    let nextRootIndex = appState.rootIndex;
     let roots: { stage: ExplorerSelection; ledger: ExplorerSelection };
     try {
+      nextHops = await resolveLedgerHopIndexes(appState.endpoint, nextHops, false);
+      nextRootIndex = Number.parseInt(
+        nextHops[0]?.snapshot ?? String(appState.rootIndex), 10,
+      );
       roots = await terminalRootSelections(
-        new JournalService(appState.endpoint), nextRoute, nextHops, nextRootIndex,
+        new JournalService(appState.endpoint), requesterJournalService,
+        nextRoute, nextHops, nextRootIndex,
       );
     } catch (error) {
       if (transition === navigationTransitionRef.current) {
@@ -840,7 +972,11 @@ const App: React.FC = () => {
     setLedgerSelection(roots.ledger);
     setStageExpandedNodes(new Set());
     setLedgerExpandedNodes(new Set());
-    setAppState((prev) => ({ ...prev, error: null }));
+    setAppState((prev) => ({
+      ...prev,
+      rootIndex: nextHops[0]?.maximum ?? nextRootIndex,
+      error: null,
+    }));
   };
 
   const handleRemoveWorkingHop = () => {
@@ -851,30 +987,22 @@ const App: React.FC = () => {
     void navigateWorkingRoute(workingRoute.slice(0, index));
   };
 
-  useEffect(() => {
-    if (workingRoute.length > 0 && (mode === 'access' || mode === 'admin')) {
-      setMode('ledger');
-    }
-  }, [workingRoute, mode]);
-
-  useEffect(() => {
-    setLedgerHops((prev) =>
-      prev.map((hop, index) => {
-        if (index === 0) {
-          return hop;
-        }
-
-        return { ...hop, snapshot: normalizeSnapshotInput(hop.snapshot) };
-      }),
-    );
-  }, [appState.rootIndex]);
+  const ledgerPinPath = useMemo<JournalPath | null>(() => {
+    if (mode !== 'ledger' || !ledgerSelection || ledgerSelection.type === 'directory') return null;
+    if (ledgerHops.length <= 1) return ledgerSelection.path;
+    return [
+      ...buildLedgerRouteBasePath(ledgerHops, appState.rootIndex),
+      ...ledgerSelection.path.slice(1),
+    ];
+  }, [mode, ledgerSelection, ledgerHops, appState.rootIndex]);
 
   useEffect(() => {
     setLedgerView('content');
   }, [ledgerSelection]);
 
   useEffect(() => {
-    if (isApplyingHashRef.current || (mode === 'ledger' && appState.rootIndex < 0)) {
+    if (sessionStatus !== 'ready' || isApplyingHashRef.current
+        || (mode === 'ledger' && appState.rootIndex < 0)) {
       return;
     }
 
@@ -894,7 +1022,7 @@ const App: React.FC = () => {
         `${window.location.pathname}${window.location.search}${nextHash}`,
       );
     }
-  }, [mode, stageSelection, ledgerSelection, ledgerRootPath, ledgerHops, appState.rootIndex]);
+  }, [sessionStatus, mode, stageSelection, ledgerSelection, ledgerRootPath, ledgerHops, appState.rootIndex]);
 
   const handleContentSelection = (selection: ExplorerSelection) => {
     const contentMode = mode === 'stage' ? 'stage' : 'ledger';
@@ -967,31 +1095,39 @@ const App: React.FC = () => {
         error={appState.error}
         mode={mode}
         isAdmin={adminStatus === 'admin'}
-        localOnlyDisabled={workingRoute.length > 0}
+        localOnlyDisabled={false}
         theme={theme}
         onModeChange={handleModeChange}
         onThemeToggle={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
+        onSignOut={closeWorkingPeerPicker}
       />
 
-      <WorkingRouteBar
-        route={workingRoute}
-        peerChoices={workingPeerChoices}
-        onRemoveHop={handleRemoveWorkingHop}
-        onSelectHop={handleSelectWorkingHop}
-        onOpenPeerPicker={handleOpenWorkingPeerPicker}
-        onClosePeerPicker={() => setWorkingPeerChoices(null)}
-        onChoosePeer={handleChooseWorkingPeer}
-      />
+      {mode === 'stage' && (
+        <WorkingRouteBar
+          route={workingRoute}
+          peerChoices={workingPeerChoices}
+          onRemoveHop={handleRemoveWorkingHop}
+          onSelectHop={handleSelectWorkingHop}
+          onOpenPeerPicker={handleOpenWorkingPeerPicker}
+          onClosePeerPicker={closeWorkingPeerPicker}
+          onChoosePeer={handleChooseWorkingPeer}
+        />
+      )}
 
       {mode === 'ledger' && (
         <LedgerRouteBar
           hops={ledgerHops}
+          peerChoices={workingPeerChoices}
           rootIndex={appState.rootIndex}
           onSynchronize={synchronizeLedger}
           isSynchronizing={appState.isLoading}
           onSnapshotChange={handleLedgerSnapshotChange}
           onStepSnapshot={handleLedgerStepSnapshot}
-          readOnlyRoute
+          onRemoveHop={handleRemoveWorkingHop}
+          onSelectHop={handleSelectWorkingHop}
+          onOpenPeerPicker={handleOpenWorkingPeerPicker}
+          onClosePeerPicker={closeWorkingPeerPicker}
+          onChoosePeer={handleChooseWorkingPeer}
         />
       )}
 
@@ -1028,11 +1164,15 @@ const App: React.FC = () => {
           <ExplorerTree
             mode={mode}
             rootPath={mode === 'stage' ? stageRootPath : ledgerRootPath}
+            retainedRootPath={retainedRootPath}
             selected={mode === 'stage' ? stageSelection : ledgerSelection}
             expandedNodes={mode === 'stage' ? stageExpandedNodes : ledgerExpandedNodes}
             journalService={journalService}
+            requesterJournalService={requesterJournalService}
             currentUser={sessionName}
-            refreshKey={mode === 'stage' ? stageRefreshKey : ledgerRefreshKey}
+            refreshKey={mode === 'stage'
+              ? stageRefreshKey + stageTreeRefreshKey
+              : ledgerRefreshKey}
             onExpandedNodesChange={mode === 'stage' ? setStageExpandedNodes : setLedgerExpandedNodes}
             onSelect={(selection) => {
               if (mode === 'stage') {
@@ -1048,14 +1188,17 @@ const App: React.FC = () => {
           <ExplorerContent
             mode={mode}
             selection={mode === 'stage' ? stageSelection : ledgerSelection}
-            journalService={journalService}
+            journalService={contentJournalService}
             refreshKey={mode === 'stage' ? stageRefreshKey : ledgerRefreshKey}
             ledgerView={ledgerView}
             stageReadOnly={mode === 'stage' && isStageNamespaceRoot(stageSelection)}
+            readPath={mode === 'ledger' ? ledgerReadPath : null}
+            pinJournalService={requesterJournalService}
+            pinPath={ledgerPinPath}
             onLedgerViewToggle={() =>
               setLedgerView((prev) => (prev === 'content' ? 'proof' : 'content'))
             }
-            onStageCreateFile={handleStageCreateFile}
+            onStageCreateFile={async (path) => setPutParentPath(path)}
             onStageCreateDirectory={handleStageCreateDirectory}
             onStageUploadFile={handleStageUploadFile}
             onStageRename={handleRenameStageNode}
@@ -1065,6 +1208,12 @@ const App: React.FC = () => {
         </div>
       </div>
       )}
+
+      <PutResourceModal
+        open={putParentPath !== null}
+        onClose={() => setPutParentPath(null)}
+        onSubmit={handleStagePut}
+      />
     </div>
   );
 };

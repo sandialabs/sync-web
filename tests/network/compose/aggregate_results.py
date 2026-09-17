@@ -58,12 +58,12 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
     requests_succeeded_total = sum(
         item.get("requests_succeeded_total", 0) for item in snapshots
     )
-    get_requests_total = sum(item.get("get_requests_total", 0) for item in snapshots)
-    set_requests_total = sum(item.get("set_requests_total", 0) for item in snapshots)
-    get_latency_sum = sum(item.get("get_latency_sum", 0.0) for item in snapshots)
-    get_latency_count = sum(item.get("get_latency_count", 0) for item in snapshots)
-    set_latency_sum = sum(item.get("set_latency_sum", 0.0) for item in snapshots)
-    set_latency_count = sum(item.get("set_latency_count", 0) for item in snapshots)
+    use_requests_total = sum(item.get("use_requests_total", 0) for item in snapshots)
+    put_requests_total = sum(item.get("put_requests_total", 0) for item in snapshots)
+    use_latency_sum = sum(item.get("use_latency_sum", 0.0) for item in snapshots)
+    use_latency_count = sum(item.get("use_latency_count", 0) for item in snapshots)
+    put_latency_sum = sum(item.get("put_latency_sum", 0.0) for item in snapshots)
+    put_latency_count = sum(item.get("put_latency_count", 0) for item in snapshots)
     activity_cycles_total = sum(item.get("activity_cycles_total", 0) for item in snapshots)
     activity_requests_total = sum(
         item.get("activity_requests_total", 0) for item in snapshots
@@ -83,11 +83,11 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
         for item in snapshots
     )
     requests_per_second = sum(item.get("requests_per_second", 0.0) for item in snapshots)
-    get_requests_per_second = sum(
-        item.get("get_requests_per_second", 0.0) for item in snapshots
+    use_requests_per_second = sum(
+        item.get("use_requests_per_second", 0.0) for item in snapshots
     )
-    set_requests_per_second = sum(
-        item.get("set_requests_per_second", 0.0) for item in snapshots
+    put_requests_per_second = sum(
+        item.get("put_requests_per_second", 0.0) for item in snapshots
     )
     activity_cycles_per_second = sum(
         item.get("activity_cycles_per_second", 0.0) for item in snapshots
@@ -144,17 +144,17 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
         "requests_total": requests_total,
         "requests_failed_total": requests_failed_total,
         "requests_succeeded_total": requests_succeeded_total,
-        "get_requests_total": get_requests_total,
-        "set_requests_total": set_requests_total,
-        "get_latency_sum": get_latency_sum,
-        "get_latency_count": get_latency_count,
-        "set_latency_sum": set_latency_sum,
-        "set_latency_count": set_latency_count,
-        "average_get_latency_seconds": (
-            get_latency_sum / get_latency_count if get_latency_count > 0 else 0.0
+        "use_requests_total": use_requests_total,
+        "put_requests_total": put_requests_total,
+        "use_latency_sum": use_latency_sum,
+        "use_latency_count": use_latency_count,
+        "put_latency_sum": put_latency_sum,
+        "put_latency_count": put_latency_count,
+        "average_use_latency_seconds": (
+            use_latency_sum / use_latency_count if use_latency_count > 0 else 0.0
         ),
-        "average_set_latency_seconds": (
-            set_latency_sum / set_latency_count if set_latency_count > 0 else 0.0
+        "average_put_latency_seconds": (
+            put_latency_sum / put_latency_count if put_latency_count > 0 else 0.0
         ),
         "activity_cycles_total": activity_cycles_total,
         "activity_requests_total": activity_requests_total,
@@ -164,8 +164,8 @@ def aggregate_snapshots(snapshots, now_epoch, previous=None):
         "activity_path_operations_success_total": activity_path_operations_success_total,
         "activity_path_operation_success_rate": activity_path_operation_success_rate,
         "requests_per_second": requests_per_second,
-        "get_requests_per_second": get_requests_per_second,
-        "set_requests_per_second": set_requests_per_second,
+        "use_requests_per_second": use_requests_per_second,
+        "put_requests_per_second": put_requests_per_second,
         "activity_cycles_per_second": activity_cycles_per_second,
         "activity_requests_per_second": activity_requests_per_second,
         "activity_path_operations_per_second": activity_path_operations_per_second,

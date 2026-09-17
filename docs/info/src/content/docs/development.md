@@ -44,7 +44,7 @@ Periodic stepping:
 
 - configured by `--step` and `--period`
 - used in the compose stack to invoke `*step*` continuously
-- the outer step is non-mutating: it waits for the retryable internal commit and, only when that commit created a new index, issues one detached `call!` for `(*state* *periodic*)`; this prevents unchanged steps and optimistic retries from duplicating an index launch
+- the outer step is non-mutating: it waits for the retryable internal commit and, only when that commit created a new index, issues one detached `run!` for `(*state* *periodic*)`; this prevents unchanged steps and optimistic retries from duplicating an index launch
 
 ### Language
 
@@ -144,7 +144,7 @@ These signatures are sourced from primitive registrations in `journal/src/evalua
 | `sync-call` | `(sync-call query blocking? id)` | Evaluate query against target record (or current record if `id` omitted). |
 | `sync-eval` | `(sync-eval node)` | Instantiate code carried by a sync node in the caller's current environment. |
 | `sync-let` | `(sync-let ((name value) ...) body ...)` | Evaluate shared self-coded computation in an isolated capability environment with copied inert bindings/results. |
-| `sync-http` | `(sync-http method url . data)` | Perform HTTP request (`get` or `post`). |
+| `sync-http` | `(sync-http method url . data)` | Perform HTTP request (blank read-only `use!` or `post`). |
 | `sync-remote` | `(sync-remote url data)` | Perform remote post request with payload. |
 | `crypto-generate` | `(crypto-generate seed)` | Derive public/private key pair from seed bytes. |
 | `crypto-sign` | `(crypto-sign private-key message)` | Sign message with private key. |
@@ -195,7 +195,7 @@ Public API (`standard.scm`):
 | `deep-merge!` | `(deep-merge! self object-source object-target)` | Merge digest-equivalent object structures. |
 | `deep-copy!` | `(deep-copy! self object path-source path-target)` | Copy value from one nested path to another. |
 | `deep-call` | `(deep-call self object path function)` | Call a function at a nested path without rebuilding parent state. |
-| `deep-call!` | `(deep-call! self object path function)` | Call a function at a nested path and persist resulting state. |
+| `deep-call!` | `(deep-call! self object path callback)` | Call a callback once and return `(result successor-node)` with the complete rebuilt root. |
 | `serialize` | `(serialize self node query)` | Build compact proof-oriented serialization using request-local primitive tracing. |
 | `deserialize` | `(deserialize self serialization)` | Rebuild sync-node structure from serialization output. |
 
@@ -207,10 +207,10 @@ Public API (`tree.scm`):
 | --- | --- | --- |
 | `obj->node` | `(obj->node self obj)` | Encode Lisp/runtime value into sync-node storage representation. |
 | `node->obj` | `(node->obj self node)` | Decode sync-node storage representation into runtime value. |
-| `get` | `(get self path)` | Read value at key-path; returns value, `(nothing)`, `(unknown)`, or a directory listing. |
+| blank read-only `use!` | `(get self path)` | Read value at key-path; returns value, `(nothing)`, `(unknown)`, or a directory listing. |
 | `equal?` | `(equal? self source path)` | Exact structural equality check between two paths. |
 | `equivalent?` | `(equivalent? self source path)` | Digest-equivalence check between two paths. |
-| `set!` | `(set! self path value)` | Write value at a nonempty path, delete with `(nothing)`, or clear the complete map with `(set! self '() '(nothing))`; the empty path cannot store a scalar or object. |
+| `put!` | `(set! self path value)` | Write value at a nonempty path, delete with `(nothing)`, or clear the complete map with `(set! self '() '(nothing))`; the empty path cannot store a scalar or object. |
 | `copy!` | `(copy! self source path)` | Copy source to target; a missing source applies normal `(nothing)` deletion semantics, and only a directory source may replace the complete map at the empty path. |
 | `prune!` | `(prune! self path keep-key?)` | Prune proof/state detail at path. |
 | `slice!` | `(slice! self path)` | Slice state to keep proof for path and cut unrelated branches. |
@@ -224,13 +224,13 @@ Public API (`linear-chain.scm`):
 | Method | Signature | Description |
 | --- | --- | --- |
 | `*init*` | `(*init* self)` | Initialize empty chain state. |
-| `get` | `(get self index)` | Return entry at normalized index. |
+| blank read-only `use!` | `(get self index)` | Return entry at normalized index. |
 | `previous` | `(previous self index)` | Build proof chain ending at index. |
 | `digest` | `(digest self (index ...))` | Return digest for proof chain at index. |
 | `size` | `(size self)` | Return chain length. |
 | `index` | `(index self index~)` | Normalize/index-check external index input. |
 | `push!` | `(push! self data)` | Append entry to chain. |
-| `set!` | `(set! self index data)` | Replace entry at index. |
+| `put!` | `(set! self index data)` | Replace entry at index. |
 | `slice!` | `(slice! self index)` | Slice proof view around index. |
 | `prune!` | `(prune! self index)` | Prune proof detail at index. |
 | `truncate!` | `(truncate! self index)` | Hide entries through the inclusive index while preserving the chain digest. |
@@ -244,11 +244,11 @@ Public API (`log-chain.scm`):
 | `*init*` | `(*init* self)` | Initialize empty log-structured chain state. |
 | `size` | `(size self)` | Return chain length. |
 | `index` | `(index self index~)` | Normalize/index-check external index input. |
-| `get` | `(get self index)` | Return entry at normalized index. |
+| blank read-only `use!` | `(get self index)` | Return entry at normalized index. |
 | `previous` | `(previous self index)` | Build proof chain ending at index. |
 | `digest` | `(digest self (index ...))` | Return digest for proof chain at index. |
 | `push!` | `(push! self data)` | Append entry to chain. |
-| `set!` | `(set! self index data)` | Replace entry at index. |
+| `put!` | `(set! self index data)` | Replace entry at index. |
 | `slice!` | `(slice! self index)` | Slice proof view around index. |
 | `prune!` | `(prune! self index)` | Prune proof detail at index. |
 | `truncate!` | `(truncate! self index)` | Hide entries through the inclusive index while preserving the chain digest. |
@@ -264,18 +264,20 @@ Public API (`ledger.scm`):
 | `descriptor` | `(descriptor self index)` | Return the public descriptor for a selected local state. |
 | `size` | `(size self)` | Return permanent chain length. |
 | `read` | `(read self index supplied-object)` | Anchor an exact partial chain against local history. |
-| `get` | `(get self path)` | Read a staged Tree-native value. |
-| `get-batch` | `(get-batch self paths)` | Read ordered staged values from one Ledger snapshot. |
-| `set!` | `(set! self path value expected? expected)` | Stage a byte-vector write/deletion, optionally after an exact snapshot comparison. |
-| `set-batch!` | `(set-batch! self changes)` | Validate every `(path value [expected])`, compare expectations against one snapshot, and atomically apply replacements in order. |
-| `resolve` | `(resolve self path pinned? proof? head ancestor?)` | Resolve committed content with optional retention, proof, prepared-head, and ancestor projection context. |
-| `resolve-batch` | `(resolve-batch self paths pinned? heads ancestors proof?)` | Resolve ordered committed paths and optionally produce one union proof for a compatible group. |
+| `use!` | `(use! self path method arguments read-only?)` | Exercise staged inert/object content; read-only mode always discards successors. |
+| `use-batch!` | `(use-batch! self requests read-only?)` | Exercise ordered staged requests with one scalar persistence mode. |
+| `put!` | `(put! self path value object? expected? expected)` | Stage inert content or an object shell after an optional snapshot comparison. |
+| `put-batch!` | `(put-batch! self changes)` | Validate every `(path value [expected])`, compare expectations against one snapshot, and atomically apply replacements in order. |
+| `retrieve` | `(retrieve self path pinned? proof? head ancestor?)` | Retrieve committed content with optional retention, proof, prepared-head, and ancestor projection context. |
+| `retrieve-batch` | `(retrieve-batch self paths pinned? heads ancestors proof?)` | Retrieve ordered committed paths and optionally produce one union proof for a compatible group. |
 | `trace` | `(trace self path head)` | Serialize a proof from local history or a prepared head. |
 | `trace-batch` | `(trace-batch self paths head)` | Serialize one union-of-accesses proof for same-anchor paths. |
 | `pin!` | `(pin! self path proof)` | Pin a local path, optionally from a prepared proof response. |
 | `pin-batch!` | `(pin-batch! self paths proofs)` | Atomically pin ordered paths; shared prepared proofs reuse one anchored immutable head. |
 | `unpin!` | `(unpin! self path)` | Remove a previously pinned path. |
 | `unpin-batch!` | `(unpin-batch! self paths)` | Atomically apply ordered digest-preserving proof cuts. |
+| `prune!` | `(prune! self path)` | Remove one canonical committed path from temporary and permanent retention. |
+| `prune-batch!` | `(prune-batch! self paths)` | Prepare complete path-union cuts for both retained fields, then install both or neither. |
 | `pinned?` | `(pinned? self path)` | Test whether permanent retention contains a path. |
 | `signed-head` | `(signed-head self known-index)` | Return a signed synchronization head. |
 | `peer-head` | `(peer-head self alias index)` | Return committed peer evidence or an opaque peer checkpoint. |
@@ -303,7 +305,7 @@ peer object or an external API independent of Interface.
 | `bridge-synchronize!` | `(bridge-synchronize! self ledger alias)` | Prepare initiator-side synchronization. |
 | `step!` | `(step! self ledger)` | Return synchronization work for the permanent initiator role. |
 | `route` | `(route self ledger request)` | Construct exact committed terminal routing material. |
-| `invoke` | `(invoke self ledger operation arguments route history identity)` | Sign, deliver, and verify federated `get`, `set!`, `get-batch`, `set-batch!`, or `resolve`. |
+| `invoke` | `(invoke self ledger operation arguments route history identity)` | Sign, deliver, and verify federated blank read-only `use!`, `put!`, `use-batch!`, `put-batch!`, independently path-scoped `run!`, or `retrieve`. |
 | `authenticate` | `(authenticate self ledger invocation)` | Anchor and authenticate a terminal invocation before local authorization. |
 
 #### Authorization Class
@@ -316,7 +318,7 @@ passes canonical principals and terminal-local history context into policy.
 | `authorizations` | `(authorizations self (principal #f))` | List rules visible to an owning local principal or administrator. |
 | `authorize!` | `(authorize! self rule)` | Add one validated path-scoped rule. |
 | `deauthorize!` | `(deauthorize! self rule-or-selector)` | Remove an exact rule or bridge-prefix selection. |
-| `authorized?` | `(authorized? self principal key-index path operation)` | Return `direct`, `ancestor`, or `#f` for grantable `get`, `set!`, or `resolve` operations. `call!` authority is enforced only by Interface administrator membership. |
+| `authorized?` | `(authorized? self principal key-index path operation)` | Return `direct`, `ancestor`, or `#f` for grantable blank read-only `use!`, `put!`, `run!`, or `retrieve` operations. Namespace ownership and blank read-only `use!` do not imply `run!`; Interface administrators retain their direct bypass. |
 
 ## Testing
 
@@ -342,7 +344,10 @@ journal/target/release/records-test --suite records/tests/suite.toml
 
 These tests validate class behavior in fresh isolated evaluator processes. The
 same suite also runs deterministic cross-journal Interface cases under
-`records/tests/interface`.
+`records/tests/interface`, including two-hop `run!` grant/use/revoke and
+post-revocation denial plus original-caller checks for nested operations. This
+is Records coverage, not a claim that browser, HTTP, or social-agent suites run
+that scenario.
 
 ### Service Stack Smoke Tests
 
@@ -456,10 +461,10 @@ Generator defaults:
 - `INTERFACE_SECRET=interface-password`
 - `ADMIN_PASSWORD=admin-pass`
 - `CONNECTIVITY=2`
-- `PERIOD=2`
+- `PERIOD=8`
 - `WINDOW=1024`
 - `SIZE=32`
-- `ACTIVITY=4` (seconds between controlled activity cycles; `0` runs maximum-throughput saturation traffic)
+- `ACTIVITY=8` (seconds between controlled activity cycles; `0` runs maximum-throughput saturation traffic)
 - `BATCH` unset (optional positive batch size for continuous activity)
 - `WORDS=8`
 

@@ -48,7 +48,7 @@ class HelloWorldUserTests(unittest.TestCase):
 
         self.assertEqual(len(client.calls), 1)
         path, payload, headers = client.calls[0]
-        self.assertEqual(path, "/api/v1/general/set")
+        self.assertEqual(path, "/api/v1/general/put")
         self.assertEqual(payload["path"], ["*state*", "locust", "key-111"])
         self.assertEqual(payload["value"], "val-222")
         self.assertTrue(payload["expression?"])

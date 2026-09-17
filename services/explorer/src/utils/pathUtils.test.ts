@@ -5,7 +5,20 @@ import {
   getBasePath,
   buildVersionPath,
   getVersionAtTab,
+  pathSegmentIdentity,
 } from './pathUtils';
+
+describe('pathSegmentIdentity', () => {
+  it('distinguishes integer keys from symbols containing the integer tag', () => {
+    expect(pathSegmentIdentity(123)).not.toBe(pathSegmentIdentity('integer:123'));
+  });
+
+  it('distinguishes Scheme string keys from symbols containing the string tag', () => {
+    expect(pathSegmentIdentity({ '*type/string*': 'abc' })).not.toBe(
+      pathSegmentIdentity('string:"abc"'),
+    );
+  });
+});
 
 describe('encodePathToHash', () => {
   it('should encode a simple path', () => {
@@ -100,6 +113,11 @@ describe('getBasePath', () => {
     const result = getBasePath(path);
     expect(result).toBe(JSON.stringify(['alice', '*state*', 'data']));
   });
+
+  it('preserves integer terminal keys while removing history selectors', () => {
+    const path = [-1, 'alice', -2, '*state*', 'typed', 123];
+    expect(getBasePath(path)).toBe(JSON.stringify(['alice', '*state*', 'typed', 123]));
+  });
 });
 
 describe('buildVersionPath', () => {
@@ -119,6 +137,12 @@ describe('buildVersionPath', () => {
     const path = [-1, 'alice', -1, '*state*', 'data'];
     const result = buildVersionPath(path, 1, -4);
     expect(result).toEqual([-1, 'alice', -4, '*state*', 'data']);
+  });
+
+  it('never treats an integer terminal key as a version selector', () => {
+    const path = [-1, '*state*', 'typed', 123];
+    expect(buildVersionPath(path, 1, -4)).toEqual(path);
+    expect(getVersionAtTab(path, 1)).toBeNull();
   });
 });
 

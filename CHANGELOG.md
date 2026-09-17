@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- **Retained federation retrieval** — Allows `retrieve` and `retrieve-batch` to use one explicit `$federation.route` as a terminal retention provider. The responder interprets committed paths locally, serves only permanently retained evidence under ordinary authorization, resolves each parent-relative `-1` to the greatest materialized index in its containing permanent Chain, exposes deterministic Chain inventories, and never searches for or contacts the attributed source. The terminal anchors proof construction to the exact permanent invocation head. The origin anchors the response proof, independently derives the same permanent selections from that proof, and uses richer same-root route evidence only for exact-path content verification.
+- **Chain inventories** — Adds read-only `indices` to current linear and log Chains with exact ascending materialized indexes and structural completeness; historical Chains negotiate the method or execute their own complete `size`/`get` fallback inside `sync-let`.
+- **Committed read indexes** — Added opt-in `index?` metadata to scalar and batch resolution so callers can capture the absolute local and per-hop indexes selected for a committed read without changing existing response shapes when omitted or false.
+- **Atomic staged copies** — Added `copy!` and `copy-batch!` Interface/Gateway operations for raw server-side file and directory copying from one pre-mutation staged snapshot, including optional target expectations, ordered duplicate handling, and same-terminal signed routing.
+- **Administrative history truncation** — Added Self-local administrator `truncate!` across both Chain implementations, Ledger permanent/temporary history, Interface, and Gateway. Inclusive positive/negative cutoffs release locally available history while preserving logical chain identity, numbering, retained suffix, staged state, and future appends.
+- **Administrative retained-path pruning** — Added Self-local administrator `prune!` and `prune-batch!` for idempotent leaf/directory removal from both temporary and permanent Ledger retention. Canonical committed paths include negative indexes; direct or ancestral committed `*crypto*` targets reject complete prune and unpin calls, and valid batches install their retained-field candidates atomically while preserving Stage and committed history identity, signatures, size, and numbering.
+- **Explicit staged-program authorization** — Added independent recursive path-scoped `call!` grants for authenticated local non-admin and federated route principals. Namespace ownership and `get` do not imply execution; nested operations preserve and recheck the original caller, while Root/configured local Interface administrators retain default authority. Bridge, configuration, access, retention, secret, window, periodic-configuration, and root-plane controls remain local, and 1.6 claims no deterministic execution meter.
+
+### Changed
+
+- **Unified retained Explorer tree** — Replaces the routed Ledger snapshot strip with one `State`/`Bridges` tree at the selected responder, including exact retained indexes, authorized nested State, recursive retained bridges, and route-preserving deep links.
+- **Typed Explorer paths** — Preserves integer, symbol, and Scheme-string terminal key identity from directory listing through selection and follow-up reads, with stable disambiguation for colliding labels.
+
+### Fixed
+
+- **Administrator JSON projection** — Projects the unchanged internal administrator principal list as an exact username-keyed JSON object, validates replacements atomically, and provides guarded Explorer removal controls.
+
 ## 1.5.0
 
 ### Added

@@ -1,4 +1,7 @@
-(lambda (scenario-src root-src standard-src chain-src tree-src ledger-src federation-src authorization-src interface-src)
+(lambda* (scenario-src root-src standard-src chain-src tree-src ledger-src federation-src authorization-src
+          interface-src (legacy-ledger-src #f) (legacy-federation-src #f)
+          (legacy-interface-src #f) (legacy-chain-src #f) (legacy-tree-src #f)
+          (legacy-standard-src #f) (legacy-authorization-src #f))
 
   (define submitted-actions '())
 
@@ -16,7 +19,8 @@
             (users '(alice))
             (admins '())
             (window 4)
-            (tick 0))
+            (tick 0)
+            (legacy? #f))
 
     (define native-scenario-submit scenario-submit)
     (define native-scenario-await scenario-await)
@@ -88,9 +92,19 @@
         (name ,(journal 'url))))
 
     (define (install-expression journal)
-      `(,interface-src ,(interface-config journal #t admins window)
-                       ',standard-src ',chain-src ',tree-src ',ledger-src
-                       ',federation-src ',authorization-src))
+      (if (and legacy?
+               (not (and legacy-ledger-src legacy-federation-src legacy-interface-src
+                         legacy-chain-src legacy-tree-src legacy-standard-src
+                         legacy-authorization-src)))
+          (error 'test-error "Legacy installation sources are unavailable"))
+      `(,(if legacy? legacy-interface-src interface-src)
+        ,(interface-config journal #t admins window)
+        ',(if legacy? legacy-standard-src standard-src)
+        ',(if legacy? legacy-chain-src chain-src)
+        ',(if legacy? legacy-tree-src tree-src)
+        ',(if legacy? legacy-ledger-src ledger-src)
+        ',(if legacy? legacy-federation-src federation-src)
+        ',(if legacy? legacy-authorization-src authorization-src)))
 
     ;; Interface installation is ordinary scheduled work, submitted before
     ;; scenario actions for each generated environment.
@@ -127,46 +141,87 @@
              (positionals (car split))
              (keywords (cadr split)))
         (case function
-          ((set!)
+          ((put! set!)
            (let ((arguments
-                  (cond ((>= (length positionals) 2)
+                  (cond ((and (= (length positionals) 1)
+                              (list? (car positionals))
+                              (pair? (car positionals))
+                              (pair? (caar positionals))
+                              (assoc 'path (car positionals)))
+                         (append (car positionals) keywords))
+                        ((>= (length positionals) 2)
                          (append `((path ,(car positionals))
                                    (value ,(cadr positionals))) keywords))
                         ((= (length positionals) 1)
                          (cons `(path ,(car positionals)) keywords))
                         ((assoc 'path keywords) keywords)
-                        (else (error 'argument-error "set! requires a path")))))
+                        (else (error 'argument-error "put! requires a path")))))
              (if (or (assoc 'expression? arguments)
                      (not (assoc 'value arguments)))
                  arguments
                  (cons '(expression? #t) arguments))))
-          ((get resolve)
+          ((use! get retrieve)
            (let ((arguments
-                  (cond ((pair? positionals)
+                  (cond ((and (= (length positionals) 1)
+                              (list? (car positionals))
+                              (pair? (car positionals))
+                              (pair? (caar positionals))
+                              (assoc 'path (car positionals)))
+                         (append (car positionals) keywords))
+                        ((pair? positionals)
                          (cons `(path ,(car positionals)) keywords))
                         ((assoc 'path keywords) keywords)
                         (else (error 'argument-error "~S requires a path" function)))))
-             (if (assoc 'expression? arguments)
-                 arguments
-                 (cons '(expression? #t) arguments))))
-          ((get-batch resolve-batch pin-batch! unpin-batch!)
+             (let ((arguments
+                    (if (assoc 'expression? arguments) arguments
+                        (cons '(expression? #t) arguments))))
+               (if (and (eq? function 'use!) (pair? positionals)
+                        (not (assoc 'read-only? arguments))
+                        (not (assoc 'method arguments)))
+                   (cons '(read-only? #t) arguments)
+                   arguments))))
+          ((use-batch!)
+           (let ((arguments
+                  (cond ((and (= (length positionals) 1)
+                              (list? (car positionals))
+                              (pair? (car positionals))
+                              (pair? (caar positionals))
+                              (eq? (caaar positionals) 'paths))
+                         (append (car positionals) keywords))
+                        ((pair? positionals)
+                         (cons `(paths ,(car positionals)) keywords))
+                        ((assoc 'paths keywords) keywords)
+                        (else (error 'argument-error "use-batch! requires named fields")))))
+             (let ((arguments
+                    (if (assoc 'expression? arguments) arguments
+                        (cons '(expression? #t) arguments))))
+               (if (and (pair? positionals)
+                        (not (and (= (length positionals) 1)
+                                  (list? (car positionals))
+                                  (pair? (car positionals))
+                                  (pair? (caar positionals))
+                                  (eq? (caaar positionals) 'paths)))
+                        (not (assoc 'read-only? arguments)))
+                   (cons '(read-only? #t) arguments)
+                   arguments))))
+          ((retrieve-batch pin-batch! unpin-batch! prune-batch!)
            (let ((arguments
                   (cond ((pair? positionals)
                          (cons `(paths ,(car positionals)) keywords))
                         ((assoc 'paths keywords) keywords)
                         (else (error 'argument-error "~S requires paths" function)))))
-             (if (and (memq function '(get-batch resolve-batch))
+             (if (and (eq? function 'retrieve-batch)
                       (not (assoc 'expression? arguments)))
                  (cons '(expression? #t) arguments)
                  arguments)))
-          ((call!)
+          ((run!)
            (cond ((>= (length positionals) 2)
                   (append `((path ,(car positionals))
                             (arguments ,(cadr positionals))) keywords))
                  ((and (assoc 'path keywords) (assoc 'arguments keywords)) keywords)
                  (else
-                  (error 'argument-error "call! requires a path and arguments list"))))
-          ((pin! unpin! delete-bridge!)
+                  (error 'argument-error "run! requires a path and arguments list"))))
+          ((pin! unpin! prune! delete-bridge!)
            (if (null? positionals)
                (error 'argument-error "~S requires one argument" function))
            (cons (list (if (eq? function 'delete-bridge!) 'name 'path)
@@ -186,7 +241,7 @@
             (anonymous? (eq? principal '*anonymous*)))
         (if (and root? (eq? function 'step!))
             `(*step* ,(origin 'root-secret))
-            (let* ((committed? (and (pair? route) (memq function '(resolve pin! unpin!))))
+            (let* ((committed? (and (pair? route) (memq function '(retrieve pin! unpin!))))
                    (indexes
                     (and committed?
                          (if (not (undefined? history)) history
@@ -402,7 +457,7 @@
               admins window clear?)))
 
     ;; Keep the harness helpers in the outlet and add only generated public names
-    ;; to a child environment. `varlet` can resolve values through that outlet.
+    ;; to a child environment. `varlet` can retrieve values through that outlet.
     (define environment (sublet (curlet)))
     (varlet environment '*journal* (make-principal '*journal*))
     (varlet environment '*anonymous* (make-principal '*anonymous*))
@@ -422,11 +477,12 @@
             (users '(alice))
             (admins '())
             (window 4)
-            (tick 0))
+            (tick 0)
+            (legacy? #f))
     (factory root-src standard-src chain-src tree-src ledger-src federation-src
              authorization-src interface-src :journals journals
              :journal-start journal-start :users users :admins admins
-             :window window :tick tick))
+             :window window :tick tick :legacy? legacy?))
 
   (define checks 0)
 

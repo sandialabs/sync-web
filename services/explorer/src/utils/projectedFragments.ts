@@ -1,5 +1,9 @@
 import { ExplorerMode, ExplorerSelection, JournalPath, LedgerHop } from '../types';
-import { LEDGER_LATEST, buildLedgerStateRootPath } from './ledgerRoute';
+import {
+  LEDGER_LATEST,
+  buildLedgerStateRootPath,
+  retainedLedgerRootPath,
+} from './ledgerRoute';
 
 const encodeSegments = (segments: string[], isDirectory: boolean): string => {
   const encoded = segments.map((segment) => encodeURIComponent(segment)).join('/');
@@ -42,7 +46,7 @@ const buildStageFragment = (
   const path = buildStagePath(selection);
   const suffix = path[0] === '*state*' ? path.slice(1).map(String) : [];
   if (ledgerHops.length <= 1) {
-    return encodeSegments(['stage', ...suffix], selection?.type !== 'file');
+    return encodeSegments(['stage', ...suffix], selection?.type === 'directory');
   }
 
   const segments = ['stage-route', normalizedSnapshot(ledgerHops[0].snapshot)];
@@ -50,7 +54,7 @@ const buildStageFragment = (
     segments.push('bridge', hop.name, normalizedSnapshot(hop.snapshot));
   });
   segments.push('state', ...suffix);
-  return encodeSegments(segments, selection?.type !== 'file');
+  return encodeSegments(segments, selection?.type === 'directory');
 };
 
 const getLedgerRootSnapshot = (hop: LedgerHop, rootIndex: number): string => {
@@ -59,20 +63,6 @@ const getLedgerRootSnapshot = (hop: LedgerHop, rootIndex: number): string => {
     return rootIndex >= 0 ? String(rootIndex) : '0';
   }
   return hop.snapshot;
-};
-
-const lastStateIndex = (path: JournalPath): number => path.lastIndexOf('*state*');
-
-const buildLedgerStateSuffix = (selection: ExplorerSelection | null, ledgerRootPath: JournalPath): string[] => {
-  const targetPath = selection?.path ?? ledgerRootPath;
-  const targetState = lastStateIndex(targetPath);
-  const rootState = lastStateIndex(ledgerRootPath);
-
-  if (targetState < 0 || rootState < 0) {
-    return [];
-  }
-
-  return targetPath.slice(targetState + 1).map(String);
 };
 
 const buildLedgerFragment = (
@@ -91,8 +81,18 @@ const buildLedgerFragment = (
     }
   }
 
-  segments.push('state', ...buildLedgerStateSuffix(selection, ledgerRootPath));
-  return encodeSegments(segments, selection?.type !== 'file');
+  const target = selection?.path ?? [...ledgerRootPath, '*state*'];
+  const retained = target.indexOf('*bridge*');
+  if (retained >= 0) {
+    segments.push('retained');
+    target.slice(retained).forEach((segment) => {
+      segments.push(segment === '*bridge*' ? 'bridge' : segment === '*state*' ? 'state' : String(segment));
+    });
+  } else {
+    const state = target.lastIndexOf('*state*');
+    segments.push('state', ...(state >= 0 ? target.slice(state + 1).map(String) : []));
+  }
+  return encodeSegments(segments, selection?.type === 'directory');
 };
 
 export const buildFragmentHash = (input: {
@@ -146,7 +146,7 @@ const isRootSnapshot = (value: string): boolean =>
   value === LEDGER_LATEST || (canonicalInteger(value) ?? -1) >= 0;
 
 const isBridgeSnapshot = (value: string): boolean =>
-  value === LEDGER_LATEST || (canonicalInteger(value) ?? 0) < 0;
+  value === LEDGER_LATEST || canonicalInteger(value) !== null;
 
 const parseStageFragment = (segments: string[], isDirectory: boolean) => {
   if (segments[0] === 'stage') {
@@ -209,26 +209,54 @@ const parseLedgerFragment = (segments: string[], isDirectory: boolean) => {
     snapshot: rootSnapshot,
   });
 
-  const path: JournalPath = [Number.parseInt(rootSnapshot, 10)];
-
   while (cursor < segments.length) {
     const segment = segments[cursor];
     if (segment === 'state') {
       const suffix = segments.slice(cursor + 1);
-      path.push('*state*', ...suffix);
       return {
         mode: 'ledger' as const,
         ledgerHops: hops,
         selection: {
-          path,
+          path: [Number.parseInt(rootSnapshot, 10), '*state*', ...suffix] as JournalPath,
           type: isDirectory || suffix.length === 0 ? 'directory' as const : 'file' as const,
         },
       };
     }
 
-    if (segment !== 'bridge' || cursor + 1 >= segments.length) {
-      return null;
+    if (segment === 'retained') {
+      const path: JournalPath = [
+        ...retainedLedgerRootPath(hops, Number.parseInt(rootSnapshot, 10)),
+      ];
+      cursor++;
+      while (cursor < segments.length) {
+        if (segments[cursor] === 'state') {
+          path.push('*state*', ...segments.slice(cursor + 1));
+          return {
+            mode: 'ledger' as const,
+            ledgerHops: hops,
+            selection: {
+              path,
+              type: isDirectory || cursor + 1 === segments.length
+                ? 'directory' as const : 'file' as const,
+            },
+          };
+        }
+        if (segments[cursor] !== 'bridge' || cursor + 1 >= segments.length) return null;
+        path.push('*bridge*', segments[cursor + 1]);
+        cursor += 2;
+        if (cursor < segments.length && canonicalInteger(segments[cursor]) !== null) {
+          path.push(Number.parseInt(segments[cursor], 10));
+          cursor++;
+        }
+      }
+      return {
+        mode: 'ledger' as const,
+        ledgerHops: hops,
+        selection: { path, type: 'directory' as const },
+      };
     }
+
+    if (segment !== 'bridge' || cursor + 1 >= segments.length) return null;
 
     const bridgeName = segments[cursor + 1];
     cursor += 2;
@@ -244,7 +272,6 @@ const parseLedgerFragment = (segments: string[], isDirectory: boolean) => {
       name: bridgeName,
       snapshot,
     });
-    path.push(bridgeName, snapshot === 'latest' ? -1 : Number.parseInt(snapshot, 10));
   }
 
   return null;

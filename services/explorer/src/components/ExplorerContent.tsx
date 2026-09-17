@@ -1,11 +1,25 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DirectoryResult, ExplorerMode, ExplorerSelection, JournalPath, JournalResponse } from '../types';
-import { JournalService } from '../services/JournalService';
+import { JournalService, ObjectInvocationResult } from '../services/JournalService';
 import { compareSegmentedNames } from '../utils/sortKeys';
-import RawDocumentView from './RawDocumentView';
+import { pathSegmentIdentity } from '../utils/pathUtils';
+import { encodeLedgerRawSelection, encodeStageRawSelection } from '../utils/rawUrl';
+import ObjectPane from './ObjectPane';
 
 const ACCESS_MESSAGE = 'Unable to load this location. Check that the selected journal has granted access to this user and path.';
 const SNAPSHOT_MESSAGE = 'The selected ledger snapshot is unavailable. It may still be committing or may no longer be retained.';
+const displayPathSegment = (segment: unknown): string => {
+  if (segment === '*state*') return 'State';
+  if (segment === '*bridge*') return 'Bridges';
+  return JournalService.decodePathSegment(String(segment));
+};
+
+const isPinnedValue = (value: JournalResponse['pinned?'] | null | undefined): boolean => {
+  if (value == null) return false;
+  if (typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+};
 
 interface ExplorerContentProps {
   mode: ExplorerMode;
@@ -14,6 +28,9 @@ interface ExplorerContentProps {
   refreshKey: number;
   ledgerView: 'content' | 'proof';
   stageReadOnly?: boolean;
+  readPath?: JournalPath | null;
+  pinJournalService?: JournalService | null;
+  pinPath?: JournalPath | null;
   onLedgerViewToggle: () => void;
   onStageCreateFile: (path: JournalPath) => Promise<void>;
   onStageCreateDirectory: (path: JournalPath) => Promise<void>;
@@ -30,6 +47,9 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   refreshKey,
   ledgerView,
   stageReadOnly = false,
+  readPath = null,
+  pinJournalService = null,
+  pinPath = null,
   onLedgerViewToggle,
   onStageCreateFile,
   onStageCreateDirectory,
@@ -46,83 +66,185 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [rawView, setRawView] = useState(false);
+  const [verifiedPinned, setVerifiedPinned] = useState<boolean | null>(null);
+  const [objectMetadata, setObjectMetadata] = useState<string | null>(null);
+  const [objectApi, setObjectApi] = useState<ObjectInvocationResult | null>(null);
+  const [objectStatus, setObjectStatus] = useState<'checking' | 'object' | 'value'>('checking');
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const isEditingRef = useRef(false);
   const responseKeyRef = useRef<string | null>(null);
+  const selectionGenerationRef = useRef(0);
 
-  useEffect(() => {
-    isEditingRef.current = isEditing;
-  }, [isEditing]);
+  const setEditing = useCallback((value: boolean) => {
+    isEditingRef.current = value;
+    setIsEditing(value);
+  }, []);
 
   useEffect(() => {
     responseKeyRef.current = responseKey;
   }, [responseKey]);
 
+  const operationPath = readPath ?? selection?.path ?? null;
   const selectionKey = useMemo(
-    () => (selection ? JSON.stringify([selection.type, selection.path]) : null),
-    [selection],
+    () => (selection ? JSON.stringify([selection.type, selection.path, operationPath]) : null),
+    [operationPath, selection],
   );
   const currentResponse = responseKey === selectionKey ? response : null;
+  const structuralLedgerSelection = mode === 'ledger'
+    && operationPath !== null && !operationPath.includes('*state*');
   const refreshDependency = mode === 'stage' ? refreshKey : 0;
 
   useEffect(() => {
-    if (!journalService || !selection) {
+    const generation = ++selectionGenerationRef.current;
+    if (!journalService || !selection || !operationPath || structuralLedgerSelection) {
       setResponse(null);
-      setIsEditing(false);
+      setEditing(false);
       setEditValue('');
       setActionNotice(null);
       setActionError(null);
       setLoadError(null);
-      setRawView(false);
+      setVerifiedPinned(null);
+      setObjectMetadata(null);
+      setObjectApi(null);
+      setObjectStatus(selection?.type === 'directory' ? 'value' : 'checking');
       return;
     }
 
     let active = true;
+    const current = () => active && selectionGenerationRef.current === generation;
+    const objectProbe = selection.type !== 'directory'
+      ? journalService.probeObjectApi({
+          path: operationPath,
+          historical: mode === 'ledger',
+        })
+      : null;
+    const objectResult = objectProbe
+      ? objectProbe.then(() => journalService.invokeObject({
+          path: operationPath,
+          method: '*api*',
+          argumentsExpression: '()',
+          readOnly: true,
+          historical: mode === 'ledger',
+        })).then(
+          (result) => result,
+          () => null,
+        )
+      : null;
+    const pinResult = mode === 'ledger' && selection.type !== 'directory'
+        && pinJournalService && pinPath
+      ? pinJournalService.get(pinPath, { pinned: true, proof: false })
+      : null;
+
+    setIsLoading(true);
+    setLoadError(null);
+    setVerifiedPinned(null);
+    setObjectMetadata(null);
+    setObjectApi(null);
+    setObjectStatus(selection.type === 'directory' ? 'value' : 'checking');
+
+    if (pinResult) {
+      void pinResult.then((pinEvidence) => {
+        if (current()) setVerifiedPinned(isPinnedValue(pinEvidence['pinned?']));
+      }).catch(() => {
+        if (current()) setVerifiedPinned(null);
+      });
+    }
+
     const load = async () => {
-      setIsLoading(true);
-      setLoadError(null);
       try {
-        const nextResponse = await journalService.get(selection.path, {
+        const nextResponse = await journalService.get(operationPath, {
           pinned: mode === 'ledger',
           proof: mode === 'ledger' && ledgerView === 'proof',
+          ...(mode === 'ledger' && selection.type !== 'directory' ? { selectedIndexes: true } : {}),
         });
-        if (!active) {
-          return;
-        }
-        if (isEditingRef.current && responseKeyRef.current === selectionKey) {
-          return;
-        }
+        if (!current()) return;
+        if (isEditingRef.current && responseKeyRef.current === selectionKey) return;
+
         setResponse((prev) =>
           JSON.stringify(prev) === JSON.stringify(nextResponse) ? prev : nextResponse,
         );
         setResponseKey(selectionKey);
         setEditValue(JournalService.documentContentToText(nextResponse.content));
-        setIsEditing(false);
+        setEditing(false);
         setActionNotice(null);
         setActionError(null);
         setLoadError(null);
+        setIsLoading(false);
+
+        if (objectResult) {
+          void objectResult.then((apiResult) => {
+            if (!current()) return;
+            if (!apiResult) {
+              setObjectMetadata(null);
+              setObjectApi(null);
+              setObjectStatus('value');
+              return;
+            }
+            setObjectMetadata(JournalService.documentContentToText(nextResponse.content));
+            setObjectApi(apiResult);
+            setObjectStatus('object');
+          });
+        }
       } catch (error) {
-        if (active) {
+        if (current() && objectProbe && objectResult) {
+          try {
+            await objectProbe;
+            const metadataResultPromise = journalService.invokeObject({
+              path: operationPath,
+              method: '',
+              argumentsExpression: '()',
+              readOnly: true,
+              historical: mode === 'ledger',
+            });
+            const [apiResult, metadataResult] = await Promise.all([
+              objectResult, metadataResultPromise,
+            ]);
+            if (!apiResult) throw new Error('Object API probe failed');
+            if (!current()) return;
+            const metadata = JournalService.documentContentToText(metadataResult.result);
+            setResponse({ content: metadataResult.result });
+            setObjectMetadata(metadata);
+            setObjectApi(apiResult);
+            setObjectStatus('object');
+            setResponseKey(selectionKey);
+            setEditValue(metadata);
+            setEditing(false);
+            setActionNotice(null);
+            setActionError(null);
+            setLoadError(null);
+            return;
+          } catch {
+            // The normal read error remains authoritative when object dispatch also fails.
+          }
+        }
+        if (current()) {
+          if (isEditingRef.current && responseKeyRef.current === selectionKey) return;
           setResponse(null);
           setResponseKey(selectionKey);
-          setIsEditing(false);
+          setEditing(false);
           setActionNotice(null);
           setActionError(null);
+          setObjectMetadata(null);
+          setObjectApi(null);
+          setObjectStatus('value');
           setLoadError(JournalService.isSnapshotUnavailable(error) ? SNAPSHOT_MESSAGE : ACCESS_MESSAGE);
         }
       } finally {
-        if (active) {
-          setIsLoading(false);
-        }
+        if (current()) setIsLoading(false);
       }
     };
 
-    load();
+    void load();
     return () => {
       active = false;
+      if (selectionGenerationRef.current === generation) {
+        selectionGenerationRef.current += 1;
+      }
     };
-  }, [journalService, selection, selectionKey, refreshDependency, mode, ledgerView]);
+  }, [
+    journalService, selection, selectionKey, refreshDependency, mode, ledgerView,
+    structuralLedgerSelection, setEditing, pinJournalService, pinPath, operationPath,
+  ]);
 
   const directory = useMemo<DirectoryResult | null>(() => {
     if (!currentResponse) {
@@ -131,20 +253,8 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
     return JournalService.parseDirectoryResponse(currentResponse.content);
   }, [currentResponse]);
 
-  const isPinnedValue = (value: JournalResponse['pinned?'] | null | undefined): boolean => {
-    if (value == null) {
-      return false;
-    }
-    if (typeof value === 'boolean') {
-      return value;
-    }
-    if (Array.isArray(value)) {
-      return value.length > 0;
-    }
-    return true;
-  };
-
-  const isPinned = useMemo(() => isPinnedValue(currentResponse?.['pinned?']), [currentResponse]);
+  const isPinned = mode === 'ledger' ? verifiedPinned === true : isPinnedValue(currentResponse?.['pinned?']);
+  const isObject = selection?.type === 'object' || objectStatus === 'object';
 
   const directoryEntries = useMemo(() => {
     if (!currentResponse) {
@@ -159,27 +269,29 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
     const stateIndex = selection.path.lastIndexOf('*state*');
     if (stateIndex < 0) return [];
     return selection.path.slice(stateIndex).map((segment, index) => ({
-      label: JournalService.decodePathSegment(String(segment)),
+      label: displayPathSegment(segment),
       path: selection.path.slice(0, stateIndex + index + 1),
     }));
   }, [selection]);
 
   const handleSave = async () => {
-    if (!journalService || !selection) {
+    if (!journalService || !selection || !operationPath) {
       return;
     }
 
     setIsLoading(true);
     setActionError(null);
     try {
-      await journalService.setText(selection.path, editValue);
-      const nextResponse = await journalService.get(selection.path, {
+      await journalService.setText(operationPath, editValue);
+      const nextResponse = await journalService.get(operationPath, {
         pinned: mode === 'ledger',
         proof: mode === 'ledger' && ledgerView === 'proof',
       });
       setResponse(nextResponse);
+      setObjectMetadata(null);
+      setObjectApi(null);
       setEditValue(JournalService.documentContentToText(nextResponse.content));
-      setIsEditing(false);
+      setEditing(false);
       setActionNotice('Saved');
     } catch (error) {
       setActionError(`Save failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -189,12 +301,12 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   };
 
   const handleDownload = async () => {
-    if (!journalService || !selection) {
+    if (!journalService || !selection || !operationPath) {
       return;
     }
 
     try {
-      const { blob, filename } = await journalService.download(selection.path);
+      const { blob, filename } = await journalService.download(operationPath);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -208,40 +320,45 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
   };
 
   const handlePinToggle = async () => {
-    if (!journalService || !selection) {
-      return;
-    }
+    if (!journalService || !selection || !operationPath || !pinJournalService || !pinPath) return;
+    const generation = selectionGenerationRef.current;
+    const current = () => selectionGenerationRef.current === generation;
     setIsLoading(true);
+    setActionError(null);
+    setActionNotice(null);
+    const expectedPinned = !isPinned;
     try {
-      if (isPinned) {
-        await journalService.unpin(selection.path);
-      } else {
-        await journalService.pin(selection.path);
-      }
+      if (expectedPinned) await pinJournalService.pin(pinPath);
+      else await pinJournalService.unpin(pinPath);
 
-      const expectedPinned = !isPinned;
-      setResponse((prev) =>
-        prev
-          ? {
-              ...prev,
-              'pinned?': expectedPinned,
-            }
-          : prev,
-      );
-
-      try {
-        const nextResponse = await journalService.get(selection.path, {
-          pinned: mode === 'ledger',
-          proof: mode === 'ledger' && ledgerView === 'proof',
-        });
-        setResponse(nextResponse);
-      } catch {
-        // Keep the optimistic pinned state if the immediate refresh fails.
+      const localEvidence = await pinJournalService.get(pinPath, { pinned: true, proof: false });
+      if (!current()) return;
+      if (isPinnedValue(localEvidence['pinned?']) !== expectedPinned) {
+        throw new Error(`post-${expectedPinned ? 'pin' : 'unpin'} readback did not confirm the requested state`);
       }
+      if (expectedPinned && pinPath.indexOf('*state*') > 1) {
+        await pinJournalService.verifyPinnedInventories(pinPath);
+        if (!current()) return;
+      }
+      const routedEvidence = await journalService.get(operationPath, {
+        pinned: true,
+        proof: ledgerView === 'proof',
+        selectedIndexes: true,
+      });
+      if (!current()) return;
+      if (JSON.stringify(localEvidence.content) !== JSON.stringify(routedEvidence.content)) {
+        throw new Error('local and terminal-provider evidence disagree');
+      }
+      setResponse(routedEvidence);
+      setVerifiedPinned(expectedPinned);
+      setActionNotice(expectedPinned ? 'Pinned with local and terminal-provider readback' : 'Unpinned with exact readback');
     } catch (error) {
-      alert(`Failed to update pin: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if (current()) {
+        setVerifiedPinned(null);
+        setActionError(`Pin state is indeterminate: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     } finally {
-      setIsLoading(false);
+      if (current()) setIsLoading(false);
     }
   };
 
@@ -257,8 +374,29 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
     );
   }
 
+  if (structuralLedgerSelection) {
+    return (
+      <div className="content-viewer">
+        <div className="content-header">
+          <div className="content-path-container">
+            <div className="content-path">
+              {displayPathSegment(selection.path[selection.path.length - 1] ?? 'index')}
+            </div>
+          </div>
+        </div>
+        <div className="empty-state">No accessible contents</div>
+      </div>
+    );
+  }
+
   const extractedContent = JournalService.documentContentToText(currentResponse?.content);
-  const title = JournalService.decodePathSegment(String(selection.path[selection.path.length - 1] ?? 'item'));
+  const title = displayPathSegment(selection.path[selection.path.length - 1] ?? 'item');
+  const rawSelection = currentResponse && selection.type !== 'directory'
+    ? mode === 'stage'
+      ? encodeStageRawSelection(journalService?.getFederationContext()?.route ?? [], operationPath ?? selection.path)
+      : encodeLedgerRawSelection(operationPath ?? selection.path, currentResponse.indexes)
+    : null;
+  const rawHref = rawSelection && journalService ? journalService.rawUrl(rawSelection) : null;
 
   return (
     <div className="content-viewer">
@@ -266,7 +404,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
         <div className="content-path-container">
           <div className="content-path">
             {title}
-            {mode === 'stage' && !rawView && !stageReadOnly && (
+            {mode === 'stage' && !stageReadOnly && (
               <button
                 className="button-inline-icon"
                 title="Rename"
@@ -303,7 +441,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
         <div className="content-actions">
           {!loadError && mode === 'stage' && !stageReadOnly && selection.type === 'directory' && (
             <>
-              <button className="button button-secondary" onClick={() => void onStageCreateFile(selection.path)}>+ Document</button>
+              <button className="button button-secondary" onClick={() => void onStageCreateFile(selection.path)}>+ Put</button>
               <button className="button button-secondary" onClick={() => void onStageCreateDirectory(selection.path)}>+ Directory</button>
               <button className="button button-secondary" onClick={openUploadDialog}>Upload Document</button>
               <input
@@ -321,46 +459,46 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
               <button className="button button-secondary" onClick={() => void onStageDelete(selection.path, title)}>Delete</button>
             </>
           )}
-          {!loadError && mode === 'stage' && selection.type === 'file' && (
+          {!loadError && mode === 'stage' && selection.type !== 'directory' && (
             <>
-              <button className="button button-secondary" onClick={() => setRawView(false)}>Content</button>
-              <button className="button button-secondary" onClick={() => setRawView(true)}>Raw</button>
-              {!rawView && !stageReadOnly && (
+              {rawHref && (
+                <a className="button button-secondary" href={rawHref} target="_blank" rel="noopener noreferrer">Raw</a>
+              )}
+              {!stageReadOnly && !isObject && objectStatus === 'value' && (
                 <button className="button button-secondary" onClick={() => {
                   if (isEditing) {
                     void handleSave();
                   } else {
                     setActionError(null);
-                    setIsEditing(true);
+                    setEditing(true);
                   }
                 }}>
                   {isEditing ? 'Save' : 'Edit'}
                 </button>
               )}
               <button className="button button-secondary" onClick={handleDownload}>Download</button>
-              {!rawView && !stageReadOnly && (
+              {!stageReadOnly && (
                 <button className="button button-secondary" onClick={() => void onStageDelete(selection.path, title)}>Delete</button>
               )}
             </>
           )}
-          {!loadError && mode === 'ledger' && selection.type === 'file' && (
+          {!loadError && mode === 'ledger' && selection.type !== 'directory' && (
             <>
-              <button className="button button-secondary" onClick={() => {
-                setRawView(false);
-                if (ledgerView === 'proof') onLedgerViewToggle();
-              }}>Content</button>
-              <button className="button button-secondary" onClick={() => setRawView(true)}>Raw</button>
+              <button className="button button-secondary" onClick={onLedgerViewToggle}>
+                {ledgerView === 'content' ? 'Proof' : 'Content'}
+              </button>
+              {rawHref && (
+                <a className="button button-secondary" href={rawHref} target="_blank" rel="noopener noreferrer">Raw</a>
+              )}
               <button
                 className={isPinned ? 'button button-secondary' : 'button button-primary'}
                 onClick={handlePinToggle}
+                disabled={verifiedPinned === null}
+                title={verifiedPinned === null ? 'Pin status requires exact local readback' : undefined}
               >
-                {isPinned ? 'Unpin' : 'Pin'}
+                {verifiedPinned === null ? 'Pin status unavailable' : isPinned ? 'Unpin' : 'Pin'}
               </button>
               <button className="button button-secondary" onClick={handleDownload}>Download</button>
-              <button className="button button-secondary" onClick={() => {
-                setRawView(false);
-                if (ledgerView === 'content') onLedgerViewToggle();
-              }}>Proof</button>
             </>
           )}
         </div>
@@ -371,14 +509,11 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
           <div className="loading-spinner" />
         ) : loadError ? (
           <div className="content-load-error" role="alert">{loadError}</div>
-        ) : selection.type === 'file' && rawView ? (
-          <RawDocumentView content={currentResponse?.content} filename={title} />
-        ) : mode === 'ledger' && selection.type === 'file' && ledgerView === 'proof' ? (
+        ) : mode === 'ledger' && selection.type !== 'directory' && ledgerView === 'proof' ? (
           <pre className="content-text">{JSON.stringify(currentResponse?.proof, null, 2)}</pre>
         ) : directory ? (
           <div className="directory-list">
             {(directoryEntries ?? [])
-              .filter((item) => !JournalService.isReservedStateSegment(item.name))
               .sort((a, b) => {
                 const leftRank = a.type === 'directory' ? 0 : 1;
                 const rightRank = b.type === 'directory' ? 0 : 1;
@@ -389,28 +524,38 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
               })
               .map((item) => (
                 <button
-                  key={item.name}
+                  key={pathSegmentIdentity(item.pathSegment ?? item.name)}
                   className="directory-item directory-item-button"
                   onClick={() => onSelectPath({
                     path: [
                       ...selection.path,
                       item.pathSegment ?? JournalService.encodePathSegment(item.name),
                     ],
-                    type: item.type === 'directory' ? 'directory' : 'file',
+                    type: item.type === 'directory' ? 'directory'
+                      : item.type === 'object' ? 'object' : 'file',
                   })}
                 >
                   <span className="directory-item-kind" aria-hidden="true">
-                    {item.type === 'directory' ? '▣' : '▤'}
+                    {item.type === 'directory' ? '▣' : item.type === 'object' ? '◆' : '▤'}
                   </span>
                   <span>{item.name}</span>
                 </button>
               ))}
           </div>
-        ) : mode === 'stage' && selection.type === 'file' && isEditing && !rawView ? (
+        ) : mode === 'stage' && selection.type === 'file' && isEditing ? (
           <textarea
             className="content-editor"
+            aria-label="Document content"
             value={editValue}
             onChange={(event) => setEditValue(event.target.value)}
+          />
+        ) : isObject && journalService && objectMetadata && objectApi ? (
+          <ObjectPane
+            journalService={journalService}
+            path={operationPath ?? selection.path}
+            historical={mode === 'ledger'}
+            metadata={objectMetadata}
+            apiResult={objectApi}
           />
         ) : (
           <pre className="content-text">
@@ -420,6 +565,7 @@ const ExplorerContent: React.FC<ExplorerContentProps> = ({
           </pre>
         )}
       </div>
+
     </div>
   );
 };

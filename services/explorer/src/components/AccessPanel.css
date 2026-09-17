@@ -115,7 +115,8 @@
 
 .access-form input[type="text"],
 .access-form input[type="number"],
-.access-form input:not([type]) {
+.access-form input:not([type]),
+.access-form select {
   width: 100%;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -126,7 +127,8 @@
   box-sizing: border-box;
 }
 
-.access-form input:disabled {
+.access-form input:disabled,
+.access-form select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -138,16 +140,29 @@
   gap: 8px;
 }
 
+.access-permission-pill {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.access-permission-pill.expanded {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px rgba(42, 125, 225, 0.14);
+}
+
 .access-switch-row {
   flex-direction: row !important;
   align-items: center;
   gap: 8px !important;
   min-height: 32px;
   padding: 7px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  background: var(--bg-primary);
   color: var(--text-primary) !important;
+  white-space: nowrap;
 }
 
 .access-switch-row input {
@@ -188,30 +203,41 @@
   background: #ffffff;
 }
 
-.access-resolve-range {
-  grid-column: 1 / -1;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px;
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr);
-  gap: 10px;
-  background: var(--bg-primary);
+.access-secondary-toggle,
+.access-secondary-range {
+  align-self: stretch;
+  border-left: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 
-.access-range legend {
-  padding: 0 4px;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 700;
+.access-secondary-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 11px;
+  color: var(--text-primary) !important;
+  white-space: nowrap;
 }
 
-.access-range-help {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
+.access-secondary-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+}
+
+.access-secondary-range label {
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.access-secondary-range input[type="number"] {
+  width: 58px;
+  padding: 5px 6px;
+  border-radius: 6px;
 }
 
 .access-form-submit {
@@ -241,6 +267,14 @@
 .access-rule-principal {
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.access-rule-principal-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .access-rule-path {
@@ -284,7 +318,64 @@
   }
 
   .access-form,
-  .access-resolve-range {
+  .access-namespace-target {
     grid-template-columns: 1fr;
+  }
+
+  .access-permission-pill.expanded {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    border-radius: 18px;
+  }
+
+  .access-permission-pill.expanded .access-switch-row {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .access-secondary-toggle,
+  .access-secondary-range {
+    width: 100%;
+    border-top: 1px solid var(--border-color);
+    border-left: 0;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 480px) {
+  .access-panel {
+    padding: 10px;
+  }
+
+  .access-card,
+  .access-message {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .access-card {
+    margin-bottom: 12px;
+    padding: 12px;
+  }
+
+  .access-form,
+  .access-retrieve-range,
+  .access-namespace-target {
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .access-form > *,
+  .access-rule > * {
+    min-width: 0;
+  }
+
+  .access-form-submit,
+  .access-rule > .button {
+    width: 100%;
+  }
+
+  .access-confirmation-backdrop {
+    padding: 10px;
   }
 }

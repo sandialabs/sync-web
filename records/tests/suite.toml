@@ -67,6 +67,22 @@ arguments = [
 ]
 
 [[case]]
+name = "Resource Objects Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-resource-objects.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
 name = "Call Interface"
 kind = "interface"
 test = "interface/interface-harness.scm"
@@ -147,6 +163,29 @@ arguments = [
 ]
 
 [[case]]
+name = "Standard Local Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-standard-local.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/interface.scm",
+  "fixtures/standard-local/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/standard.scm",
+  "../lisp/authorization.scm",
+]
+
+[[case]]
 name = "History Interface"
 kind = "interface"
 test = "interface/interface-harness.scm"
@@ -163,6 +202,61 @@ arguments = [
 ]
 
 [[case]]
+name = "Truncate Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-truncate.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Prune Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-prune.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Retained Federation Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-retained-federation.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/interface.scm",
+  "fixtures/standard-local/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/standard.scm",
+  "../lisp/authorization.scm",
+]
+
+[[case]]
 name = "Retained History Interface"
 kind = "interface"
 test = "interface/interface-harness.scm"
@@ -176,4 +270,50 @@ arguments = [
   "../lisp/federation.scm",
   "../lisp/authorization.scm",
   "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Journal Identity Migration Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-journal-identity-migration.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+  "fixtures/journal-identity-v1/ledger.scm",
+  "fixtures/journal-identity-v1/federation.scm",
+  "fixtures/journal-identity-v1/interface.scm",
+  "fixtures/journal-identity-v1/log-chain.scm",
+  "fixtures/journal-identity-v1/tree.scm",
+  "fixtures/journal-identity-v1/standard.scm",
+  "fixtures/journal-identity-v1/authorization.scm",
+]
+
+[[case]]
+name = "Journal Identity Migration Network Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-journal-identity-migration-network.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+  "fixtures/journal-identity-v1/ledger.scm",
+  "fixtures/journal-identity-v1/federation.scm",
+  "fixtures/journal-identity-v1/interface.scm",
+  "fixtures/journal-identity-v1/log-chain.scm",
+  "fixtures/journal-identity-v1/tree.scm",
+  "fixtures/journal-identity-v1/standard.scm",
+  "fixtures/journal-identity-v1/authorization.scm",
 ]

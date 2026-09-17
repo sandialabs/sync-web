@@ -9,7 +9,7 @@ Reference definitions for recurring terms introduced throughout the paper.
     Verification of an asserted identity, origin, or authority through evidence such as credentials and signatures. Merkle integrity supplies the complementary structural check against a commitment.
 
   \item[Authorization]
-    A policy decision determining whether a principal may perform an operation. In current federation, terminal-local rules grant remote principals path-scoped \texttt{get}, \texttt{set!}, and \texttt{resolve} permissions; administrators remain local principals.
+    A policy decision determining whether a principal may perform an operation. In current federation, terminal-local rules grant authenticated remote principals independent path-scoped \texttt{put!}, qualified \texttt{use!}, \texttt{run!}, and \texttt{retrieve} permissions. Namespace ownership and read-only \texttt{use!} do not imply \texttt{run!}; Root and configured Interface administrators remain local principals with default authority.
 
   \item[Bridge]
     A reciprocal signed-head-retention relationship through which each journal preserves a verified head for the other. Reciprocity provides identity and history reachability, while terminal policy independently grants application-data authority.
@@ -18,7 +18,7 @@ Reference definitions for recurring terms introduced throughout the paper.
     A cryptographic hash derived from a node or larger structure and used as its integrity identifier.
 
   \item[Historical cursor]
-    The independently selected origin and per-hop indexes used only by \texttt{resolve}. A canonical public journal-relative path interleaves these indexes with directional aliases; the Interface separates that path into the current route used for authentication and endpoint context and the historical cursor used to select committed content.
+    The independently selected origin and per-hop indexes used only by \texttt{retrieve}. A canonical public journal-relative path interleaves these indexes with directional aliases; the Interface separates that path into the current route used for authentication and endpoint context and the historical cursor used to select committed content.
 
   \item[History]
     Used in its ordinary broad sense for prior states and changes. Concrete chains, heads, and receipts represent history using ordinary Synchronic Web structures.
@@ -29,8 +29,8 @@ Reference definitions for recurring terms introduced throughout the paper.
   \item[Journal]
     The software an entity runs together with all data persisted on it. A journal supplies the root from which that entity views the Synchronic Web and is analogous to a site or origin on the conventional Web.
 
-  \item[Journal identity]
-    A stable commitment formed from a domain-separated random nonce and bound by bridges, preapprovals, and invocation audiences. Active signing keys may evolve beneath this identity through predecessor-authorized transitions.
+  \item[Journal signing-key continuity]
+    A receiver-local chain from an accepted signing key through predecessor-authorized transitions in committed heads. Journals are infrastructure rather than durable principals; bridge aliases name authorization relationships locally.
 
   \item[Key-index]
     The terminal-local history index whose committed bridge state authenticated a remote interface key. Authorization may constrain this index relative to the terminal's current history.
@@ -45,7 +45,7 @@ Reference definitions for recurring terms introduced throughout the paper.
     A durable structure that couples executable behavior with state. Its documented protocol determines how the state is read, transformed, and represented; its internal layout remains implementation-specific.
 
   \item[Origin-local pin]
-    Retention of verified remote proof material in the originating journal under the full origin-relative historical path. It follows a federated \texttt{resolve} and mutates the origin's retention state.
+    Retention of verified remote proof material in the originating journal under the full origin-relative historical path. It follows a federated \texttt{retrieve} and mutates the origin's retention state.
 
   \item[Path]
     A sequence interpreted from a selected journal root to address a resource or intermediate structure. A canonical federated path interleaves optional historical indexes with directional aliases before the terminal namespace and local path. Like a relative URL, its meaning is completed by a starting root.
@@ -87,7 +87,7 @@ Reference definitions for recurring terms introduced throughout the paper.
     The journal that directly receives and authorizes a federated application invocation after the origin follows a working route to its committed endpoint and authentication object.
 
   \item[Working route]
-    The ordered receiver-local directional aliases used from the origin's latest committed view to select the terminal authentication object, endpoint, and reverse path to the origin key. Its implicit indexes are current; \texttt{resolve} may select historical content independently.
+    The ordered receiver-local directional aliases used from the origin's latest committed view to select the terminal authentication object, endpoint, and reverse path to the origin key. Its implicit indexes are current; \texttt{retrieve} may select historical content independently.
 
   \item[Entanglement]
     Cross-history ordering created when one journal incorporates another's committed head into its own later state. The term follows Maniatis and Baker's secure-history protocol~\cite{Maniatis2002timeline}.

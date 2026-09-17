@@ -1,5 +1,5 @@
 use clap::Parser;
-use journal_sdk::JOURNAL;
+use journal_sdk::{evaluator::lisp2json, JOURNAL};
 use log::info;
 use rand::{distributions::Alphanumeric, Rng};
 use rocket::config::Config as RocketConfig;
@@ -293,6 +293,14 @@ fn install_expr(args: &Args, secret: &str, interface_secret: &str, clear: bool) 
     }
 }
 
+fn journal_result_is_error(result: &str) -> bool {
+    match lisp2json(result) {
+        Err(_) => true,
+        Ok(Value::Array(items)) => items.first().and_then(Value::as_str) == Some("error"),
+        Ok(_) => false,
+    }
+}
+
 fn install_or_update_records(
     args: &Args,
     secret: &str,
@@ -302,13 +310,13 @@ fn install_or_update_records(
     if !has_content {
         let result = JOURNAL.evaluate(&install_expr(args, secret, interface_secret, true));
         info!("Installed ledger records; result omitted");
-        if result.starts_with("(error ") {
+        if journal_result_is_error(&result) {
             panic!("failed to install ledger records; result omitted");
         }
     } else if args.update_records {
         let result = JOURNAL.evaluate(&install_expr(args, secret, interface_secret, false));
         info!("Updated ledger records; result omitted");
-        if result.starts_with("(error ") {
+        if journal_result_is_error(&result) {
             panic!("failed to update ledger records; result omitted");
         }
     }
@@ -391,4 +399,31 @@ async fn main() {
         .configure(rocket_config)
         .launch()
         .await;
+}
+
+#[cfg(test)]
+mod structured_error_tests {
+    use super::journal_result_is_error;
+
+    #[test]
+    fn recognizes_only_the_canonical_journal_error_envelope() {
+        assert!(journal_result_is_error(
+            r#"(error 'api-error "failed" ((data (details))))"#
+        ));
+        assert!(!journal_result_is_error(
+            r#"(wrapper (error 'api-error "failed" ((data details))))"#
+        ));
+        assert!(!journal_result_is_error(
+            r#""(error 'api-error \"failed\" ((data details)))""#
+        ));
+        assert!(!journal_result_is_error("error-prefix"));
+    }
+
+    #[test]
+    fn malformed_or_multiple_results_fail_closed_without_panicking() {
+        assert!(journal_result_is_error(r#"(error 'api-error "failed")"#));
+        assert!(journal_result_is_error(r#"(ok) (error 'api-error "failed")"#));
+        assert!(journal_result_is_error("(unterminated"));
+        assert!(journal_result_is_error("value\0hidden"));
+    }
 }

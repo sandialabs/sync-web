@@ -30,7 +30,7 @@ test("callJson omits identity when no identityId provided", async (t) => {
     captured = init.body as string;
     return respondWith("ok");
   });
-  await makeClient().callJson({ functionName: "get", authentication: "secret" });
+  await makeClient().callJson({ functionName: "use!", authentication: "secret" });
   const body = JSON.parse(captured!);
   assert.equal("identity" in body.authentication, false);
   assert.deepEqual(body.authentication.credentials, { "*type/string*": "secret" });
@@ -42,7 +42,7 @@ test("callJson sends local principal path when identityId provided", async (t) =
     captured = init.body as string;
     return respondWith("ok");
   });
-  await makeClient().callJson({ functionName: "get", authentication: "secret", identityId: "alice" });
+  await makeClient().callJson({ functionName: "use!", authentication: "secret", identityId: "alice" });
   const body = JSON.parse(captured!);
   assert.deepEqual(body.authentication.identity, ["*state*", "alice"]);
   assert.deepEqual(body.authentication.credentials, { "*type/string*": "secret" });
@@ -55,7 +55,7 @@ test("callJson builds a federated invocation with optional Ledger indexes", asyn
     return respondWith("ok");
   });
   await makeClient().callJson({
-    functionName: "resolve",
+    functionName: "retrieve",
     authentication: "secret",
     identityId: "alice",
     routeTarget: ["carol", "bob"],
@@ -94,7 +94,7 @@ test("callJson throws JournalSemanticError on semantic error response", async (t
     ])
   );
   await assert.rejects(
-    () => makeClient().callJson({ functionName: "get" }),
+    () => makeClient().callJson({ functionName: "use!" }),
     (err: unknown) => err instanceof JournalSemanticError && err.code === "authentication-error"
   );
 });
@@ -108,7 +108,7 @@ test("callJson throws on request timeout", async (t) => {
     })
   );
   await assert.rejects(
-    () => makeClient(50).callJson({ functionName: "get" }),
+    () => makeClient(50).callJson({ functionName: "use!" }),
     /Failed to call journal/
   );
 });
@@ -128,12 +128,12 @@ test("forwarding diagnostics omit request, response, and credential bodies", asy
   t.mock.method(globalThis, "fetch", async () => respondWith("RESPONSE-LEAK-SENTINEL"));
 
   await client.callJson({
-    functionName: "set!",
+    functionName: "put!",
     args: { value: "BODY-LEAK-SENTINEL" },
     authentication: "INTERFACE-LEAK-SENTINEL",
   });
   await client.callScheme({
-    functionName: "set!",
+    functionName: "put!",
     expression: '(set! "SCHEME-LEAK-SENTINEL")',
   });
   await client.callRootJson({
@@ -153,4 +153,20 @@ test("forwarding diagnostics omit request, response, and credential bodies", asy
   ]) {
     assert.equal(logged.includes(sentinel), false, `logged ${sentinel}`);
   }
+});
+
+test("schemeToJson uses the exact sibling Journal codec endpoint", async (t) => {
+  let capturedUrl = "";
+  let capturedBody = "";
+  t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    capturedUrl = String(url);
+    capturedBody = String(init.body);
+    return respondWith({ "*type/quoted*": ["gateway-use-arguments"] });
+  });
+
+  const expression = "'(gateway-use-arguments . ((read-only? #t)))";
+  const result = await makeClient().schemeToJson(expression);
+  assert.equal(capturedUrl, "http://journal.test/interface/scheme-to-json");
+  assert.equal(capturedBody, expression);
+  assert.deepEqual(result, { "*type/quoted*": ["gateway-use-arguments"] });
 });

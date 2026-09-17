@@ -22,8 +22,8 @@
   (define-method (peers self) ((self '~config-get) '(peers)))
 
   (define-method (peer self alias)
-    (if (not (symbol? alias))
-        (error 'bridge-name-error "Peer alias must be a symbol: ~S" alias))
+    (if (not ((self '~name-admissible?) alias))
+        (error 'bridge-name-error "Peer alias must round trip through the expression codec: ~S" alias))
     ((self '~config-get) `(peers ,alias)))
 
   (define-method (bridge! self ledger alias endpoint signing-key)
@@ -39,10 +39,10 @@
         ((self '~resume!) ledger 'bridge! alias
          `((alias ,alias) (endpoint ,endpoint)) operation-data signing-key)
         (begin
-    (if (not (and (symbol? alias) (list? endpoint)
+    (if (not (and ((self '~name-admissible?) alias) (list? endpoint)
                   (assoc 'interface endpoint) (assoc 'remote-name endpoint)
                   (string? (cadr (assoc 'interface endpoint)))
-                  (symbol? (cadr (assoc 'remote-name endpoint)))))
+                  ((self '~name-admissible?) (cadr (assoc 'remote-name endpoint)))))
         (error 'argument-error "Malformed bridge endpoint descriptor: ~S" endpoint))
     (let* ((interface (cadr (assoc 'interface endpoint)))
            (remote-name (cadr (assoc 'remote-name endpoint)))
@@ -102,6 +102,10 @@
     (let* ((name (cadr (assoc 'name request)))
            (interface (cadr (assoc 'interface request)))
            (remote-name (cadr (assoc 'remote-name request)))
+           (_ (if (not (and ((self '~name-admissible?) name)
+                            ((self '~name-admissible?) remote-name)))
+                  (error 'bridge-name-error
+                         "Bridge aliases must round trip through the expression codec")))
            (known-index (if (assoc 'known-index request)
                             (cadr (assoc 'known-index request)) -1))
            (info (and (assoc 'info request)
@@ -116,8 +120,8 @@
                  (eq? (cadr (assoc 'establish-check? request)) #t)
                  ((self '~peer-match?) name
                   `((interface ,interface) (remote-name ,remote-name)) 'remote)
-                 (equal? ((self '~ref) ((self 'peer) name) '(identity-id))
-                         ((self '~required) verified 'identity-id))
+                 (equal? ((self '~ref) ((self 'peer) name) '(public-key))
+                         ((self '~required) verified 'public-key))
                  (= ((self '~required) verified 'index)
                     ((self '~required) ledger-checkpoint 'accepted-index))
                  (= known-index (- ((ledger 'size)) 1))))
@@ -305,8 +309,6 @@
          (initiation ,(if (null? existing) initiation
                           ((self '~ref) existing '(initiation))))
          (enabled? #t)
-         (identity ,((self '~required) verified 'identity))
-         (identity-id ,((self '~required) verified 'identity-id))
          (public-key ,((self '~required) verified 'public-key))
          (last-index ,((self '~required) verified 'index))
          (remote-index ,remote-index)
@@ -384,9 +386,8 @@
            (history-indexes (and (assoc 'history-indexes request)
                                   (cadr (assoc 'history-indexes request))))
            (history-head-index (and (assoc 'history-head-index request)
-                                     (cadr (assoc 'history-head-index request))))
-           (roots (if (assoc 'roots request) (cadr (assoc 'roots request)) '())))
-      (if (not (and (list? route-source) (list? route-target) (list? roots)
+                                     (cadr (assoc 'history-head-index request)))))
+      (if (not (and (list? route-source) (list? route-target)
                     (or (not history-indexes)
                         (and (list? history-indexes)
                              (= (length history-indexes) (+ (length route-target) 1))
@@ -395,11 +396,10 @@
                                    (and (integer? (car indexes))
                                         (loop (cdr indexes)))))))))
           (error 'route-error "Invalid federation route/history shape: ~S" request))
-      (set! roots
-            (cons (cadr (assoc 'id
-                               ((self '~ref) ((ledger 'config))
-                                '(public identity))))
-                  roots))
+      (if (not (and ((self '~route-admissible?) route-source)
+                    ((self '~route-admissible?) route-target)))
+          (error 'bridge-name-error
+                 "Federation route aliases must round trip through the expression codec"))
       (if (pair? route-target)
           (let* ((next (car route-target))
                  (edge ((ledger 'peer-head) next index))
@@ -423,8 +423,7 @@
                                  (cddr history-indexes)))
                          (history-head-index
                           ,(cadr (assoc 'head-index history-edge))))
-                       '())
-                 (roots ,roots))))))
+                       '()))))))
           (let* ((index (if (< index 0) (- ((ledger 'size)) 1) index))
                  (key-path ((self '~bridge-route-path)
                             (reverse route-source)
@@ -434,7 +433,7 @@
                  (key-value ((self '~get) standard key-object key-path))
                  (paths (list '(*crypto* interface public-key)
                               '(*crypto* interface endpoint)
-                              '(*crypto* journal identity id)))
+                              '(*crypto* journal key-derivation-salt)))
                  (trace-paths
                   (map (lambda (path) ((self '~ledger-path) path))
                        (cons key-path paths)))
@@ -453,7 +452,6 @@
                         (list history-head-index history-index)))))
             `((route-source ,route-source)
               (terminal-index ,index)
-              (roots ,(reverse roots))
               (object
                ,((standard 'serialize) object
                  (and (byte-vector? key-value)
@@ -478,10 +476,13 @@
   (define-method (invoke self ledger operation arguments route history identity signing-key
                          (indexed-proof? #f))
     ;; Construct, sign, deliver, and verify one federated application request.
-    (if (not (memq operation '(get set! get-batch set-batch! resolve)))
+    (if (not (memq operation '(put! copy! use! put-batch! copy-batch! use-batch! run! retrieve)))
         (error 'api-error "Function is not available through federation: ~S" operation))
     (if (not (and (symbol? identity) (list? route) (pair? route)))
         (error 'authentication-error "Invalid originating federation invocation"))
+    (if (not ((self '~route-admissible?) route))
+        (error 'bridge-name-error
+               "Federation route aliases must round trip through the expression codec"))
     (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (origin-index (- ((ledger 'size)) 1))
            (route-response
@@ -551,34 +552,26 @@
            (data-head-index
             (if history history-head-index terminal-index))
            (data-index (if history history-index terminal-index))
-           (route-roots (cadr (assoc 'roots route-response)))
-           (self-route?
-            (and (pair? route-roots) (pair? (cdr route-roots))
-                 (equal? (car route-roots)
-                         (car (reverse route-roots)))))
            (source-key-path
-            (if self-route?
-                '(*crypto* interface public-key)
-                ((self '~bridge-route-path) (reverse source-route)
-                 '(*crypto* interface public-key))))
+            ((self '~bridge-route-path) (reverse source-route)
+             '(*crypto* interface public-key)))
            (source-key ((self '~get) standard combined source-key-path))
            (_
             (if (byte-vector? source-key) #t
                 (error 'bridge-error
                        "Federation route is not ready: reverse interface key is unavailable")))
            (endpoint ((self '~get) standard combined '(*crypto* interface endpoint)))
-           (audience ((self '~get) standard combined '(*crypto* journal identity id)))
            (private-key
             (and (pair? signing-key)
                  (equal? source-key (car signing-key))
                  (cdr signing-key)))
-           (resolve? (eq? operation 'resolve))
+           (retrieve? (eq? operation 'retrieve))
            (original-proof? proof-requested?)
            (original-pinned?
             (and (assoc 'pinned? arguments)
                  (cadr (assoc 'pinned? arguments))))
            (wire-arguments
-            (if resolve?
+            (if retrieve?
                 (let* ((path (cadr (assoc 'path arguments)))
                        (path
                         (if (not history) path
@@ -603,13 +596,12 @@
                        (route-target ())
                        (object ,serialization)
                        (terminal-index ,terminal-index)
-                       (self-route? ,self-route?)
                        ,@(if history
                              `((data-object
                                 ,((standard 'serialize) data-head))
                                (data-head-index ,data-head-index))
                              '())
-                       (audience ,audience)))
+                       ))
            (signature
             (crypto-sign
              (if private-key private-key
@@ -623,12 +615,15 @@
              `((function ,operation)
                (arguments ,wire-arguments)
                (invocation (,@unsigned (signature ,signature)))))))
-      ;; Resolve responses carry proof and are re-anchored by the origin.
-      (if (not resolve?) response
+      ;; Retrieve responses carry proof and are re-anchored by the origin.
+      (if (not retrieve?) response
           (let* ((verified-response
-                  ((self '~verify-resolve-response)
-                   ledger data-head wire-arguments response))
+                  ((self '~verify-retrieve-response)
+                   ledger data-head wire-arguments response (not history)))
                  (content (cadr (assoc 'content verified-response)))
+                 (indexes
+                  (and (assoc 'indexes verified-response)
+                       (cadr (assoc 'indexes verified-response))))
                  (terminal-proof
                   ((standard 'deserialize)
                    (cadr (assoc 'proof verified-response))))
@@ -637,12 +632,12 @@
                       (cons history-origin-index history-path)
                       target-path))
                  (origin-base
-                  (and original-proof?
+                  (and (or original-proof? indexed-proof?)
                        ((standard 'deep-slice!)
                         (if history history-origin-head target-object)
                         ((self '~ledger-path) origin-object-path))))
                  (origin-proof
-                  (and original-proof?
+                  (and (or original-proof? indexed-proof?)
                        ((standard 'deep-set!)
                         origin-base ((self '~ledger-path) origin-object-path)
                         terminal-proof)))
@@ -659,17 +654,24 @@
              (original-proof?
               `((content ,content)
                 (pinned? ,(not (not pinned)))
+                ,@(if indexes `((indexes ,indexes)) '())
                 ,@(if indexed-proof?
                       `((proof-index
                          ,(if history history-origin-index origin-index))) '())
                 (proof ,((standard 'serialize) origin-proof))))
+             (indexed-proof?
+              `((content ,content)
+                ,@(if indexes `((indexes ,indexes)) '())
+                (indexed-proof ,((standard 'serialize) origin-proof))))
              (original-pinned?
-              `((content ,content) (pinned? ,(not (not pinned)))))
+              `((content ,content) (pinned? ,(not (not pinned)))
+                ,@(if indexes `((indexes ,indexes)) '())))
+             (indexes `((content ,content) (indexes ,indexes)))
              (else content))))))
 
   (define-method (invoke-batch self ledger arguments route history identity signing-key
                                (indexed-proof? #f))
-    ;; Resolve one route/history group with one verified terminal multiproof.
+    ;; Retrieve one route/history group with one verified terminal multiproof.
     (if (not (and (symbol? identity) (list? route) (pair? route)
                   (list? arguments) (assoc 'paths arguments)
                   (list? (cadr (assoc 'paths arguments)))))
@@ -734,15 +736,9 @@
            (data-head (if history history-merged combined))
            (data-head-index (if history history-head-index terminal-index))
            (data-index (if history history-index terminal-index))
-           (route-roots (cadr (assoc 'roots route-response)))
-           (self-route?
-            (and (pair? route-roots) (pair? (cdr route-roots))
-                 (equal? (car route-roots) (car (reverse route-roots)))))
            (source-key-path
-            (if self-route?
-                '(*crypto* interface public-key)
-                ((self '~bridge-route-path) (reverse source-route)
-                 '(*crypto* interface public-key))))
+            ((self '~bridge-route-path) (reverse source-route)
+             '(*crypto* interface public-key)))
            (source-key ((self '~get) standard combined source-key-path))
            (_
             (if (byte-vector? source-key) #t
@@ -750,8 +746,6 @@
                        "Federation route is not ready: reverse interface key is unavailable")))
            (endpoint ((self '~get) standard combined
                       '(*crypto* interface endpoint)))
-           (audience ((self '~get) standard combined
-                      '(*crypto* journal identity id)))
            (private-key
             (and (pair? signing-key)
                  (equal? source-key (car signing-key))
@@ -782,11 +776,10 @@
               (route-target ())
               (object ,serialization)
               (terminal-index ,terminal-index)
-              (self-route? ,self-route?)
               ,@(if history
                     `((data-object ,((standard 'serialize) data-head))
                       (data-head-index ,data-head-index)) '())
-              (audience ,audience)))
+              ))
            (signature
             (crypto-sign
              (if private-key private-key
@@ -794,16 +787,16 @@
                         "Transient interface key does not match terminal source key"))
              (expression->byte-vector
               ((self '~invocation-message)
-               'resolve-batch wire-arguments unsigned))))
+               'retrieve-batch wire-arguments unsigned))))
            (response
             ((self '~remote)
              endpoint
-             `((function resolve-batch)
+             `((function retrieve-batch)
                (arguments ,wire-arguments)
                (invocation (,@unsigned (signature ,signature))))))
            (verified-response
-            ((self '~verify-resolve-batch-response)
-             ledger data-head wire-arguments response))
+            ((self '~verify-retrieve-batch-response)
+             ledger data-head wire-arguments response (not history)))
            (results (cadr (assoc 'results verified-response))))
       (if (not indexed-proof?) results
           (let* ((terminal-proof
@@ -839,47 +832,46 @@
            (route-target ((self '~required) value 'route-target))
            (serialization ((self '~required) value 'object))
            (terminal-index ((self '~required) value 'terminal-index))
-           (audience ((self '~required) value 'audience))
            (signature ((self '~required) value 'signature))
-           (self-route? (and (assoc 'self-route? value)
-                             (cadr (assoc 'self-route? value)))))
-      (if (or (not (memq operation '(get set! get-batch set-batch! resolve resolve-batch)))
+           (retained-provider?
+            (and (memq operation '(retrieve retrieve-batch))
+                 (not (assoc 'data-object value))))
+           (provider-paths
+            (cond ((eq? operation 'retrieve)
+                   (and (assoc 'path arguments)
+                        (list (cadr (assoc 'path arguments)))))
+                  ((eq? operation 'retrieve-batch)
+                   (and (assoc 'paths arguments)
+                        (cadr (assoc 'paths arguments))))
+                  (else '()))))
+      (if (or (not (memq operation '(put! copy! use! put-batch! copy-batch! use-batch! run! retrieve retrieve-batch)))
               (not (symbol? identity))
               (not (and (list? route-source) (pair? route-source)))
+              (not ((self '~route-admissible?) route-source))
               (not (equal? route-target '()))
               (not (list? serialization))
               (not (integer? terminal-index)))
           (error 'authentication-error "Invalid terminal invocation envelope"))
       (let* ((key-path
-              (if self-route?
-                  '(*crypto* interface public-key)
-                  ((self '~bridge-route-path)
-                   (reverse route-source)
-                   '(*crypto* interface public-key))))
+              ((self '~bridge-route-path) (reverse route-source)
+               '(*crypto* interface public-key)))
+             (supplied-object ((standard 'deserialize) serialization))
+             (operation-paths
+              (cond
+               ((and (eq? operation 'retrieve) (assoc 'path arguments))
+                (list ((self '~ledger-path) (cadr (assoc 'path arguments)))))
+               ((and (eq? operation 'retrieve-batch)
+                     (assoc 'paths arguments)
+                     (list? (cadr (assoc 'paths arguments))))
+                (map (lambda (path) ((self '~ledger-path) path))
+                     (cadr (assoc 'paths arguments))))
+               (else '())))
              (object
-              ((ledger 'read) terminal-index
-               ((standard 'deserialize) serialization)
-               (cons
-                ((self '~ledger-path) key-path)
-                (cond
-                 ((and (eq? operation 'resolve) (assoc 'path arguments))
-                  (list
-                   ((self '~ledger-path)
-                    (cadr (assoc 'path arguments)))))
-                 ((and (eq? operation 'resolve-batch)
-                       (assoc 'paths arguments)
-                       (list? (cadr (assoc 'paths arguments))))
-                  (map (lambda (path) ((self '~ledger-path) path))
-                       (cadr (assoc 'paths arguments))))
-                 (else '())))))
-             (public-key ((self '~get) standard object key-path))
-             (local-audience
-              (cadr (assoc 'id
-                           ((self '~ref) ((ledger 'config))
-                            '(public identity))))))
-        (if (not (equal? audience local-audience))
-            (error 'authentication-error
-                   "Federated invocation audience does not match terminal"))
+              ((ledger 'read) terminal-index supplied-object
+               (if retained-provider?
+                   (list ((self '~ledger-path) key-path))
+                   (cons ((self '~ledger-path) key-path) operation-paths))))
+             (public-key ((self '~get) standard object key-path)))
         (if (or (not (byte-vector? public-key))
                 (not (crypto-verify
                       public-key signature
@@ -888,30 +880,202 @@
                         operation arguments value)))))
             (error 'authentication-error
                    "Could not verify federated invocation signature"))
-        (let ((data-head
-               (and (assoc 'data-object value)
-                    (assoc 'data-head-index value)
-                    ((ledger 'read)
-                     (cadr (assoc 'data-head-index value))
-                     ((standard 'deserialize)
-                      (cadr (assoc 'data-object value)))
-                     (if (eq? operation 'resolve-batch)
-                         (map (lambda (path) ((self '~ledger-path) path))
-                              (cadr (assoc 'paths arguments)))
-                         ((self '~ledger-path)
-                          (cadr (assoc 'path arguments))))))))
-          `((principal ,((self '~route-principal) route-source identity))
-            (context ((latest-index ,(- ((ledger 'size)) 1))
-                      (authentication-index ,terminal-index)))
-            ,@(if data-head
-                  `((data-head ,data-head)
-                    (data-head-index
-                     ,(cadr (assoc 'data-head-index value))))
-                  '()))))))
+        (let* ((resolved
+                (and retained-provider?
+                     (begin
+                       (if (not (and (list? provider-paths)
+                                     (pair? provider-paths)))
+                           (error 'argument-error
+                                  "Retained retrieval requires committed paths"))
+                       ((ledger 'read)
+                        terminal-index supplied-object
+                        `((paths ,operation-paths)
+                          (resolve-latest-perm? #t))))))
+               (resolved-paths
+                (and resolved (list? resolved)
+                     (assoc 'paths resolved)
+                     (cadr (assoc 'paths resolved))))
+               (provider-paths
+                (if retained-provider?
+                    (if (and (list? resolved) (= (length resolved) 2)
+                             (assoc 'object resolved) (assoc 'paths resolved)
+                             (sync-node? (cadr (assoc 'object resolved)))
+                             (list? resolved-paths)
+                             (= (length resolved-paths)
+                                (length provider-paths)))
+                        (map (lambda (path)
+                               ((self '~public-retained-path) path))
+                             resolved-paths)
+                        (error 'integrity-error
+                               "Invalid resolved retained paths"))
+                    provider-paths)))
+          (if retained-provider?
+              (for-each
+               (lambda (path)
+                 (if (not ((ledger 'pinned?) path))
+                     (error 'availability-error
+                            "Responder has not permanently retained path: ~S" path)))
+               provider-paths))
+          (let* ((data-head
+                  (if retained-provider?
+                      (cadr (assoc 'object resolved))
+                      (and (assoc 'data-object value)
+                           (assoc 'data-head-index value)
+                           ((ledger 'read)
+                            (cadr (assoc 'data-head-index value))
+                            ((standard 'deserialize)
+                             (cadr (assoc 'data-object value)))
+                            (if (eq? operation 'retrieve-batch)
+                                (map (lambda (path) ((self '~ledger-path) path))
+                                     (cadr (assoc 'paths arguments)))
+                                ((self '~ledger-path)
+                                 (cadr (assoc 'path arguments))))))))
+                 (data-head-index
+                  (if retained-provider? terminal-index
+                      (and data-head (cadr (assoc 'data-head-index value))))))
+            `((principal ,((self '~route-principal) route-source identity))
+              (context ((latest-index ,(- ((ledger 'size)) 1))
+                        (authentication-index ,terminal-index)))
+              ,@(if retained-provider?
+                    `((provider-paths ,provider-paths)) '())
+              ,@(if data-head
+                    `((data-head ,data-head)
+                      (data-head-index ,data-head-index))
+                    '())))))))
 
   ;; Private implementation helpers.
 
-  (define-method (~verify-resolve-batch-response self ledger head arguments response)
+  (define-method (~name-admissible? self name)
+    ;; Alias symbols must survive the exact durable expression codec canonically.
+    (and (symbol? name)
+         (let* ((encoded (expression->byte-vector name))
+                (decoded (byte-vector->expression encoded)))
+           (and (symbol? decoded)
+                (equal? (symbol->string decoded) (symbol->string name))
+                (equal? encoded (expression->byte-vector decoded))))))
+
+  (define-method (~route-admissible? self route)
+    (and (list? route)
+         (let loop ((route route))
+           (or (null? route)
+               (and ((self '~name-admissible?) (car route))
+                    (loop (cdr route)))))))
+
+  (define-method (~public-retained-path self path)
+    (let loop ((path path) (result '()))
+      (if (null? path) result
+          (let ((segment (car path)))
+            (cond ((integer? segment)
+                   (loop (cdr path) (append result (list segment))))
+                  ((and (list? segment) (= (length segment) 3)
+                        (eq? (car segment) '*bridge*)
+                        (eq? (caddr segment) 'chain))
+                   (loop (cdr path)
+                         (append result (list '*bridge* (cadr segment)))))
+                  ((and (list? segment) (pair? segment))
+                   (loop (cdr path) (append result segment)))
+                  (else
+                   (error 'integrity-error
+                          "Invalid resolved retained path: ~S" path)))))))
+
+  (define-method (~chain-path? self path)
+    (let* ((path ((self '~ledger-path) path))
+           (last (and (pair? path) (car (reverse path)))))
+      (and (pair? last) (= (length last) 3)
+           (eq? (car last) '*bridge*) (eq? (caddr last) 'chain))))
+
+  (define-method (~chain-indices self standard node)
+    ;; Negotiate a contained structural inventory with an authenticated Chain.
+    (let ((result
+           ((standard 'deep-call) node '()
+            '(lambda (chain)
+               (if (member 'indices (chain '*api*)) ((chain 'indices))
+                   (let ((size ((chain 'size))))
+                     (if (not (and (integer? size) (>= size 0)))
+                         (error 'integrity-error "Invalid historical Chain size"))
+                     (let loop ((index 0) (indexes '()) (complete? #t))
+                       (if (= index size) `(chain ,(reverse indexes) ,complete?)
+                           (let ((available?
+                                  (not (equal? ((chain 'get) index) '(unknown)))))
+                             (loop (+ index 1)
+                                   (if available? (cons index indexes) indexes)
+                                   (and complete? available?)))))))))))
+      (if (not (and (list? result) (= (length result) 3)
+                    (eq? (car result) 'chain) (list? (cadr result))
+                    (boolean? (caddr result))
+                    (let loop ((indexes (cadr result)) (previous -1))
+                      (or (null? indexes)
+                          (and (integer? (car indexes)) (> (car indexes) previous)
+                               (loop (cdr indexes) (car indexes)))))))
+          (error 'integrity-error "Invalid Chain inventory: ~S" result))
+      result))
+
+  (define-method (~resolve-retained-proof-path self standard source path)
+    ;; Derive every latest selection from one digest-anchored permanent proof.
+    (if (not (and (list? path) (pair? path) (integer? (car path))))
+        (error 'integrity-error "Invalid retained history path: ~S" path))
+    (let* ((requested (car path))
+           (inventory
+            (and (= requested -1) ((self '~chain-indices) standard source)))
+           (indexes (and inventory (cadr inventory)))
+           (index (if inventory
+                      (if (null? indexes)
+                          (error 'availability-error
+                                 "Retained Chain has no permanent payload")
+                          (car (reverse indexes)))
+                      requested))
+           (remaining (cdr path)))
+      (if (null? remaining) (list index)
+          (let ((tree-path (car remaining)))
+            (if (not (list? tree-path))
+                (error 'integrity-error "Invalid retained history path: ~S" path))
+            (if (null? (cdr remaining)) (list index tree-path)
+                (let* ((head ((standard 'deep-get) source (list index)))
+                       (nested (and (sync-node? head)
+                                    ((standard 'deep-get) head (list tree-path)))))
+                  (if (or (not (sync-node? nested))
+                          (equal? nested '(nothing))
+                          (equal? nested '(unknown)))
+                      (error 'availability-error
+                             "Retained Chain is unavailable: ~S" tree-path))
+                  (append
+                   (list index tree-path)
+                   ((self '~resolve-retained-proof-path)
+                    standard nested (cdr remaining)))))))))
+
+  (define-method (~resource-exercise self method arguments)
+    ;; Recalculate one opaque resource result from proof-selected material.
+    (if (not (list? arguments))
+        (error 'argument-error "Resource arguments must be a proper list"))
+    (if (and method (not (null? method)) (not (symbol? method)))
+        (error 'argument-error "Resource method must be a symbol"))
+    (if (and (or (not method) (null? method)) (pair? arguments))
+        (error 'argument-error "Blank resource method requires blank arguments"))
+    `(lambda (running)
+       ,(if (or (not method) (null? method))
+            '`((class ,(running '*name*))
+               (object-hash ,(sync-digest (running)))
+               (code-hash ,(sync-digest (sync-car (running)))))
+            `(apply (running ',method) ',arguments))))
+
+  (define-method (~retrieved-value self standard object path method arguments)
+    ;; Return inert content or locally exercise an authenticated resource proof.
+    (let ((value ((self '~get) standard object path)))
+      (if (not (sync-node? value))
+          (begin
+            (if (or method (pair? arguments))
+                (error 'argument-error
+                       "Inert retrieve requires blank method and arguments"))
+            value)
+          (if (and ((self '~chain-path?) path)
+                   (or (not method) (null? method)) (null? arguments))
+              ((self '~chain-indices) standard value)
+              (car
+               ((standard 'deep-call!) object ((self '~ledger-path) path)
+                ((self '~resource-exercise) method arguments)))))))
+
+  (define-method (~verify-retrieve-batch-response self ledger head arguments response
+                                                  (resolve-latest? #f))
     ;; Verify every declared result against one same-head terminal multiproof.
     (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (proof-entry (and (list? response) (assoc 'proof response)))
@@ -920,15 +1084,41 @@
                        ((standard 'deserialize) (cadr proof-entry))))
            (paths (and (assoc 'paths arguments)
                        (cadr (assoc 'paths arguments))))
-           (results (and results-entry (cadr results-entry))))
-      (if (not (and proof (list? paths) (list? results)
+           (results (and results-entry (cadr results-entry)))
+           (methods (if (assoc 'methods arguments)
+                        (cadr (assoc 'methods arguments))
+                        (and (list? paths) (map (lambda (path) #f) paths))))
+           (resource-arguments
+            (if (assoc 'arguments arguments)
+                (cadr (assoc 'arguments arguments))
+                (and (list? paths) (map (lambda (path) '()) paths))))
+           (merged (and proof
+                        (equal? (sync-digest proof) (sync-digest head))
+                        ((standard 'deep-merge!) proof head))))
+      (if (not (and merged (list? paths) (list? results)
+                    (list? methods) (list? resource-arguments)
                     (= (length paths) (length results))
-                    (equal? (sync-digest proof) (sync-digest head))))
+                    (= (length paths) (length methods))
+                    (= (length paths) (length resource-arguments))))
           (error 'integrity-error
-                 "Terminal resolve batch does not match its committed object"))
-      (let loop ((paths paths) (results results))
+                 "Terminal retrieve batch does not match its committed object"))
+      (let loop
+          ((paths
+            (if resolve-latest?
+                (map
+                 (lambda (path)
+                   ((self '~public-retained-path)
+                    ((self '~resolve-retained-proof-path)
+                     standard proof ((self '~ledger-path) path))))
+                 paths)
+                paths))
+           (methods methods)
+           (resource-arguments resource-arguments)
+           (results results))
         (if (null? paths) response
-            (let* ((value ((self '~get) standard proof (car paths)))
+            (let* ((value
+                    ((self '~retrieved-value) standard merged (car paths)
+                     (car methods) (car resource-arguments)))
                    (value
                     (if (and (assoc 'expression? arguments)
                              (cadr (assoc 'expression? arguments))
@@ -945,9 +1135,11 @@
               (if (not (equal? value declared))
                   (error 'integrity-error
                          "Terminal batch result does not match its proof"))
-              (loop (cdr paths) (cdr results)))))))
+              (loop (cdr paths) (cdr methods) (cdr resource-arguments)
+                    (cdr results)))))))
 
-  (define-method (~verify-resolve-response self ledger head arguments response)
+  (define-method (~verify-retrieve-response self ledger head arguments response
+                                            (resolve-latest? #f))
     (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (proof-entry (and (list? response) (assoc 'proof response)))
            (proof (and proof-entry
@@ -955,12 +1147,27 @@
       (if (not (and proof
                     (equal? (sync-digest proof) (sync-digest head))))
           (error 'integrity-error
-                 "Terminal resolve response does not match its committed object"))
+                 "Terminal retrieve response does not match its committed object"))
       (let* ((merged
               (if (assoc 'ancestor? response) proof
                   ((standard 'deep-merge!) proof head)))
-             (path (cadr (assoc 'path arguments)))
-             (value ((self '~get) standard merged path))
+             (path
+              (let ((path (cadr (assoc 'path arguments))))
+                (if resolve-latest?
+                    ((self '~public-retained-path)
+                     ((self '~resolve-retained-proof-path)
+                      standard proof ((self '~ledger-path) path)))
+                    path)))
+             (method (and (assoc 'method arguments)
+                          (cadr (assoc 'method arguments))))
+             (resource-arguments
+              (if (assoc 'arguments arguments)
+                  (cadr (assoc 'arguments arguments)) '()))
+             (value
+              (if (assoc 'ancestor? response)
+                  ((self '~get) standard merged path)
+                  ((self '~retrieved-value) standard merged path method
+                   resource-arguments)))
              (value
               (if (and (assoc 'expression? arguments)
                        (cadr (assoc 'expression? arguments))
@@ -969,19 +1176,19 @@
                   value)))
         (if (not (equal? value (cadr (assoc 'content response))))
             (error 'integrity-error
-                   "Terminal resolve response does not match its committed object"))
+                   "Terminal retrieve response does not match its committed object"))
         response)))
 
   (define-method (~trace-object self ledger index path)
     (let* ((standard (sync-eval ((self '~field!) 'standard)))
-           (resolve-path
+           (retrieve-path
             (if (and (pair? path) (integer? (car path)))
                 path (cons index path)))
-           (attempt ((ledger 'resolve) resolve-path)))
+           (attempt ((ledger 'retrieve) retrieve-path)))
       (if (not (equal? attempt '(unknown)))
           ((standard 'deserialize)
            ((ledger 'trace) (cons index path)))
-          (let* ((edge ((ledger 'peer-head) resolve-path index))
+          (let* ((edge ((ledger 'peer-head) retrieve-path index))
                  (response
                   ((self '~remote)
                    (cadr (assoc 'interface edge))
@@ -992,7 +1199,7 @@
                  (head
                   ((standard 'deserialize) response)))
             ((ledger 'merge-head!)
-             `((path ,resolve-path) (index ,index)) head)))))
+             `((path ,retrieve-path) (index ,index)) head)))))
 
   (define-method (~identity-verify self identity)
     (let ((id (and (list? identity) (assoc 'id identity)
@@ -1010,178 +1217,113 @@
                  "Invalid journal identity commitment: ~S" identity))
       id))
 
-  (define-method (~rotation-verify self identity rotation previous-key)
-    (let* ((identity-id ((self '~identity-verify) identity))
+  (define-method (~rotation-verify self version identity rotation previous-key)
+    (let* ((identity-id (and (= version 1) ((self '~identity-verify) identity)))
            (field (lambda (key) (and (list? rotation) (assoc key rotation)
                                      (cadr (assoc key rotation)))))
-           (index (field 'index))
-           (previous-index (field 'previous-index))
-           (included-previous (field 'previous-key))
-           (public-key (field 'public-key))
+           (index (field 'index)) (previous-index (field 'previous-index))
+           (included-previous (field 'previous-key)) (public-key (field 'public-key))
            (signature (field 'signature)))
-      (if (not (and (list? rotation) (= (length rotation) 5)
-                    (integer? index) (integer? previous-index)
-                    (< previous-index index)
-                    (byte-vector? included-previous)
-                    (byte-vector? public-key)
+      (if (not (and (memv version '(1 2)) (list? rotation) (= (length rotation) 5)
+                    (integer? index) (integer? previous-index) (< previous-index index)
+                    (byte-vector? included-previous) (byte-vector? public-key)
                     (byte-vector? signature)))
-          (error 'integrity-error
-                 "Malformed journal signing-key transition: ~S" rotation))
+          (error 'integrity-error "Malformed journal signing-key transition: ~S" rotation))
       (if (not (equal? included-previous previous-key))
-          (error 'integrity-error
-                 "Journal signing-key transition does not start at accepted key"))
-      (if (not (crypto-verify
-                previous-key signature
+          (error 'integrity-error "Journal signing-key transition does not start at accepted key"))
+      (if (not (crypto-verify previous-key signature
                 (expression->byte-vector
-                 (list 'sync-web/journal-key-rotation/v1
-                       identity-id index previous-index
-                       previous-key public-key))))
-          (error 'integrity-error
-                 "Journal signing-key transition signature does not verify"))
+                 (if (= version 1)
+                     (list 'sync-web/journal-key-rotation/v1 identity-id index previous-index previous-key public-key)
+                     (list 'sync-web/journal-key-rotation/v2 index previous-index previous-key public-key)))))
+          (error 'integrity-error "Journal signing-key transition signature does not verify"))
       public-key))
 
-  (define-method (~signature-verify self chain identity-id expected-key accepted-index)
-    (let* ((standard (sync-eval ((self '~field!) 'standard)))
-           (chain-copy chain)
+  (define-method (~signature-verify self chain expected-key accepted-index)
+    (let* ((standard (sync-eval ((self '~field!) 'standard))) (chain-copy chain)
            (field (lambda* (path (index -1))
                     ((standard 'deep-get) chain `(,index (*crypto* ,@path))))))
-      (for-each
-       (lambda (path)
-         (set! chain-copy
-               ((standard 'deep-set!) chain-copy path #u())))
-       '((-1 (*crypto* public-key))
-         (-1 (*crypto* signature))
-         (-1 (*crypto* journal public-key))
-         (-1 (*crypto* journal signature))))
-      (let* ((head-index
-              (- ((standard 'deep-call) chain '()
-                  '(lambda (chain) ((chain 'size)))) 1))
-             (identity `((id ,(field '(journal identity id)))
-                         (nonce ,(field '(journal identity nonce)))))
-             (included-identity ((self '~identity-verify) identity))
+      (for-each (lambda (path) (set! chain-copy ((standard 'deep-set!) chain-copy path #u())))
+                '((-1 (*crypto* public-key)) (-1 (*crypto* signature))
+                  (-1 (*crypto* journal public-key)) (-1 (*crypto* journal signature))))
+      (let* ((head-index (- ((standard 'deep-call) chain '() '(lambda (chain) ((chain 'size)))) 1))
+             (version (let ((value (field '(journal format-version))))
+                        (if (equal? value '(nothing)) 1 value)))
+             (identity (and (= version 1)
+                            `((id ,(field '(journal identity id)))
+                              (nonce ,(field '(journal identity nonce))))))
+             (_ (if (= version 1) ((self '~identity-verify) identity)
+                    (let ((salt (field '(journal key-derivation-salt))))
+                      (if (not (and (= version 2) (byte-vector? salt) (= (length salt) 32)))
+                          (error 'integrity-error "Invalid Journal head format")))))
              (latest-rotation-index (field '(journal latest-rotation-index)))
              (included-key (field '(journal public-key)))
              (signature (field '(journal signature)))
              (authorized-key
-              (if (or (not (integer? latest-rotation-index))
-                      (< latest-rotation-index -1)
+              (if (or (not (integer? latest-rotation-index)) (< latest-rotation-index -1)
                       (> latest-rotation-index head-index))
-                  (error 'integrity-error
-                         "Invalid latest journal key rotation index")
+                  (error 'integrity-error "Invalid latest journal key rotation index")
                   (if (not expected-key) included-key
                       (let* ((rotations
-                              (let gather ((index latest-rotation-index)
-                                           (result '()))
+                              (let gather ((index latest-rotation-index) (result '()))
                                 (if (<= index accepted-index) result
-                                    (let* ((rotation
-                                            (field '(journal rotation) index))
-                                           (included-index
-                                            (and (list? rotation)
-                                                 (assoc 'index rotation)
-                                                 (cadr (assoc 'index rotation))))
-                                           (previous-index
-                                            (and (list? rotation)
-                                                 (assoc 'previous-index rotation)
-                                                 (cadr (assoc 'previous-index rotation)))))
-                                      (if (not (and (integer? included-index)
-                                                    (= included-index index)
-                                                    (integer? previous-index)
-                                                    (< previous-index index)))
-                                          (error 'integrity-error
-                                                 "Missing or malformed journal key rotation"))
-                                      (gather previous-index
-                                              (cons rotation result))))))
+                                    (let* ((rotation (field '(journal rotation) index))
+                                           (included-index (and (list? rotation) (assoc 'index rotation)
+                                                                (cadr (assoc 'index rotation))))
+                                           (previous-index (and (list? rotation) (assoc 'previous-index rotation)
+                                                                (cadr (assoc 'previous-index rotation)))))
+                                      (if (not (and (integer? included-index) (= included-index index)
+                                                    (integer? previous-index) (< previous-index index)))
+                                          (error 'integrity-error "Missing or malformed journal key rotation"))
+                                      (gather previous-index (cons (list index rotation) result))))))
                              (verified
-                              (let loop ((items rotations)
-                                         (public-key expected-key)
-                                         (previous-rotation-index #f))
+                              (let loop ((items rotations) (public-key expected-key) (prior #f))
                                 (if (null? items) public-key
-                                    (let* ((rotation (car items))
-                                           (index (cadr (assoc 'index rotation)))
-                                           (previous-index
-                                            (cadr (assoc 'previous-index rotation))))
-                                      (if (if previous-rotation-index
-                                              (not (= previous-index
-                                                      previous-rotation-index))
-                                              (> previous-index accepted-index))
-                                          (error 'integrity-error
-                                                 "Journal key rotations do not continue checkpoint"))
+                                    (let* ((index (caar items)) (rotation (cadar items))
+                                           (previous-index (cadr (assoc 'previous-index rotation)))
+                                           (rotation-version
+                                            (let ((value (field '(journal format-version) index)))
+                                              (if (equal? value '(nothing)) 1 value)))
+                                           (rotation-identity
+                                            (and (= rotation-version 1)
+                                                 `((id ,(field '(journal identity id) index))
+                                                   (nonce ,(field '(journal identity nonce) index))))))
+                                      (if (if prior (not (= previous-index prior)) (> previous-index accepted-index))
+                                          (error 'integrity-error "Journal key rotations do not continue checkpoint"))
                                       (loop (cdr items)
-                                            ((self '~rotation-verify)
-                                             identity rotation public-key)
+                                            ((self '~rotation-verify) rotation-version rotation-identity rotation public-key)
                                             index))))))
                         verified)))))
-        (cond ((and identity-id
-                    (not (equal? identity-id included-identity)))
-               (error 'integrity-error
-                      "Signed journal identity does not match expected identity"))
-              ((not (equal? authorized-key included-key))
-               (error 'integrity-error
-                      "Signed journal key does not continue accepted key"))
-              ((not (crypto-verify included-key signature
-                                   (sync-digest chain-copy)))
-               (error 'integrity-error "Included signature does not verify"))
-              (else included-key)))))
+        (if (not (equal? authorized-key included-key))
+            (error 'integrity-error "Signed journal key does not continue accepted key"))
+        (if (not (crypto-verify included-key signature (sync-digest chain-copy)))
+            (error 'integrity-error "Included signature does not verify"))
+        included-key)))
 
   (define-method (~verify-peer-response self response info interface checkpoint)
     (let* ((standard (sync-eval ((self '~field!) 'standard)))
            (chain ((standard 'deserialize) response))
-           (size ((standard 'deep-call) chain '()
-                  '(lambda (chain) ((chain 'size)))))
-           (existing-identity ((self '~required) checkpoint 'identity))
-           (identity (if (null? existing-identity)
-                         (and (list? info) (assoc 'identity info)
-                              (cadr (assoc 'identity info)))
-                         existing-identity))
-           (identity-id ((self '~identity-verify) identity))
-           (bound-id ((self '~required) checkpoint 'identity-id))
+           (size ((standard 'deep-call) chain '() '(lambda (chain) ((chain 'size)))))
            (expected-key ((self '~required) checkpoint 'public-key))
            (accepted-index ((self '~required) checkpoint 'accepted-index)))
-      (if (= size 0)
-          (error 'bridge-sync-error
-                 "A reciprocal bridge requires a signed peer head"))
-      (if (and (byte-vector? bound-id) (not (equal? bound-id identity-id)))
-          (error 'bridge-name-error
-                 "Peer identity does not match permanent alias binding"))
-      (if (and (not (eq? ((self '~required) checkpoint 'status) 'active))
-               (eq? ((self '~required) checkpoint 'acceptance) 'preapproved)
-               (not (equal?
-                     (let ((preapproved
-                            ((self '~required) checkpoint 'preapproval)))
-                       (if (byte-vector? preapproved) preapproved bound-id))
-                     identity-id)))
-          (error 'bridge-acceptance-error
-                 "Reciprocal bridge identity is not preapproved"))
-      (let ((public-key
-             ((self '~signature-verify)
-              chain identity-id
-              (if (byte-vector? expected-key) expected-key #f)
-              accepted-index)))
-        (if (and info
-                 (or (not (equal? identity-id
-                                  ((self '~identity-verify)
-                                   (cadr (assoc 'identity info)))))
-                     (not (equal? public-key
-                                  (cadr (assoc 'public-key info))))))
-            (error 'bridge-name-error
-                   "Peer descriptor does not match signed identity/key"))
-        (let ((signed-interface
-               ((standard 'deep-get)
-                chain '(-1 (*crypto* interface endpoint))))
-              (info-interface
-               (and info (assoc 'interface info)
-                    (cadr (assoc 'endpoint
-                                 (cadr (assoc 'interface info)))))))
+      (if (= size 0) (error 'bridge-sync-error "A reciprocal bridge requires a signed peer head"))
+      (let ((public-key ((self '~signature-verify) chain
+                         (if (byte-vector? expected-key) expected-key #f) accepted-index)))
+        (if (and (not (eq? ((self '~required) checkpoint 'status) 'active))
+                 (eq? ((self '~required) checkpoint 'acceptance) 'preapproved)
+                 (not (equal? ((self '~required) checkpoint 'preapproval)
+                              (sync-hash public-key))))
+            (error 'bridge-acceptance-error
+                   "Reciprocal bridge signing key hash is not preapproved"))
+        (if (and info (not (equal? public-key (cadr (assoc 'public-key info)))))
+            (error 'bridge-name-error "Peer descriptor does not match signed key"))
+        (let ((signed-interface ((standard 'deep-get) chain '(-1 (*crypto* interface endpoint))))
+              (info-interface (and info (assoc 'interface info)
+                                   (cadr (assoc 'endpoint (cadr (assoc 'interface info)))))))
           (if (or (not (equal? signed-interface interface))
-                  (and info-interface
-                       (not (equal? signed-interface info-interface))))
-              (error 'bridge-endpoint-error
-                     "Peer interface does not match signed descriptor")))
-        `((serialization ,response)
-          (identity ,identity)
-          (identity-id ,identity-id)
-          (public-key ,public-key)
-          (index ,(- size 1))
+                  (and info-interface (not (equal? signed-interface info-interface))))
+              (error 'bridge-endpoint-error "Peer interface does not match signed descriptor")))
+        `((serialization ,response) (public-key ,public-key) (index ,(- size 1))
           (checkpoint ,((self '~required) checkpoint 'checkpoint))))))
 
   (define-method (~route-principal self route identity)
@@ -1215,6 +1357,8 @@
              (indexed (cdr segments) (car segments)))
             ((memq (car segments) '(*state* *transition* *crypto*))
              `(,index ,segments))
+            ((and (eq? (car segments) '*bridge*) (null? (cdr segments)))
+             `(,index (*bridge*)))
             ((or (eq? (car segments) '*bridge*) (symbol? (car segments)))
              (let* ((explicit? (eq? (car segments) '*bridge*))
                     (name (if explicit? (cadr segments) (car segments)))
@@ -1251,6 +1395,23 @@
     ((self '~ref) (byte-vector->expression ((self '~field!) 'config)) path))
 
   (define-method (~config-set! self path value)
+    (if (and (list? path) (>= (length path) 2)
+             (memq (car path) '(peers retired))
+             (not ((self '~name-admissible?) (cadr path))))
+        (error 'bridge-name-error
+               "Bridge alias does not round trip through the expression codec: ~S"
+               (cadr path)))
+    (if (and (list? path) (= (length path) 1)
+             (memq (car path) '(peers retired))
+             (not (and (list? value)
+                       (let valid? ((entries value))
+                         (or (null? entries)
+                             (and (list? (car entries))
+                                  (= (length (car entries)) 2)
+                                  ((self '~name-admissible?) (caar entries))
+                                  (valid? (cdr entries))))))))
+        (error 'bridge-name-error
+               "Malformed or inadmissible Federation alias table: ~S" value))
     ((self '~field!) 'config
      (expression->byte-vector
       (let set-path ((config (byte-vector->expression

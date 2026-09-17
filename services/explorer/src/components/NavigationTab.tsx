@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, JournalPath, TreeNode } from '../types';
+import { AppState, JournalPath, JournalPathSegment, TreeNode } from '../types';
 import { JournalService } from '../services/JournalService';
+import { pathSegmentIdentity } from '../utils/pathUtils';
 
 interface NavigationTabProps {
   appState: AppState;
@@ -12,7 +13,7 @@ interface NavigationTabProps {
 /**
  * Build the child path based on the parent node's path and the child item name
  */
-const buildChildPath = (parentPath: JournalPath, itemName: string): JournalPath => {
+const buildChildPath = (parentPath: JournalPath, itemName: JournalPathSegment): JournalPath => {
   const lastSegment = parentPath[parentPath.length - 1];
 
   if (lastSegment === '*bridge*') {
@@ -41,6 +42,14 @@ const removeNodeFromTree = (nodes: TreeNode[], nodeId: string): TreeNode[] => {
   });
 };
 
+const updateNodeInTree = (nodes: TreeNode[], updated: TreeNode): TreeNode[] =>
+  nodes.map((node) => {
+    if (node.id === updated.id) return { ...updated };
+    return node.children
+      ? { ...node, children: updateNodeInTree(node.children, updated) }
+      : node;
+  });
+
 const NavigationTab: React.FC<NavigationTabProps> = ({
   appState,
   journalService,
@@ -60,7 +69,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
     const rootNodes: TreeNode[] = [
       {
         id: 'local-state',
-        label: 'state',
+        label: 'State',
         type: 'directory',
         path: ['*state*'],
         isLocal: true,
@@ -105,7 +114,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
   const createBridgeChainChildren = (node: TreeNode): TreeNode[] => [
     {
       id: `${node.id}-state`,
-      label: 'state',
+      label: 'State',
       type: 'directory',
       valueType: 'directory',
       path: [...node.path, '*state*'],
@@ -128,7 +137,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
       // Special handling for bridge chain nodes
       if (isBridgeChainNode(node.path)) {
         node.children = createBridgeChainChildren(node);
-        setTreeData([...treeData]);
+        setTreeData((current) => updateNodeInTree(current, node));
         return;
       }
 
@@ -141,18 +150,17 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
         node.type = 'file';
         node.valueType = 'value';
         node.children = undefined;
-        setTreeData([...treeData]);
+        setTreeData((current) => updateNodeInTree(current, node));
         return;
       }
 
       const children: TreeNode[] = directory
-        .filter(entry => entry.name !== '*directory*') // Hide the directory marker file
         .sort((a, b) => a.name.localeCompare(b.name)) // Sort alphabetically
         .map(entry => {
           const nodeType: TreeNode['type'] =
             entry.type === 'directory' ? 'directory' : 'file';
           return {
-            id: `${node.id}-${entry.pathSegment ?? entry.name}`,
+            id: `${node.id}-${pathSegmentIdentity(entry.pathSegment ?? entry.name)}`,
             label: entry.name,
             type: nodeType,
             valueType: entry.type,
@@ -162,7 +170,7 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
         });
 
       node.children = children;
-      setTreeData([...treeData]);
+      setTreeData((current) => updateNodeInTree(current, node));
     } catch (error) {
       node.children = [{
         id: `${node.id}-error`,
@@ -171,8 +179,9 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
         valueType: 'unknown',
         path: node.path,
         isLocal: false,
+        error: true,
       }];
-      setTreeData([...treeData]);
+      setTreeData((current) => updateNodeInTree(current, node));
     }
   };
 
@@ -232,8 +241,8 @@ const NavigationTab: React.FC<NavigationTabProps> = ({
   const renderNode = (node: TreeNode, level: number = 0): JSX.Element => {
     const isExpanded = appState.expandedNodes.has(node.id);
     const isSelected = JSON.stringify(node.path) === JSON.stringify(appState.selectedPath);
-    const isError = node.label.startsWith('Error:');
-    const isSpecial = node.label === 'bridge' || node.label === 'state';
+    const isError = node.error === true;
+    const isSpecial = node.label === 'bridge' || node.label === 'State';
     const isDirectory = node.type === 'directory';
     const nodeKind = node.valueType ?? (isDirectory ? 'directory' : 'value');
     const typeBadge =

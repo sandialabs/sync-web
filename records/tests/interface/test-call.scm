@@ -6,28 +6,28 @@
     ;; Stored programs are ordinary staged expressions beneath user state.
     (for-each
      (lambda (entry)
-       (test-submit ((alice journal-1 'set!)
+       (test-submit ((alice journal-1 'put!)
                      `(*state* alice programs ,(car entry)) (cadr entry))
         :expect #t))
      `((echo (lambda (journal . arguments) arguments))
        (keyword (lambda* (journal (value #f)) value))
-       (read (lambda (journal path) ((journal 'get) path)))
+       (read (lambda (journal path) ((journal 'use!) path)))
        (write-read
         (lambda (journal path value)
-          ((journal 'set!) path value)
-          ((journal 'get) path)))
+          ((journal 'put!) path value)
+          ((journal 'use!) path)))
        (counter
         (lambda (journal path)
-          (let* ((current ((journal 'get) path))
+          (let* ((current ((journal 'use!) path))
                  (next (if (equal? current '(nothing)) 1 (+ current 1))))
-            ((journal 'set!) path next)
+            ((journal 'put!) path next)
             next)))
        (nested
         (lambda (journal program-path arguments)
-          ((journal 'call!) program-path arguments)))
+          ((journal 'run!) program-path arguments)))
        (direct-call
         (lambda (journal program-path)
-          (%sync-call-program 'call!
+          (%sync-call-program 'run!
                           `((path ,program-path) (arguments ())
                             (authentication ((identity (*state* bob))
                                              (credentials "forged")))))))
@@ -60,25 +60,25 @@
        (remove-admin
         (lambda (journal target arguments)
           ((journal '*admins-set*) '((admins ())))
-          ((journal 'call!) target arguments)))
+          ((journal 'run!) target arguments)))
        (rotate-secret
         (lambda (journal secret probe)
           ((journal '*secret*) `((secret ,secret)))
-          ((journal 'get) probe)))
+          ((journal 'use!) probe)))
        (replace-self
         (lambda (journal own-path)
-          ((journal 'set!) own-path
+          ((journal 'put!) own-path
            '(lambda (journal . arguments) '(replacement version)))
           '(original version)))
        (admins (lambda (journal) ((journal '*admins-get*))))
        (partial
         (lambda (journal path value)
-          ((journal 'set!) path value)
+          ((journal 'put!) path value)
           (error 'expected "Fail after completed nested write")))
        (ambient (lambda (journal) (rootlet)))
        (return-capability (lambda (journal) journal))
        (argument-capability
-        (lambda (journal path) ((journal 'set!) path journal)))
+        (lambda (journal path) ((journal 'put!) path journal)))
        (no-journal (lambda () #t))
        (not-procedure 17)))
 
@@ -109,191 +109,218 @@
       '(*state* alice programs argument-capability))
     (define no-journal-path '(*state* alice programs no-journal))
     (define not-procedure-path '(*state* alice programs not-procedure))
-    (define alice-call-rule
-      '((principal (*state* alice)) (path (programs))
-        (get #t) (set! #f) (call! #t) (resolve #f)))
-    (define alice-call-envelope
-      `((user (*state* alice)) (rule ,alice-call-rule)))
+    (define bob-call-rule
+      '((principal (*state* bob)) (path (programs))
+         (put! #f) (run! #t) (retrieve #f)))
+    (define bob-call-envelope
+      `((user (*state* alice)) (rule ,bob-call-rule)))
 
-    ;; A fresh policy grants call authority only to Interface administrators.
-    ;; Path ownership and ordinary read permission are both insufficient.
-    (test-submit ((alice journal-1 'call!) echo-path '(owner denied))
+    ;; A fresh policy denies run! by default. Namespace ownership and ordinary
+    ;; read permission remain independently insufficient.
+    (test-submit ((alice journal-1 'run!) echo-path '(owner denied))
       :expect error-result?)
-    (test-submit ((alice journal-2 'set!) counter-path
+    (test-submit ((alice journal-2 'put!) counter-path
                   '(lambda (journal path)
-                     ((journal 'set!) path 1)))
+                     ((journal 'put!) path 1)))
       :expect #t)
-    (test-submit ((alice journal-1 journal-2 'call!) counter-path
+    (test-submit ((alice journal-1 journal-2 'run!) counter-path
                   '((*state* alice remote-denied-count)))
       :expect error-result?)
-    (test-submit ((alice journal-2 'get) '(*state* alice remote-denied-count))
+    (test-submit ((alice journal-2 'use!) '(*state* alice remote-denied-count))
       :expect '(nothing))
     (test-submit ((alice journal-1 'authorize!)
                   '((user (*state* alice))
                     (rule ((principal (*state* bob)) (path (programs echo))
-                           (get #t) (set! #f) (resolve #f)))))
+                           (use! ((read-only? #t))) (put! #f) (retrieve #f)))))
       :expect #t)
-    (test-submit ((bob journal-1 'call!) echo-path '(get-only denied))
+    (test-submit ((bob journal-1 'run!) echo-path '(get-only denied))
       :expect error-result?)
-    (test-submit ((*journal* journal-1 'call!) echo-path '(root allowed))
-      :expect '(root allowed))
-    (test-submit ((*journal* journal-1 '*admins-set*)
-                  '((admins ((*state* bob)))))
+    (test-submit ((alice journal-1 'deauthorize!)
+                  '((user (*state* alice))
+                    (rule ((principal (*state* bob)) (path (programs echo))
+                           (use! ((read-only? #t))) (put! #f) (retrieve #f)))))
       :expect #t)
-    (test-submit ((bob journal-1 'call!) echo-path '(admin allowed))
-      :expect '(admin allowed))
-
-    ;; Authorization rules cannot grant call authority. A new rule naming the
-    ;; removed field is rejected, and the denied call cannot execute effects.
-    (test-submit ((alice journal-1 'authorize!) alice-call-envelope)
-      :expect error-result?)
-    (test-submit ((alice journal-1 'call!) counter-path
+    ;; run! can be granted without get. Revocation takes effect before the
+    ;; program loads, so a denied counter call cannot execute effects.
+    (test-submit ((alice journal-1 'authorize!) bob-call-envelope) :expect #t)
+    (test-submit ((bob journal-1 'run!) echo-path '(granted call))
+      :expect '(granted call))
+    (test-submit ((bob journal-1 'use!) echo-path) :expect error-result?)
+    (test-submit ((alice journal-1 'deauthorize!) bob-call-envelope) :expect #t)
+    (test-submit ((bob journal-1 'run!) counter-path
                   '((*state* alice denied-call-count)))
       :expect error-result?)
-    (test-submit ((alice journal-1 'get) '(*state* alice denied-call-count))
+    (test-submit ((alice journal-1 'use!) '(*state* alice denied-call-count))
       :expect '(nothing))
+    (test-submit ((alice journal-1 'authorize!) bob-call-envelope) :expect #t)
+    (test-submit ((alice journal-1 'put!) '(*state* alice nested-source)
+                  '(value 9))
+      :expect #t)
+    (test-submit ((bob journal-1 'run!) read-path
+                  '((*state* alice nested-source)))
+      :expect error-result?)
+    (test-submit ((alice journal-1 'authorize!)
+                  '((user (*state* alice))
+                    (rule ((principal (*state* bob)) (path (nested-source))
+                           (use! ((read-only? #t))) (put! #f) (run! #f) (retrieve #f)))))
+      :expect #t)
+    (test-submit ((bob journal-1 'run!) read-path
+                  '((*state* alice nested-source)))
+      :expect '(value 9))
+    (test-submit ((bob journal-1 'run!) nested-path
+                  `(,echo-path (nested nonadmin)))
+      :expect '(nested nonadmin))
+
+    ;; Root and configured local administrators retain their default authority.
+    (test-submit ((*journal* journal-1 'run!) echo-path '(root allowed))
+      :expect '(root allowed))
+    (test-submit ((*journal* journal-1 '*admins-set*)
+                  '((admins ((bob (*state* bob))))))
+      :expect #t)
+    (test-submit ((bob journal-1 'run!) echo-path '(admin allowed))
+      :expect '(admin allowed))
     (test-submit ((alice journal-1 'authorize!)
                   '((user (*state* alice))
                     (rule ((principal (*state* carol)) (path (programs))
-                           (get #t) (set! #f) (resolve #f)))))
+                           (use! ((read-only? #t))) (put! #f) (retrieve #f)))))
       :expect #t)
-    (test-submit ((carol journal-1 'call!) echo-path '(get-rule denied))
+    (test-submit ((carol journal-1 'run!) echo-path '(get-rule denied))
       :expect error-result?)
 
     ;; Arguments are one explicit list, preserve keywords as data, and are
     ;; applied after the conventional journal argument.
-    (test-submit ((bob journal-1 'call!) echo-path '(1 :flag #t))
+    (test-submit ((bob journal-1 'run!) echo-path '(1 :flag #t))
       :expect '(1 :flag #t))
-    (test-submit ((bob journal-1 'call!) keyword-path '(:value 7))
+    (test-submit ((bob journal-1 'run!) keyword-path '(:value 7))
       :expect 7)
 
     ;; Journal methods use the ordinary Interface calling convention, including
     ;; positional paths and keyword arguments.
-    (test-submit ((alice journal-1 'set!) '(*state* alice source) '(value 9))
+    (test-submit ((alice journal-1 'put!) '(*state* alice source) '(value 9))
       :expect #t)
-    (test-submit ((bob journal-1 'call!) read-path
+    (test-submit ((bob journal-1 'run!) read-path
                   '((*state* alice source)))
       :expect '(value 9))
-    (test-submit ((bob journal-1 'call!) write-read-path
+    (test-submit ((bob journal-1 'run!) write-read-path
                   '((*state* alice written) "stored"))
       :expect "stored")
-    (test-submit ((alice journal-1 'get) '(*state* alice written))
+    (test-submit ((alice journal-1 'use!) '(*state* alice written))
       :expect "stored")
 
     ;; Each method call and outer call executes exactly once rather than replaying
     ;; after its nested calls advance the Journal root.
-    (test-submit ((bob journal-1 'call!) counter-path
+    (test-submit ((bob journal-1 'run!) counter-path
                   '((*state* alice call-count)))
       :expect 1)
-    (test-submit ((alice journal-1 'get) '(*state* alice call-count))
+    (test-submit ((alice journal-1 'use!) '(*state* alice call-count))
       :expect 1)
-    (test-submit ((bob journal-1 'call!) counter-path
+    (test-submit ((bob journal-1 'run!) counter-path
                   '((*state* alice call-count)))
       :expect 2)
 
     ;; Every nested target rechecks the same hidden configured-admin identity.
-    (test-submit ((bob journal-1 'call!) nested-path
+    (test-submit ((bob journal-1 'run!) nested-path
                   `(,echo-path (nested 2)))
       :expect '(nested 2))
-    (test-submit ((bob journal-1 'set!) '(*state* bob programs echo)
+    (test-submit ((bob journal-1 'put!) '(*state* bob programs echo)
                   '(lambda (journal . arguments) arguments))
       :expect #t)
-    (test-submit ((bob journal-1 'call!) nested-path
+    (test-submit ((bob journal-1 'run!) nested-path
                   '((*state* bob programs echo) (nested allowed)))
       :expect '(nested allowed))
     ;; No Journal execution helper or sync-let context predicate exists in
     ;; stored code. Direct attempts fail before effects, while ordinary nested
     ;; calls remain available only through the supplied Interface capability.
-    (test-submit ((bob journal-1 'call!) call-boundary-path '())
+    (test-submit ((bob journal-1 'run!) call-boundary-path '())
       :expect error-result?)
-    (test-submit ((bob journal-1 'call!) direct-call-path
+    (test-submit ((bob journal-1 'run!) direct-call-path
                   '((*state* bob programs echo)))
       :expect error-result?)
-    (test-submit ((bob journal-1 'call!) direct-host-effect-path
+    (test-submit ((bob journal-1 'run!) direct-host-effect-path
                   '((*state* alice direct-host-effect)))
       :expect error-result?)
-    (test-submit ((alice journal-1 'get) '(*state* alice direct-host-effect))
+    (test-submit ((alice journal-1 'use!) '(*state* alice direct-host-effect))
       :expect '(nothing))
     (for-each
      (lambda (path)
-       (test-submit ((bob journal-1 'call!) path '())
+       (test-submit ((bob journal-1 'run!) path '())
          :expect error-result?))
      host-effect-paths)
     (test-submit
-      ((bob journal-1 'call!) '(*state* alice programs decode-host)
+      ((bob journal-1 'run!) '(*state* alice programs decode-host)
        (list (expression->byte-vector #_rootlet)))
       :expect error-result?)
 
     ;; Removing the configured admin takes effect inside an already-running
     ;; program before its next nested dispatch, which cannot execute effects.
-    (test-submit ((bob journal-1 'call!) remove-admin-path
+    (test-submit ((bob journal-1 'run!) remove-admin-path
                   `(,counter-path ((*state* alice removed-admin-count))))
       :expect error-result?)
-    (test-submit ((alice journal-1 'get) '(*state* alice removed-admin-count))
+    (test-submit ((alice journal-1 'use!) '(*state* alice removed-admin-count))
       :expect '(nothing))
     (test-submit ((*journal* journal-1 '*admins-set*)
-                  '((admins ((*state* bob)))))
+                  '((admins ((bob (*state* bob))))))
       :expect #t)
 
     ;; Replacing the current program path cannot change its active closure.
-    (test-submit ((bob journal-1 'call!) replace-self-path
+    (test-submit ((bob journal-1 'run!) replace-self-path
                   `(,replace-self-path))
       :expect '(original version))
-    (test-submit ((bob journal-1 'call!) replace-self-path '())
+    (test-submit ((bob journal-1 'run!) replace-self-path '())
       :expect '(replacement version))
 
     ;; Authentication identity is inherited: root authority remains root, while
     ;; the same program cannot elevate Alice to an administrator.
-    (test-submit ((*journal* journal-1 'call!) admins-path '())
-      :expect '((*state* bob)))
-    (test-submit ((alice journal-1 'call!) admins-path '())
+    (test-submit ((*journal* journal-1 'run!) admins-path '())
+      :expect '((bob (*state* bob))))
+    (test-submit ((alice journal-1 'run!) admins-path '())
       :expect error-result?)
 
-    ;; call! is intentionally non-atomic: a completed nested write remains after
+    ;; run! is intentionally non-atomic: a completed nested write remains after
     ;; a later program error.
-    (test-submit ((bob journal-1 'call!) partial-path
+    (test-submit ((bob journal-1 'run!) partial-path
                   '((*state* alice partial-result) "kept"))
       :expect error-result?)
-    (test-submit ((alice journal-1 'get) '(*state* alice partial-result))
+    (test-submit ((alice journal-1 'use!) '(*state* alice partial-result))
       :expect "kept")
     ;; Stored code executes in an Interface-owned masked environment outside
     ;; sync-let, and neither ambient authority nor the journal capability may
     ;; escape as a result.
-    (test-submit ((bob journal-1 'call!) ambient-path '())
+    (test-submit ((bob journal-1 'run!) ambient-path '())
       :expect error-result?)
-    (test-submit ((bob journal-1 'call!) return-capability-path '())
+    (test-submit ((bob journal-1 'run!) return-capability-path '())
       :expect error-result?)
-    (test-submit ((bob journal-1 'call!) argument-capability-path
+    (test-submit ((bob journal-1 'run!) argument-capability-path
                   '((*state* alice escaped-capability)))
       :expect error-result?)
-    (test-submit ((alice journal-1 'get) '(*state* alice escaped-capability))
+    (test-submit ((alice journal-1 'use!) '(*state* alice escaped-capability))
       :expect '(nothing))
-    (test-submit ((bob journal-1 'call!) no-journal-path '())
+    (test-submit ((bob journal-1 'run!) no-journal-path '())
       :expect error-result?)
-    (test-submit ((bob journal-1 'call!) not-procedure-path '())
+    (test-submit ((bob journal-1 'run!) not-procedure-path '())
       :expect error-result?)
-    (test-submit ((bob journal-1 'call!) echo-path 'not-a-list)
+    (test-submit ((bob journal-1 'run!) echo-path 'not-a-list)
       :expect error-result?)
 
     ;; Configured-admin execution survives a committed transition and
     ;; reconstruction; committing does not change the selected staged version.
-    (test-submit ((alice journal-1 'set!) echo-path
+    (test-submit ((alice journal-1 'put!) echo-path
                   '(lambda (journal . arguments) '(new staged program)))
       :expect #t)
-    (test-submit ((bob journal-1 'call!) echo-path '(ignored))
+    (test-submit ((bob journal-1 'run!) echo-path '(ignored))
       :expect '(new staged program))
     (test-submit ((*journal* journal-1 'step!)) :expect 1)
-    (test-submit ((bob journal-1 'call!) echo-path '(ignored))
+    (test-submit ((bob journal-1 'run!) echo-path '(ignored))
       :expect '(new staged program))
 
     ;; The host retains credentials, not a pinned principal. Rotating the
     ;; Interface secret invalidates the very next nested call in this call.
     (define rotated-secret "rotated-call-secret")
-    (test-submit ((*journal* journal-1 'call!) rotate-secret-path
+    (test-submit ((*journal* journal-1 'run!) rotate-secret-path
                   `(,rotated-secret (*state* alice source)))
       :expect error-result?)
     (journal-1 'credentials rotated-secret)
-    (test-submit ((*journal* journal-1 'get) '(*state* alice source))
+    (test-submit ((*journal* journal-1 'use!) '(*state* alice source))
       :expect '(value 9))
 
     (test-report)))

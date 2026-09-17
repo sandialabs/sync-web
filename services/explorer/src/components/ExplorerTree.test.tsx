@@ -1,11 +1,12 @@
 import React from 'react';
-import { fireEvent, render, screen, waitForElementToBeRemoved } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, waitForElementToBeRemoved } from '@testing-library/react';
 import ExplorerTree from './ExplorerTree';
 import { JournalService } from '../services/JournalService';
 
 describe('ExplorerTree', () => {
   const mockJournalService = {
     getDirectoryEntries: jest.fn(),
+    getChainInventory: jest.fn(),
   } as unknown as JournalService;
 
   beforeEach(() => {
@@ -42,6 +43,34 @@ describe('ExplorerTree', () => {
     expect(labels).toEqual(['▣2-foo', '▣10-foo', '▤alpha', '▤beta']);
   });
 
+  it('renders object metadata as a non-expandable object leaf', async () => {
+    const onSelect = jest.fn();
+    (mockJournalService.getDirectoryEntries as jest.Mock).mockResolvedValue([
+      { name: 'counter', type: 'object' },
+    ]);
+
+    render(
+      <ExplorerTree
+        mode="stage"
+        rootPath={['*state*']}
+        selected={null}
+        expandedNodes={new Set()}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={onSelect}
+      />,
+    );
+
+    const label = await screen.findByText('counter');
+    expect(label.closest('button')).toHaveTextContent('◆counter');
+    const node = label.closest('.tree-node');
+    expect(node?.querySelector('.tree-node-icon')).toHaveClass('disabled');
+    fireEvent.click(label);
+    expect(onSelect).toHaveBeenCalledWith({ path: ['*state*', 'counter'], type: 'object' });
+    expect(mockJournalService.getDirectoryEntries).toHaveBeenCalledTimes(1);
+  });
+
   it('sorts and emphasizes the signed-in user at the namespace root', async () => {
     (mockJournalService.getDirectoryEntries as jest.Mock).mockResolvedValue([
       { name: 'zara', type: 'directory' },
@@ -67,7 +96,7 @@ describe('ExplorerTree', () => {
     const labels = screen.getAllByRole('button')
       .filter((button) => button.classList.contains('tree-node-label'))
       .map((button) => button.textContent);
-    expect(labels).toEqual(['▣*state*', '▣bob', '▣alice', '▣zara']);
+    expect(labels).toEqual(['▣State', '▣bob', '▣alice', '▣zara']);
     expect(bob).toHaveClass('tree-node-current-user');
   });
 
@@ -101,9 +130,9 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="ledger"
-        rootPath={[-1, 'peer', -1, '*state*', 'admin']}
+        rootPath={[12]}
         selected={null}
-        expandedNodes={new Set(['ledger/data'])}
+        expandedNodes={new Set(['ledger/state/symbol:"data"'])}
         journalService={mockJournalService}
         refreshKey={0}
         onExpandedNodesChange={jest.fn()}
@@ -115,7 +144,39 @@ describe('ExplorerTree', () => {
     expect(screen.getByText('journal-1')).toBeInTheDocument();
     expect(mockJournalService.getDirectoryEntries).toHaveBeenNthCalledWith(
       2,
-      [-1, 'peer', -1, '*state*', 'admin', 'data'],
+      [12, '*state*', 'data'],
+    );
+  });
+
+  it('expands only the typed node whose ID matches when a symbol contains an integer tag', async () => {
+    (mockJournalService.getDirectoryEntries as jest.Mock)
+      .mockResolvedValueOnce([
+        { name: '123', type: 'directory', pathSegment: 123 },
+        { name: 'integer:123', type: 'directory', pathSegment: 'integer:123' },
+      ])
+      .mockResolvedValueOnce([{ name: 'integer-child', type: 'value' }]);
+
+    render(
+      <ExplorerTree
+        mode="stage"
+        rootPath={['*state*']}
+        selected={null}
+        expandedNodes={new Set(['stage/integer:123'])}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('integer-child')).toBeInTheDocument();
+    expect(mockJournalService.getDirectoryEntries).toHaveBeenCalledTimes(2);
+    expect(mockJournalService.getDirectoryEntries).toHaveBeenNthCalledWith(
+      2,
+      ['*state*', 123],
+    );
+    expect(mockJournalService.getDirectoryEntries).not.toHaveBeenCalledWith(
+      ['*state*', 'integer:123'],
     );
   });
 
@@ -127,7 +188,7 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="ledger"
-        rootPath={[-1, 'peer', -1, '*state*', 'alice']}
+        rootPath={[-1]}
         selected={null}
         expandedNodes={new Set()}
         journalService={mockJournalService}
@@ -151,7 +212,7 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="ledger"
-        rootPath={[257, 'journal-1', -2, '*state*']}
+        rootPath={[257]}
         selected={null}
         expandedNodes={new Set()}
         journalService={mockJournalService}
@@ -169,15 +230,15 @@ describe('ExplorerTree', () => {
   it('distinguishes an unretained historical route from an access denial', async () => {
     (mockJournalService.getDirectoryEntries as jest.Mock).mockRejectedValue(
       Object.assign(
-        new Error('bridge-error: Bridge is not committed at the selected local index: journal-1 -1'),
-        { code: 'bridge-error' },
+        new Error('bridge-index-error: Bridge is not committed at the selected local index: journal-1 -1'),
+        { code: 'bridge-index-error' },
       ),
     );
 
     render(
       <ExplorerTree
         mode="ledger"
-        rootPath={[257, 'journal-1', -2, '*state*']}
+        rootPath={[257]}
         selected={null}
         expandedNodes={new Set()}
         journalService={mockJournalService}
@@ -203,9 +264,9 @@ describe('ExplorerTree', () => {
     render(
       <ExplorerTree
         mode="ledger"
-        rootPath={[-1, '*state*', 'alice']}
+        rootPath={[-1]}
         selected={null}
-        expandedNodes={new Set(['ledger/denied'])}
+        expandedNodes={new Set(['ledger/state/symbol:"denied"'])}
         journalService={mockJournalService}
         refreshKey={0}
         onExpandedNodesChange={jest.fn()}
@@ -272,7 +333,7 @@ describe('ExplorerTree', () => {
       />,
     );
 
-    const root = await screen.findByText('*state*');
+    const root = await screen.findByText('State');
     const alice = await screen.findByText('alice');
     expect(root.closest('.tree-node-content')).toHaveClass('selected');
     expect(root.closest('.tree-root-node')).toContainElement(alice);
@@ -280,9 +341,193 @@ describe('ExplorerTree', () => {
     expect(onSelect).toHaveBeenCalledWith({ path: ['*state*'], type: 'directory' });
   });
 
-  it('selects the exact routed Ledger namespace root including snapshot prefixes', async () => {
+  it('navigates retained Bridges through exact inventory indexes and State', async () => {
+    (mockJournalService.getDirectoryEntries as jest.Mock).mockImplementation(
+      async (path: Array<string | number>) => (
+        path[path.length - 1] === '*bridge*'
+          ? [{ name: 'archive', type: 'directory' }]
+          : []
+      ),
+    );
+    (mockJournalService.getChainInventory as jest.Mock).mockResolvedValue({
+      indexes: [2, 7], complete: false,
+    });
+    const rootPath = [9];
+    const retainedRootPath = [4];
+
+    const { rerender } = render(
+      <ExplorerTree
+        mode="ledger"
+        rootPath={rootPath}
+        retainedRootPath={retainedRootPath}
+        selected={null}
+        expandedNodes={new Set(['ledger/bridges'])}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('archive')).toBeInTheDocument();
+    rerender(
+      <ExplorerTree
+        mode="ledger"
+        rootPath={rootPath}
+        retainedRootPath={retainedRootPath}
+        selected={null}
+        expandedNodes={new Set([
+          'ledger/bridges', 'ledger/bridges/symbol:"archive"',
+          'ledger/bridges/symbol:"archive"/7',
+        ])}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={jest.fn()}
+      />,
+    );
+    expect(await screen.findByText('7')).toBeInTheDocument();
+    expect(mockJournalService.getChainInventory).toHaveBeenCalledWith([
+      4, '*bridge*', 'archive',
+    ]);
+    await waitFor(() => expect(mockJournalService.getDirectoryEntries).toHaveBeenCalledWith([
+      4, '*bridge*', 'archive', 7, '*state*',
+    ]));
+    expect(mockJournalService.getDirectoryEntries).not.toHaveBeenCalledWith([
+      9, '*bridge*', 'archive', 7, '*state*',
+    ]);
+  });
+
+  it('omits retained indexes whose authenticated child loads are inaccessible or empty', async () => {
+    (mockJournalService.getDirectoryEntries as jest.Mock).mockImplementation(
+      async (path: Array<string | number>) => {
+        if (JSON.stringify(path) === JSON.stringify([9, '*bridge*'])) {
+          return [{ name: 'archive', type: 'directory' }];
+        }
+        if (JSON.stringify(path) === JSON.stringify([9, '*bridge*', 'archive', 2, '*state*'])) {
+          throw new Error('authorization-error: unavailable state');
+        }
+        if (JSON.stringify(path) === JSON.stringify([9, '*bridge*', 'archive', 7, '*state*'])) {
+          return [{ name: 'public', type: 'directory' }];
+        }
+        return [];
+      },
+    );
+    (mockJournalService.getChainInventory as jest.Mock).mockResolvedValue({
+      indexes: [2, 7], complete: true,
+    });
+
+    render(
+      <ExplorerTree
+        mode="ledger"
+        rootPath={[9]}
+        selected={null}
+        expandedNodes={new Set([
+          'ledger/bridges', 'ledger/bridges/symbol:"archive"',
+          'ledger/bridges/symbol:"archive"/2', 'ledger/bridges/symbol:"archive"/7',
+        ])}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('7')).toBeInTheDocument();
+    expect(screen.queryByText('2')).not.toBeInTheDocument();
+    expect(screen.queryByText('No accessible contents')).not.toBeInTheDocument();
+    expect(mockJournalService.getDirectoryEntries).toHaveBeenCalledWith([
+      9, '*bridge*', 'archive', 2, '*state*',
+    ]);
+    expect(mockJournalService.getDirectoryEntries).toHaveBeenCalledWith([
+      9, '*bridge*', 'archive', 7, '*state*',
+    ]);
+  });
+
+  it('renders a bridge with malformed index children as a selectable leaf', async () => {
     const onSelect = jest.fn();
-    const rootPath = [42, 'journal-1', -3, '*state*'];
+    (mockJournalService.getDirectoryEntries as jest.Mock).mockImplementation(
+      async (path: Array<string | number>) => {
+        if (JSON.stringify(path) === JSON.stringify([9, '*bridge*'])) {
+          return [{ name: 'archive', type: 'directory' }];
+        }
+        if (path.includes(2)) {
+          throw new Error('malformed retained child');
+        }
+        return [];
+      },
+    );
+    (mockJournalService.getChainInventory as jest.Mock).mockResolvedValue({
+      indexes: [2], complete: true,
+    });
+
+    render(
+      <ExplorerTree
+        mode="ledger"
+        rootPath={[9]}
+        selected={null}
+        expandedNodes={new Set(['ledger/bridges'])}
+        journalService={mockJournalService}
+        refreshKey={0}
+        onExpandedNodesChange={jest.fn()}
+        onSelect={onSelect}
+      />,
+    );
+
+    const archive = await screen.findByText('archive');
+    const icon = archive.closest('.tree-node')?.querySelector('.tree-node-icon');
+    expect(icon).toHaveTextContent('•');
+    expect(icon).toHaveClass('disabled');
+    expect(screen.queryByText('2')).not.toBeInTheDocument();
+    fireEvent.click(archive);
+    expect(onSelect).toHaveBeenCalledWith({
+      path: [9, '*bridge*', 'archive'], type: 'directory',
+    });
+  });
+
+  it('discards a retained child load from an older route-edit context', async () => {
+    let resolveInventory: (value: { indexes: number[]; complete: boolean }) => void = () => undefined;
+    (mockJournalService.getChainInventory as jest.Mock).mockReturnValue(
+      new Promise((resolve) => { resolveInventory = resolve; }),
+    );
+    (mockJournalService.getDirectoryEntries as jest.Mock).mockImplementation(
+      async (path: Array<string | number>) => {
+        if (JSON.stringify(path) === JSON.stringify([9, '*bridge*'])) {
+          return [{ name: 'archive', type: 'directory' }];
+        }
+        if (path.includes(2) && path[path.length - 1] === '*state*') {
+          return [{ name: 'public', type: 'directory' }];
+        }
+        return [];
+      },
+    );
+
+    const props = {
+      mode: 'ledger' as const,
+      selected: null,
+      expandedNodes: new Set<string>(),
+      journalService: mockJournalService,
+      onExpandedNodesChange: jest.fn(),
+      onSelect: jest.fn(),
+    };
+    const { rerender } = render(
+      <ExplorerTree {...props} rootPath={[9]} refreshKey={0} />,
+    );
+    const bridges = await screen.findByText('Bridges');
+    const toggle = bridges.closest('.tree-node')?.querySelector('.tree-node-icon');
+    if (!toggle) throw new Error('Bridges toggle not found');
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mockJournalService.getChainInventory).toHaveBeenCalled());
+
+    rerender(<ExplorerTree {...props} rootPath={[10]} refreshKey={1} />);
+    await act(async () => resolveInventory({ indexes: [2], complete: true }));
+    await act(async () => Promise.resolve());
+    expect(screen.queryByText('archive')).not.toBeInTheDocument();
+  });
+
+  it('selects the responder-local Ledger State root', async () => {
+    const onSelect = jest.fn();
+    const rootPath = [42];
     (mockJournalService.getDirectoryEntries as jest.Mock).mockResolvedValue([]);
 
     render(
@@ -298,8 +543,8 @@ describe('ExplorerTree', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByText('*state*'));
-    expect(onSelect).toHaveBeenCalledWith({ path: rootPath, type: 'directory' });
+    fireEvent.click(await screen.findByText('State'));
+    expect(onSelect).toHaveBeenCalledWith({ path: [42, '*state*'], type: 'directory' });
   });
 
   it('emits a selection when a node is clicked', async () => {

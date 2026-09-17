@@ -21,7 +21,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 COUNTS = (1, 32, 1024)
-OPERATIONS = ("get", "resolve", "trace")
+OPERATIONS = ("use", "retrieve", "trace")
 MODES = ("scalar", "batch")
 REPEATS = {1: 100, 32: 10, 1024: 1}
 RECORD_SOURCES = (
@@ -45,12 +45,12 @@ def source(operation: str, mode: str, count: int, repeats: int) -> str:
         for _ in range(repeats):
             if mode == "scalar":
                 for i in indexes:
-                    if operation == "get":
-                        call = f"((*journal* journal-1 'get) '(*state* bench {i}) :expression? #t)"
+                    if operation == "use":
+                        call = f"((*journal* journal-1 'use!) '(*state* bench {i}) :read-only? #t :expression? #t)"
                         expected = str(i)
-                    elif operation == "resolve":
+                    elif operation == "retrieve":
                         call = (
-                            f"((*journal* journal-1 'resolve) '(-1 *state* bench {i}) "
+                            f"((*journal* journal-1 'retrieve) '(-1 *state* bench {i}) "
                             ":pinned? #f :proof? #f :expression? #t)"
                         )
                         expected = str(i)
@@ -62,12 +62,12 @@ def source(operation: str, mode: str, count: int, repeats: int) -> str:
                         expected = "serialization?"
                     actions.append(f"    (test-submit {call} :expect {expected})")
             else:
-                if operation == "get":
-                    call = f"((*journal* journal-1 'get-batch) '{paths} :expression? #t)"
+                if operation == "use":
+                    call = f"((*journal* journal-1 'use-batch!) '{paths} :read-only? #t :expression? #t)"
                     expected = f"'((results ({expected_items})))"
-                elif operation == "resolve":
+                elif operation == "retrieve":
                     call = (
-                        f"((*journal* journal-1 'resolve-batch) '{committed} "
+                        f"((*journal* journal-1 'retrieve-batch) '{committed} "
                         ":pinned? #f :expression? #t)"
                     )
                     expected = f"'((results ({expected_committed})))"
@@ -143,7 +143,7 @@ def source(operation: str, mode: str, count: int, repeats: int) -> str:
     (define indexes '({' '.join(map(str, indexes))}))
     (define paths '{paths})
     (test-submit
-      ((*journal* journal-1 'set-batch!)
+      ((*journal* journal-1 'put-batch!)
        `((paths ,paths) (values ,indexes) (expression? #t)))
       :expect #t)
     (test-submit ((*journal* journal-1 'step!)) :expect 1)
@@ -245,8 +245,8 @@ def main() -> int:
         "pairs": pairs,
         "counts": counts,
         "semantic_contract": {
-            "get": "exact requested staged values",
-            "resolve": "exact requested committed paths and values",
+            "use": "exact requested staged values",
+            "retrieve": "exact requested committed paths and values",
             "trace": "identical concrete indexed paths; exact proof digest and every member",
         },
         "rows": rows,

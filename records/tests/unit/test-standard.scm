@@ -223,11 +223,60 @@
     (assert object object-1)
     (assert ((standard 'deep-get) object '("some path" 1 #f)) 0))
 
-  (let* ((object object-1)
-         (object ((standard 'deep-call!) object '("some path" 1) '(lambda (obj) ((obj 'increment!))))))
-    (assert (sync-node? object) #t)
-    (let* ((object ((standard 'deep-call!) object '("some path" 1) '(lambda (obj) ((obj 'increment!))))))
-      (assert (sync-node? object) #t)
-      (assert ((standard 'deep-call) object '("some path" 1) '(lambda (obj) ((obj 'get) #f))) 2)))
+  ;; deep-call! uniformly returns (result successor-node) at leaf and depth.
+  (let* ((called
+          ((standard 'deep-call!) object-3 '()
+           '(lambda (obj)
+              ((obj 'increment!))
+              ((obj 'get) #f))))
+         (successor (cadr called)))
+    (assert (and (list? called) (= (length called) 2)) #t)
+    (assert (car called) 1)
+    (assert (sync-node? successor) #t)
+    (assert ((standard 'deep-call) object-3 '()
+             '(lambda (obj) ((obj 'get) #f))) 0)
+    (assert ((standard 'deep-call) successor '()
+             '(lambda (obj) ((obj 'get) #f))) 1))
+
+  (let* ((called
+          ((standard 'deep-call!) object-1 '("some path" 1)
+           '(lambda (obj)
+              ((obj 'increment!))
+              ((obj 'get) #f))))
+         (successor (cadr called)))
+    (assert (and (list? called) (= (length called) 2)) #t)
+    (assert (car called) 1)
+    (assert (sync-node? successor) #t)
+    (assert ((standard 'deep-get) object-1 '("some path" 1 #f)) 0)
+    (assert ((standard 'deep-get) successor '("some path" 1 #f)) 1)
+    (let* ((called
+            ((standard 'deep-call!) successor '("some path" 1)
+             '(lambda (obj)
+                ((obj 'increment!))
+                ((obj 'get) #f))))
+           (successor (cadr called)))
+      (assert (car called) 2)
+      (assert ((standard 'deep-get) successor '("some path" 1 #f)) 2)))
+
+  (let ((called
+         ((standard 'deep-call!) object-3 '()
+          '(lambda (obj) '(inert result)))))
+    (assert (car called) '(inert result))
+    (assert (sync-node? (cadr called)) #t))
+
+  (let ((called
+         ((standard 'deep-call!) object-3 '()
+          '(lambda (obj) (expression->byte-vector '(direct bytes))))))
+    (assert (byte-vector? (car called)) #t)
+    (assert (byte-vector->expression (car called)) '(direct bytes))
+    (assert (sync-node? (cadr called)) #t))
+
+  (assert (catch #t
+                 (lambda ()
+                   ((standard 'deep-call!) object-3 '()
+                    '(lambda (obj) (lambda (value) value)))
+                   #f)
+                 (lambda args #t))
+          #t)
 
   (append "Success (" (object->string asserted) " checks)"))

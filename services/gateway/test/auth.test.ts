@@ -99,6 +99,23 @@ test("throws UnauthorizedError when cookie exists but lacks ory_kratos_session",
   );
 });
 
+test("rejects cookie names that only contain the Kratos session cookie name", async () => {
+  for (const resolver of [resolveIdentity, resolveSessionIdentity]) {
+    for (const cookie of [
+      "not_ory_kratos_session=value",
+      "ory_kratos_session_suffix=value",
+      "prefixory_kratos_session=value",
+      "other=ory_kratos_session=value",
+    ]) {
+      await assert.rejects(
+        () => resolver(req({ cookie }), JOURNAL_SECRET, mockKratos(IDENTITY_ID)),
+        UnauthorizedError,
+        cookie,
+      );
+    }
+  }
+});
+
 test("resolves with undefined identityId when whoami returns no username", async () => {
   const noUsernameKratos: KratosClient = {
     async whoami(_cookie) {

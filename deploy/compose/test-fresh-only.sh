@@ -52,8 +52,8 @@ MOCK
     test "$(grep -c '^install$' "$work/calls.log")" = 1
     test "$(grep -c '^server$' "$work/calls.log")" = 2
 
-    # Fresh-only JOURNAL_UPDATE=1 still invokes the installer, whose zero-status
-    # Scheme error or process failure is fatal and cannot launch another server.
+    # JOURNAL_UPDATE=1 on the current marker still invokes the installer; its
+    # fail-closed result cannot launch another server or alter the marker.
     if run 1 "(error 'upgrade-error \"stale-secret-payload\")" > /dev/null 2>"$work/failure.err"; then
         echo "FAIL: JOURNAL_UPDATE=1 Scheme error succeeded for $runner" >&2
         exit 1
@@ -101,7 +101,7 @@ MOCK
     test ! -f "$work/database/.sync-web-version"
     ! grep -q '^server$' "$work/calls.log"
 
-    # Existing unmarked/other-version state remains fresh-only fail-closed.
+    # Existing unmarked or unsupported-version state remains fail-closed.
     rm -rf "$work/database"
     mkdir -p "$work/database"
     : > "$work/database/LEGACY"
@@ -114,6 +114,26 @@ MOCK
         echo "FAIL: mismatched database version opened for $runner" >&2
         exit 1
     fi
+
+    # The one supported 1.5.0 -> 1.6.0 transition requires the explicit update
+    # switch and advances the marker only after exact installer success.
+    printf '1.5.0\n' > "$work/database/.sync-web-version"
+    if run 0 > /dev/null 2>&1; then
+        echo "FAIL: 1.5.0 database opened without update for $runner" >&2
+        exit 1
+    fi
+    before_servers=$(grep -c '^server$' "$work/calls.log" || true)
+    run 1
+    test "$(cat "$work/database/.sync-web-version")" = "$platform_version"
+    test "$(grep -c '^server$' "$work/calls.log")" = $((before_servers + 1))
+
+    printf '1.5.0\n' > "$work/database/.sync-web-version"
+    if run 1 "(error 'upgrade-error \"stale-secret-payload\")" > /dev/null 2>"$work/failure.err"; then
+        echo "FAIL: failed 1.5.0 migration succeeded for $runner" >&2
+        exit 1
+    fi
+    test "$(cat "$work/database/.sync-web-version")" = 1.5.0
+    ! grep -Fq 'stale-secret-payload' "$work/failure.err"
 
     # Ordinary reopen still enforces required runtime environment variables.
     rm -rf "$work/database"
@@ -134,4 +154,4 @@ MOCK
 check_runner deploy/compose/general/run.sh
 check_runner deploy/compose/ledger/run.sh
 
-echo "PASS: compose runners fail closed on fresh installation and reopen ordinarily"
+echo "PASS: compose runners install, migrate 1.5.0 once, and reopen fail closed"

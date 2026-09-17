@@ -49,7 +49,7 @@ SECRET="${SECRET:-root-password}"
 INTERFACE_SECRET="${INTERFACE_SECRET:-interface-password}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin-pass}"
-PERIOD="${PERIOD:-2}"
+PERIOD="${PERIOD:-8}"
 WINDOW="${WINDOW:-1024}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 CONNECT_TIMEOUT_SECONDS="${CONNECT_TIMEOUT_SECONDS:-2}"
@@ -96,8 +96,128 @@ dc() {
     $CONTAINER_COMPOSE -f "$COMPOSE_FILE" "$@"
 }
 
+validate_declared_volume_names() {
+    input_path="$1"
+    output_path="$2"
+    awk '
+        NF != 1 || $1 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ {
+            print "FAIL: invalid declared Compose volume name: " $0 > "/dev/stderr"
+            failed = 1
+            next
+        }
+        seen[$1]++ {
+            print "FAIL: duplicate declared Compose volume name: " $1 > "/dev/stderr"
+            failed = 1
+            next
+        }
+        { print $1 }
+        END { if (failed) exit 1 }
+    ' "$input_path" > "$output_path"
+}
+
+parse_normalized_declared_volumes() {
+    input_path="$1"
+    output_path="$2"
+    awk '
+        function fail(message) {
+            print "FAIL: malformed normalized top-level volumes mapping: " message > "/dev/stderr"
+            failed = 1
+        }
+        /^[^ ]/ {
+            if ($0 == "volumes:" || $0 == "volumes: {}") {
+                if (found) fail("duplicate volumes section")
+                found = 1
+                in_volumes = ($0 == "volumes:")
+                inline_empty = ($0 == "volumes: {}")
+                next
+            }
+            if ($0 ~ /^volumes:/) {
+                fail("unexpected volumes section shape: " $0)
+                in_volumes = 0
+                next
+            }
+            if (in_volumes) in_volumes = 0
+            inline_empty = 0
+            next
+        }
+        inline_empty && /^ / {
+            fail("indented entry after empty inline mapping: " $0)
+            next
+        }
+        in_volumes {
+            if ($0 == "") next
+            if ($0 !~ /^  [A-Za-z0-9][A-Za-z0-9_.-]*: null$/) {
+                fail("unexpected entry or indentation: " $0)
+                next
+            }
+            logical_name = $0
+            sub(/^  /, "", logical_name)
+            sub(/: null$/, "", logical_name)
+            if (seen[logical_name]++) {
+                fail("duplicate volume key: " logical_name)
+                next
+            }
+            names[++name_count] = logical_name
+        }
+        END {
+            if (failed) exit 1
+            for (i = 1; i <= name_count; i++) print names[i]
+        }
+    ' "$input_path" > "$output_path"
+}
+
+declared_project_volumes() {
+    discovery_dir="$(mktemp -d "${TMPDIR:-/tmp}/sync-compose-volumes.XXXXXX")" || return 1
+    primary_out="$discovery_dir/primary.out"
+    primary_err="$discovery_dir/primary.err"
+    normalized_out="$discovery_dir/normalized.out"
+    normalized_err="$discovery_dir/normalized.err"
+    validated_out="$discovery_dir/validated.out"
+
+    if dc config --volumes >"$primary_out" 2>"$primary_err"; then
+        cat "$primary_err" >&2
+        if validate_declared_volume_names "$primary_out" "$validated_out"; then
+            cat "$validated_out"
+            rm -rf "$discovery_dir"
+            return 0
+        fi
+        command_status=$?
+        rm -rf "$discovery_dir"
+        return "$command_status"
+    else
+        command_status=$?
+    fi
+    cat "$primary_out" >&2
+    cat "$primary_err" >&2
+    if [ "$command_status" -ne 2 ] || ! grep -Eq '^podman-compose: error: unrecognized arguments: --volumes$' "$primary_err"; then
+        rm -rf "$discovery_dir"
+        return "$command_status"
+    fi
+
+    echo "Compose provider lacks 'config --volumes'; using bounded normalized-config volume discovery." >&2
+    if dc config >"$normalized_out" 2>"$normalized_err"; then
+        cat "$normalized_err" >&2
+    else
+        command_status=$?
+        cat "$normalized_out" >&2
+        cat "$normalized_err" >&2
+        rm -rf "$discovery_dir"
+        return "$command_status"
+    fi
+
+    if parse_normalized_declared_volumes "$normalized_out" "$validated_out"; then
+        cat "$validated_out"
+        rm -rf "$discovery_dir"
+        return 0
+    else
+        command_status=$?
+    fi
+    rm -rf "$discovery_dir"
+    return "$command_status"
+}
+
 has_existing_named_volumes() {
-    names="$(dc config --volumes 2>/dev/null || true)"
+    names="$(declared_project_volumes 2>/dev/null || true)"
     if [ -z "$names" ]; then
         return 1
     fi
@@ -129,15 +249,111 @@ confirm_volume_wipe_if_needed() {
     done
 }
 
-cleanup() {
-    set +e
-    if [ "$cleanup_mode" = "down" ]; then
-        dc down -v --remove-orphans >/dev/null 2>&1
+remember_teardown_failure() {
+    failure_status="$1"
+    if [ "$failure_status" -eq 0 ]; then
+        failure_status=1
+    fi
+    if [ "$teardown_status" -eq 0 ]; then
+        teardown_status="$failure_status"
     fi
 }
 
+teardown_project() {
+    teardown_status=0
+
+    if declared_volumes="$(declared_project_volumes)"; then
+        :
+    else
+        command_status=$?
+        echo "FAIL: could not derive declared Compose volumes for project '$COMPOSE_PROJECT_NAME' (status $command_status)." >&2
+        remember_teardown_failure "$command_status"
+        declared_volumes=""
+    fi
+
+    echo "Stopping Compose project '$COMPOSE_PROJECT_NAME' with volume and orphan removal..."
+    if dc $COMPOSE_GLOBAL_ARGS ${compose_profile_args:-} down -v --remove-orphans; then
+        :
+    else
+        command_status=$?
+        echo "FAIL: Compose down failed for project '$COMPOSE_PROJECT_NAME' (status $command_status)." >&2
+        remember_teardown_failure "$command_status"
+    fi
+
+    if project_containers="$($CONTAINER_RUNTIME ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")"; then
+        if [ -n "$project_containers" ]; then
+            for resource_id in $project_containers; do
+                echo "FAIL: residual container for project '$COMPOSE_PROJECT_NAME': $resource_id" >&2
+            done
+            remember_teardown_failure 1
+        fi
+    else
+        command_status=$?
+        echo "FAIL: could not verify containers for project '$COMPOSE_PROJECT_NAME' (status $command_status)." >&2
+        remember_teardown_failure "$command_status"
+    fi
+
+    if project_networks="$($CONTAINER_RUNTIME network ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")"; then
+        if [ -n "$project_networks" ]; then
+            for resource_id in $project_networks; do
+                echo "FAIL: residual network for project '$COMPOSE_PROJECT_NAME': $resource_id" >&2
+            done
+            remember_teardown_failure 1
+        fi
+    else
+        command_status=$?
+        echo "FAIL: could not verify networks for project '$COMPOSE_PROJECT_NAME' (status $command_status)." >&2
+        remember_teardown_failure "$command_status"
+    fi
+
+    for logical_name in $declared_volumes; do
+        full_name="${COMPOSE_PROJECT_NAME}_${logical_name}"
+        if $CONTAINER_RUNTIME volume inspect "$full_name" >/dev/null 2>&1; then
+            echo "Cleanup residue: declared volume '$full_name' remains after Compose down." >&2
+            echo "Cleanup fallback: removing declared project volume '$full_name'." >&2
+            if $CONTAINER_RUNTIME volume rm "$full_name"; then
+                :
+            else
+                command_status=$?
+                echo "FAIL: could not remove declared project volume '$full_name' (status $command_status)." >&2
+                remember_teardown_failure "$command_status"
+            fi
+        fi
+    done
+
+    for logical_name in $declared_volumes; do
+        full_name="${COMPOSE_PROJECT_NAME}_${logical_name}"
+        if $CONTAINER_RUNTIME volume inspect "$full_name" >/dev/null 2>&1; then
+            echo "FAIL: declared project volume remains after cleanup: $full_name" >&2
+            remember_teardown_failure 1
+        fi
+    done
+
+    return "$teardown_status"
+}
+
+cleanup() {
+    primary_status=$?
+    trap - EXIT INT TERM
+    set +e
+
+    cleanup_status=0
+    if [ "$cleanup_mode" = "down" ]; then
+        cleanup_mode="none"
+        teardown_project
+        cleanup_status=$?
+    fi
+
+    if [ "$cleanup_status" -ne 0 ]; then
+        echo "FAIL: cleanup could not establish an empty project '$COMPOSE_PROJECT_NAME' (status $cleanup_status)." >&2
+    fi
+    if [ "$primary_status" -ne 0 ]; then
+        exit "$primary_status"
+    fi
+    exit "$cleanup_status"
+}
+
 on_interrupt() {
-    cleanup
     exit 130
 }
 
@@ -255,14 +471,23 @@ fi
 
 export SECRET INTERFACE_SECRET ADMIN_USERNAME ADMIN_PASSWORD PERIOD WINDOW HTTP_PORT ORIGIN HTTPS_PORT COMPOSE_PROJECT_NAME TLS_CERT_HOST_PATH TLS_KEY_HOST_PATH FILE_SYSTEM_IMAGE SYNC_WEB_VERSION
 
-compose_up_services=""
-if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" = "1" ]; then
-    compose_up_services="journal explorer workbench identity-provider gateway router"
+compose_profile_args="--profile explorer --profile workbench"
+compose_up_services="journal explorer workbench identity-provider gateway router"
+if [ "$LOCAL_COMPOSE_SKIP_FILE_SYSTEM" != "1" ]; then
+    compose_profile_args="$compose_profile_args --profile file-system"
+    compose_up_services="$compose_up_services file-system"
 fi
 
 confirm_volume_wipe_if_needed
 echo "Starting from scratch: removing compose stack + volumes..."
-dc down -v --remove-orphans >/dev/null 2>&1
+cleanup_mode="none"
+if teardown_project; then
+    cleanup_mode="down"
+else
+    teardown_status=$?
+    echo "FAIL: could not establish a clean initial Compose project '$COMPOSE_PROJECT_NAME' (status $teardown_status)." >&2
+    exit "$teardown_status"
+fi
 
 wait_for_http() {
     url="$1"
@@ -328,12 +553,12 @@ gateway_get() {
 
 if [ "$MODE" = "up" ]; then
     echo "Starting compose project '$COMPOSE_PROJECT_NAME' on HTTP $HTTP_PORT / HTTPS $HTTPS_PORT in up mode (Ctrl+C to stop)..."
-    dc $COMPOSE_GLOBAL_ARGS up $COMPOSE_UP_ARGS $compose_up_services
+    dc $COMPOSE_GLOBAL_ARGS $compose_profile_args up $COMPOSE_UP_ARGS $compose_up_services
     exit 0
 fi
 
 echo "Starting compose project '$COMPOSE_PROJECT_NAME' on HTTP $HTTP_PORT / HTTPS $HTTPS_PORT in smoke mode..."
-dc $COMPOSE_GLOBAL_ARGS up -d $COMPOSE_UP_ARGS $compose_up_services
+dc $COMPOSE_GLOBAL_ARGS $compose_profile_args up -d $COMPOSE_UP_ARGS $compose_up_services
 
 echo "Waiting for routes..."
 wait_for_http "http://127.0.0.1:$HTTP_PORT/explorer/"

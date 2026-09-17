@@ -35,7 +35,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
           <section>
             <h3>Stage Mode</h3>
             <ul>
-              <li>The permanent <code>*state*</code> row returns to the browsing-only current namespace root.</li>
+              <li>The permanent <strong>State</strong> row returns to the browsing-only current namespace root.</li>
               <li>The left tree shows staged documents and folders beneath that root.</li>
               <li>Remote descendant selections optimistically show mutation controls; the terminal journal decides authorization and denied edits remain available for correction.</li>
               <li>Tree rows provide rename and delete actions.</li>
@@ -58,9 +58,9 @@ const HelpModal: React.FC<HelpModalProps> = ({ onClose }) => {
           <section>
             <h3>Access Mode</h3>
             <ul>
-              <li>A complete remote principal has one or more route segments followed by <code>*state* USER</code>.</li>
-              <li>Partial or malformed principal text reports the accepted shapes on submission.</li>
-              <li>The Document history window governs which committed indexes resolve may access.</li>
+              <li>Choose User and enter a username; leave Journal location blank for Self or enter the whitespace-separated route aliases for a remote journal.</li>
+              <li>Choose Public to grant the exact public principal without entering a Journal location or user.</li>
+              <li>The Document history window governs which committed indexes retrieve may access.</li>
               <li>Quote owner-relative path segments containing spaces; percent, quote, and backslash characters are encoded once and decoded for display.</li>
             </ul>
           </section>

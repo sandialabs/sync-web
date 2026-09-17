@@ -4,7 +4,7 @@ networks:
 
 services:
   journal:
-    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.5.0}
+    image: ghcr.io/sandialabs/sync-web/journal-sdk:${SYNC_WEB_VERSION:-1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-journal
     working_dir: /srv
     entrypoint: ["/bin/sh", "/srv/run.sh"]
@@ -13,8 +13,8 @@ services:
     environment:
       SECRET: ${SECRET:-}
       INTERFACE_SECRET: ${INTERFACE_SECRET:-}
-      SYNC_WEB_VERSION: ${SYNC_WEB_VERSION:-1.5.0}
-      PERIOD: ${PERIOD:-2}
+      SYNC_WEB_VERSION: ${SYNC_WEB_VERSION:-1.6.0}
+      PERIOD: ${PERIOD:-8}
       WINDOW: ${WINDOW:-1024}
       RUST_LOG: ${RUST_LOG:-INFO}
       JOURNAL_UPDATE: ${JOURNAL_UPDATE:-}
@@ -35,7 +35,8 @@ services:
       start_period: 20s
 
   explorer:
-    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.5.0}
+    profiles: ["explorer"]
+    image: ghcr.io/sandialabs/sync-web/explorer:${SYNC_WEB_VERSION:-1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-explorer
     networks:
       - sync-net
@@ -49,7 +50,8 @@ services:
       start_period: 10s
 
   workbench:
-    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.5.0}
+    profiles: ["workbench"]
+    image: ghcr.io/sandialabs/sync-web/workbench:${SYNC_WEB_VERSION:-1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-workbench
     networks:
       - sync-net
@@ -63,7 +65,7 @@ services:
       start_period: 10s
 
   gateway:
-    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.5.0}
+    image: ghcr.io/sandialabs/sync-web/gateway:${SYNC_WEB_VERSION:-1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-gateway
     networks:
       - sync-net
@@ -88,7 +90,7 @@ services:
       start_period: 10s
 
   identity-provider:
-    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.5.0}
+    image: ghcr.io/sandialabs/sync-web/identity-provider:${SYNC_WEB_VERSION:-1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-identity-provider
     networks:
       - sync-net
@@ -108,7 +110,7 @@ services:
       start_period: 20s
 
   router:
-    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.5.0}
+    image: ghcr.io/sandialabs/sync-web/router:${SYNC_WEB_VERSION:-1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-router
     environment:
       TLS_CERT_FILE: ${TLS_CERT_FILE:-/etc/nginx/certs/tls.crt}
@@ -119,11 +121,8 @@ services:
       - ${ACME_WEBROOT_HOST_PATH:-./acme-challenge}:/var/www/acme-challenge:Z
     depends_on:
       - journal
-      - explorer
-      - workbench
       - gateway
       - identity-provider
-      - file-system
     networks:
       - sync-net
     ports:
@@ -137,7 +136,8 @@ services:
       start_period: 20s
 
   file-system:
-    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.5.0}
+    profiles: ["file-system"]
+    image: ${FILE_SYSTEM_IMAGE:-ghcr.io/sandialabs/sync-web/file-system:1.6.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sync}-file-system
     depends_on:
       - gateway

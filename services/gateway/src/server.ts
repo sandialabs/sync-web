@@ -8,6 +8,7 @@ import { getConfig } from "./config";
 import { createJournalClient } from "./journal";
 import { createKratosClient } from "./kratos";
 import { instrumentGatewayRequests } from "./metrics";
+import { isPathWithinDirectory } from "./path";
 import { gatewayRoutes } from "./routes";
 import { allowHttpSwaggerAssets } from "./swagger-csp";
 
@@ -17,7 +18,7 @@ Versioned, function-oriented HTTP gateway over Synchronic journal transport endp
 Start here:
 - Use GET routes for simple read-only checks: /api/v1/general/size and /api/v1/general/info.
 - Use POST /api/v1/general/{operation} for function calls that take arguments.
-- Use dedicated batch operations for common bulk workflows and staged programs through /api/v1/general/call for application-specific composition.
+- Use dedicated batch operations for common bulk workflows and staged programs through /api/v1/general/run for application-specific composition.
 - For restricted routes, authenticate via a Kratos session cookie or an API token (Authorization: Bearer sync-...).
 
 Request bodies:
@@ -53,6 +54,9 @@ const swaggerUiTheme = `
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+.sync-doc-logo-link {
+  display: inline-flex;
 }
 .sync-doc-logo {
   width: 36px;
@@ -322,7 +326,7 @@ const swaggerUiAuthJs = `
     toolbar.className = 'sync-doc-toolbar';
     toolbar.innerHTML =
       '<div class="sync-doc-toolbar-left">' +
-        '<img class="sync-doc-logo" src="/gateway-logo.png" alt="Synchronic Web" />' +
+        '<a class="sync-doc-logo-link" href="/gateway"><img class="sync-doc-logo" src="/gateway-logo.png" alt="Synchronic Web" /></a>' +
         '<nav class="sync-doc-tabs" aria-label="Gateway sections">' +
           '<a class="sync-doc-tab" href="/gateway">Gateway Home</a>' +
           '<span class="sync-doc-tab active">API Reference</span>' +
@@ -570,10 +574,10 @@ displayRequestDuration: true,
   // SPA fallback: serve index.html for any /auth/* path not matched by a static file
   // or the .ory proxy above. Enables client-side routing in the auth UI.
   app.get("/auth/*", async (request, reply) => {
-    const pathname = request.url.split("?")[0];
+    const pathname = new URL(request.url, "http://gateway.invalid").pathname;
     const relPath = pathname.replace(/^\/auth\/?/, "") || "index.html";
     const filePath = resolve(config.authUiDir, relPath);
-    if (filePath.startsWith(config.authUiDir) && existsSync(filePath)) {
+    if (isPathWithinDirectory(config.authUiDir, filePath) && existsSync(filePath)) {
       return reply.sendFile(relPath);
     }
     return reply.sendFile("index.html");

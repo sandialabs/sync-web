@@ -212,6 +212,9 @@ fn test_association_list_conversion() {
     } else {
         panic!("Expected JSON object for proper association list");
     }
+
+    // Generic duplicate-key alists retain the existing last-value object behavior.
+    assert_eq!(lisp2json("((a 1) (a 2))").unwrap(), json!({"a": 2}));
 }
 
 #[test]
@@ -305,5 +308,19 @@ fn test_quote_handling() {
     assert_eq!(
         json_val,
         json!(["symbol-a", {"*type/quoted*": "symbol-b"}])
+    );
+}
+
+
+#[test]
+fn scheme_to_json_requires_one_complete_datum() {
+    assert!(lisp2json("(one) (two)").is_err());
+    assert!(lisp2json("ordinary trailing").is_err());
+    assert!(lisp2json("'ordinary trailing").is_err());
+    assert!(lisp2json("").is_err());
+    assert!(lisp2json("(value \0 hidden)").is_err());
+    assert_eq!(
+        lisp2json("; ignored fake datum\n((read-only? #t))").unwrap(),
+        json!({"read-only?": true}),
     );
 }
