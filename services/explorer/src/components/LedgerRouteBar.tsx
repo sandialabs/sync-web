@@ -1,6 +1,66 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { LedgerHop } from '../types';
-import { normalizeSnapshotInput } from '../utils/ledgerRoute';
+import {
+  normalizePublicSnapshotInput, normalizeSnapshotInput,
+} from '../utils/ledgerRoute';
+import { decodeSafeName } from '../utils/nameCodec';
+
+interface SnapshotInputProps {
+  hop: LedgerHop;
+  index: number;
+  displayValue: string;
+  normalize: (rawValue: string) => string | null;
+  onCommit: (index: number, value: string) => void;
+}
+
+const SnapshotInput: React.FC<SnapshotInputProps> = ({
+  hop,
+  index,
+  displayValue,
+  normalize,
+  onCommit,
+}) => {
+  const [draft, setDraft] = useState(displayValue);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setDraft(displayValue);
+  }, [displayValue, editing]);
+
+  const commit = () => {
+    const value = normalize(draft);
+    setEditing(false);
+    if (value === null) {
+      setDraft(displayValue);
+      return;
+    }
+    setDraft(value);
+    onCommit(index, value);
+  };
+
+  return (
+    <input
+      value={draft}
+      onFocus={() => setEditing(true)}
+      onChange={(event) => {
+        setEditing(true);
+        setDraft(event.target.value);
+      }}
+      onBlur={() => editing && commit()}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commit();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          setDraft(displayValue);
+          setEditing(false);
+        }
+      }}
+      aria-label={`${hop.kind === 'bridge' ? decodeSafeName(hop.name) : hop.name} snapshot`}
+    />
+  );
+};
 
 interface LedgerRouteBarProps {
   hops: LedgerHop[];
@@ -11,6 +71,7 @@ interface LedgerRouteBarProps {
   onSnapshotChange: (index: number, value: string) => void;
   onStepSnapshot: (index: number, direction: 'older' | 'newer') => void;
   onRemoveHop?: () => void;
+  onSelectHop?: (index: number) => void;
   onOpenPeerPicker?: () => void;
   onClosePeerPicker?: () => void;
   onChoosePeer?: (peerName: string) => void;
@@ -26,40 +87,21 @@ const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
   onSnapshotChange,
   onStepSnapshot,
   onRemoveHop = () => undefined,
+  onSelectHop = () => undefined,
   onOpenPeerPicker = () => undefined,
   onClosePeerPicker = () => undefined,
   onChoosePeer = () => undefined,
   readOnlyRoute = false,
 }) => {
   const pickerOpen = Array.isArray(peerChoices);
-  const getSnapshotDisplayValue = (hop: LedgerHop, index: number): string => {
-    if (index === 0 && hop.snapshot.trim().toLowerCase() === 'latest' && rootIndex >= 0) {
-      return String(rootIndex);
-    }
-    return hop.snapshot;
-  };
+  const maximumFor = (hop: LedgerHop, index: number): number =>
+    hop.maximum ?? (index === 0 ? Math.max(0, rootIndex) : Math.max(0, Number.parseInt(hop.snapshot, 10) || 0));
 
-  const normalizeHopInput = (hop: LedgerHop, index: number, rawValue: string): string => {
-    const trimmed = rawValue.trim().toLowerCase();
+  const getSnapshotDisplayValue = (hop: LedgerHop, index: number): string =>
+    normalizeSnapshotInput(hop.snapshot, maximumFor(hop, index));
 
-    if (index === 0) {
-      if (trimmed === '' || trimmed === 'latest') {
-        return 'latest';
-      }
-
-      const parsed = Number.parseInt(trimmed, 10);
-      if (!Number.isNaN(parsed) && parsed >= 0) {
-        if (rootIndex >= 0 && parsed >= rootIndex) {
-          return 'latest';
-        }
-        return String(parsed);
-      }
-
-      return rootIndex >= 0 ? String(rootIndex) : 'latest';
-    }
-
-    return normalizeSnapshotInput(rawValue);
-  };
+  const normalizeHopInput = (hop: LedgerHop, index: number, rawValue: string): string | null =>
+    normalizePublicSnapshotInput(rawValue, maximumFor(hop, index));
 
   return (
     <div className="route-builder unified">
@@ -81,22 +123,31 @@ const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
                 <span className="sync-pill-icon" aria-hidden="true">⟳</span>
               </button>
             )}
-            <div className="hop-tag">{hop.name}</div>
+            <button
+              className="hop-tag route-hop-button"
+              onClick={() => onSelectHop(index)}
+              aria-current={index === hops.length - 1 ? 'location' : undefined}
+            >
+              {hop.kind === 'bridge' ? decodeSafeName(hop.name) : hop.name}
+            </button>
             <div className="stepper linear">
-              <button onClick={() => onStepSnapshot(index, 'older')}>-</button>
-              <input
-                value={getSnapshotDisplayValue(hop, index)}
-                onChange={(event) => onSnapshotChange(index, event.target.value)}
-                onBlur={(event) => onSnapshotChange(index, normalizeHopInput(hop, index, event.target.value))}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    onSnapshotChange(index, normalizeHopInput(hop, index, event.currentTarget.value));
-                    event.currentTarget.blur();
-                  }
-                }}
-                aria-label={`${hop.name} snapshot`}
+              <button
+                aria-label={`Older ${hop.kind === 'bridge' ? decodeSafeName(hop.name) : hop.name} snapshot`}
+                onClick={() => onStepSnapshot(index, 'older')}
+                disabled={Number.parseInt(getSnapshotDisplayValue(hop, index), 10) <= 0}
+              >-</button>
+              <SnapshotInput
+                hop={hop}
+                index={index}
+                displayValue={getSnapshotDisplayValue(hop, index)}
+                normalize={(value) => normalizeHopInput(hop, index, value)}
+                onCommit={onSnapshotChange}
               />
-              <button onClick={() => onStepSnapshot(index, 'newer')}>+</button>
+              <button
+                aria-label={`Newer ${hop.kind === 'bridge' ? decodeSafeName(hop.name) : hop.name} snapshot`}
+                onClick={() => onStepSnapshot(index, 'newer')}
+                disabled={Number.parseInt(getSnapshotDisplayValue(hop, index), 10) >= maximumFor(hop, index)}
+              >+</button>
             </div>
           </div>
         </React.Fragment>
@@ -130,13 +181,13 @@ const LedgerRouteBar: React.FC<LedgerRouteBarProps> = ({
           <>
             <button
               className="route-action"
-              title="Move back one hop"
+              title="Move back one journal"
               onClick={onRemoveHop}
               disabled={hops.length <= 1}
             >
               ←
             </button>
-            <button className="route-action ghost" title="Extend route to a bridge" onClick={onOpenPeerPicker}>
+            <button className="route-action ghost" title="Open a bridge" onClick={onOpenPeerPicker}>
               →
             </button>
           </>

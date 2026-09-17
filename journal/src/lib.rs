@@ -13,7 +13,7 @@ use crate::cache::{
     ResolveSource, ResolvedNode, resolve_branch_with, resolve_node_with, resolve_stump_with,
 };
 pub use crate::config::Config;
-use crate::evaluator::{Primitive, Type, json2lisp, lisp2json, obj2str};
+use crate::evaluator::{Primitive, StatefulEvaluation, Type, json2lisp, lisp2json, obj2str};
 use crate::persistor::{MemoryPersistor, PERSISTOR, Persistor, maximum_leaf_bytes};
 pub use crate::persistor::{SIZE, Word};
 use crate::scenario_context::ScenarioContext;
@@ -140,8 +140,8 @@ fn escape_scheme_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\"', "\\\"")
 }
 
-fn warn_on_error_result(output: &str) {
-    if output.starts_with("(error ") {
+fn warn_on_error_result(error: bool) {
+    if error {
         warn!("Evaluation returned error form; request and result omitted");
     }
 }
@@ -455,7 +455,7 @@ impl Journal {
                 escape_scheme_string(query),
             );
 
-            let result = evaluator.evaluate(expr.as_str());
+            let result = evaluator.evaluate_stateful(expr.as_str());
             runs += 1;
 
             let (persistor, external_called) = {
@@ -466,42 +466,28 @@ impl Journal {
                 (session.persistor.clone(), session.external_called)
             };
 
-            let (output, state_new) = match result.starts_with("(error '") {
-                true => (result, state_old),
-                false => match result.rfind('.') {
-                    Some(index) => match *&result[(index + 16)..(result.len() - 3)]
-                        .split(' ')
-                        .collect::<Vec<&str>>()
-                        .iter()
-                        .map(|x| x.parse::<u8>().expect("Failed to parse state byte"))
-                        .collect::<Vec<u8>>()
-                        .try_into()
-                    {
-                        Ok(state_new) => (String::from(&result[1..(index - 1)]), state_new),
-                        Err(_) => (
-                            String::from("(error 'sync-format \"Invalid return format\")"),
-                            state_old,
-                        ),
-                    },
-                    None => (
-                        String::from("(error 'sync-format \"Invalid return format\")"),
-                        state_old,
-                    ),
-                },
+            let (output, state_new, error_result) = match result {
+                StatefulEvaluation::Success { output, state } => (output, state, false),
+                StatefulEvaluation::Error(error) => (error, state_old, true),
+                StatefulEvaluation::Invalid => (
+                    String::from("(error 'sync-format \"Invalid return format\")"),
+                    state_old,
+                    true,
+                ),
             };
 
             if external_called && state_old != state_new {
                 let output = String::from(
                     "(error 'external-state-error \"Request called an external function and changed state\")",
                 );
-                warn_on_error_result(output.as_str());
+                warn_on_error_result(true);
                 debug!("Completed request in {:?}; body and result omitted", start.elapsed());
                 return output;
             }
 
             match state_old == state_new {
                 true => {
-                    warn_on_error_result(output.as_str());
+                    warn_on_error_result(error_result);
                     debug!("Completed request in {:?}; body and result omitted", start.elapsed());
                     return output;
                 }
@@ -518,7 +504,7 @@ impl Journal {
 
                         match PERSISTOR.root_set(record, state_old, state_new, &persistor) {
                             Ok(_) => {
-                                warn_on_error_result(output.as_str());
+                                warn_on_error_result(error_result);
                                 debug!("Completed request in {:?}; body and result omitted", start.elapsed());
                                 return output;
                             }
@@ -574,7 +560,7 @@ fn kernel_evaluate_inner(record: Word, state_old: Word, genesis: &str, query: &s
         genesis,
         escape_scheme_string(query),
     );
-    let result = evaluator.evaluate(&expression);
+    let result = evaluator.evaluate_stateful(&expression);
     let session = SESSIONS
         .write()
         .expect("sessions lock")
@@ -588,27 +574,13 @@ fn kernel_evaluate_inner(record: Word, state_old: Word, genesis: &str, query: &s
             s7::s7_gc_unprotect_at(evaluator.sc, *location);
         }
     }
-    let (output, state_new) = if result.starts_with("(error '") {
-        (result, state_old)
-    } else if let Some(index) = result.rfind('.') {
-        let parsed = result[(index + 16)..(result.len() - 3)]
-            .split(' ')
-            .map(str::parse::<u8>)
-            .collect::<Result<Vec<_>, _>>()
-            .ok()
-            .and_then(|bytes| Word::try_from(bytes).ok());
-        match parsed {
-            Some(state) => (String::from(&result[1..(index - 1)]), state),
-            None => (
-                String::from("(error 'sync-format \"Invalid return format\")"),
-                state_old,
-            ),
-        }
-    } else {
-        (
+    let (output, state_new) = match result {
+        StatefulEvaluation::Success { output, state } => (output, state),
+        StatefulEvaluation::Error(error) => (error, state_old),
+        StatefulEvaluation::Invalid => (
             String::from("(error 'sync-format \"Invalid return format\")"),
             state_old,
-        )
+        ),
     };
     let graph = session.persistor.encode_graph(state_new);
     let mut response = Vec::with_capacity(4 + output.len() + SIZE + 1 + 4 + graph.len());

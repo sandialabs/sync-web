@@ -34,35 +34,24 @@ pub fn lisp2json(expression: &str) -> Result<Value, String> {
     // - @hash-table: {"*type/hash-table*": [["a", 6], [53, 199]]}
     // - @quoted: {"*type/quoted*": [["a", 6], [53, 199]]}
 
-    let mut owned_expr = None;
-    let expr = {
-        let trimmed = expression.trim_start();
-        if let Some(rest) = trimmed.strip_prefix('\'') {
-            let rest = rest.trim_start();
-            if rest.is_empty() {
-                return Err("Empty quoted expression".to_string());
-            }
-            let mut wrapped = String::from("(quote ");
-            wrapped.push_str(rest);
-            wrapped.push(')');
-            owned_expr = Some(wrapped);
-            owned_expr.as_deref().expect("quote wrapper missing")
-        } else {
-            expression
-        }
-    };
+    let c_expr = CString::new(expression)
+        .map_err(|_| "Scheme expression contains a null byte".to_string())?;
 
     unsafe {
         let sc: *mut s7_scheme = s7_init();
         suppress_error_output(sc);
 
         // Parse the expression without evaluating it
-        let c_expr = CString::new(expr).unwrap_or_else(|_| CString::new("()").unwrap());
         let input_port = s7_open_input_string(sc, c_expr.as_ptr());
         let s7_obj = s7_read(sc, input_port);
+        let tail = s7_read(sc, input_port);
         s7_close_input_port(sc, input_port);
 
-        let result = s7_obj_to_json(sc, s7_obj);
+        let result = if s7_obj == s7_eof_object(sc) || tail != s7_eof_object(sc) {
+            Err("Expected exactly one Scheme expression".to_string())
+        } else {
+            s7_obj_to_json(sc, s7_obj)
+        };
         s7_free(sc);
         result
     }

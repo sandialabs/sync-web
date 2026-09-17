@@ -201,9 +201,9 @@ def probe(engine: str, containers: list[dict[str, Any]]) -> list[dict[str, Any]]
         size = http(f"{base}/api/v1/general/size")
         info = http(f"{base}/api/v1/general/info")
         denied = http(
-            f"{base}/api/v1/general/get",
+            f"{base}/api/v1/general/use",
             "POST",
-            json.dumps({"path": ["*state*", "admin"]}).encode(),
+            json.dumps({"path": ["*state*", "admin"], "read-only?": True}).encode(),
         )
         results.append({
             "router": name,
@@ -212,7 +212,7 @@ def probe(engine: str, containers: list[dict[str, Any]]) -> list[dict[str, Any]]
             "size": size[0],
             "size_body": size[1][:200],
             "info": info[0],
-            "unauthenticated_get": denied[0],
+            "unauthenticated_use": denied[0],
             "ok": health[0] == 200 and size[0] == 200 and info[0] == 200 and denied[0] == 401,
         })
     return results
@@ -339,7 +339,7 @@ def snapshot(
         "| Router | Health | Size | Info | Unauthenticated get |",
         "|---|---:|---:|---:|---:|",
         *[
-            f"| {item['router']} | {item['health']} | {item['size']} | {item['info']} | {item['unauthenticated_get']} |"
+            f"| {item['router']} | {item['health']} | {item['size']} | {item['info']} | {item['unauthenticated_use']} |"
             for item in probes
         ],
         "",

@@ -13,11 +13,12 @@ interface AccessPanelProps {
 const splitPathInput = (value: string): JournalPath => value.trim().split(/\s+/).filter(Boolean);
 const parseNamespaceInput = (value: string): JournalPath => {
   const parts = splitPathInput(value);
-  if (parts.length === 1 && parts[0] !== '*state*') return ['*state*', parts[0]];
-  if (parts.length === 2 && parts[0] === '*state*') return parts;
-  throw new Error('Managed namespace must be a username or exact “*state* USER”.');
+  if (parts.length === 1 && parts[0] !== '*state*' && parts[0] !== '*public*') {
+    return ['*state*', parts[0]];
+  }
+  throw new Error('Managed namespace must be one local username.');
 };
-const namespaceDisplay = (path: JournalPath) => `(${path.join(' ')})`;
+const namespaceDisplay = (path: JournalPath) => String(path[1] ?? '');
 const parseHumanPathInput = (value: string): JournalPath => {
   const segments: string[] = [];
   let segment = '';
@@ -64,12 +65,29 @@ const parseHumanPathInput = (value: string): JournalPath => {
   return segments;
 };
 const formatPath = (path: JournalPath) => path.length === 0
-  ? '(root)'
+  ? '(home)'
   : path.map((segment) => typeof segment === 'string'
     ? JournalService.decodePathSegment(segment)
     : String(segment)).join(' / ');
-const formatPrincipal = (principal: JournalPath) => principal.join(' ');
-const formatResolve = (value: AuthorizationRule['resolve']) => (
+const principalPresentation = (principal: JournalPath) => {
+  if (principal.length === 1 && principal[0] === '*public*') {
+    return { kind: 'Public', journal: '', user: '' };
+  }
+  const stateIndex = principal.lastIndexOf('*state*');
+  return {
+    kind: stateIndex > 0 ? 'Remote user' : 'Local user',
+    journal: stateIndex > 0 ? principal.slice(0, stateIndex).join(' ') : '',
+    user: stateIndex >= 0 ? String(principal[stateIndex + 1] ?? '') : '',
+  };
+};
+const formatPrincipal = (principal: JournalPath) => {
+  const presentation = principalPresentation(principal);
+  if (presentation.kind === 'Public') return 'Public';
+  return presentation.kind === 'Remote user'
+    ? `Remote user ${presentation.user} at ${presentation.journal}`
+    : `Local user ${presentation.user}`;
+};
+const formatRetrieve = (value: AuthorizationRule['retrieve']) => (
   Array.isArray(value) ? `${value[0]} … ${value[1]}` : value ? 'all indices' : 'disabled'
 );
 const REMOTE_KEY_INDEX: [number, number] = [-32, -1];
@@ -82,7 +100,10 @@ const principalKind = (principal: JournalPath): PrincipalKind => {
   if (terminalLocal || terminalRemote) {
     const user = String(principal[principal.length - 1]);
     const route = terminalRemote ? principal.slice(0, -2).map(String) : [];
-    const validUser = user !== '' && user !== '*state*' && user !== '*public*';
+    const validUser = user !== ''
+      && !/\s/.test(user)
+      && user !== '*state*'
+      && user !== '*public*';
     const validRoute = route.every((segment) => (
       segment !== '' && segment !== '*state*' && segment !== '*public*'
     ));
@@ -90,7 +111,7 @@ const principalKind = (principal: JournalPath): PrincipalKind => {
   }
   return 'invalid';
 };
-const invalidPrincipalMessage = 'Share with must be exact “*state* USER”, “*public*”, or one or more route segments followed by “*state* USER”.';
+const invalidPrincipalMessage = 'Journal location must contain only route aliases, and User must be one local username.';
 const parseRange = (startValue: string, endValue: string, label: string): [number, number] => {
   const integer = /^-?\d+$/;
   const startText = startValue.trim();
@@ -113,10 +134,14 @@ const parseRange = (startValue: string, endValue: string, label: string): [numbe
 };
 
 const emptyRuleForm = {
-  principal: '',
+  principalKind: 'local' as 'local' | 'remote' | 'public',
+  journal: '',
+  user: '',
   path: '',
-  get: false,
-  set: false,
+  readOnlyUse: false,
+  put: false,
+  mutatingUse: false,
+  run: false,
 };
 
 const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, refreshKey, isAdmin = false }) => {
@@ -131,9 +156,9 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
   const confirmationPendingRef = useRef(false);
   const confirmationResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
   const confirmationReturnFocusRef = useRef<HTMLElement | null>(null);
-  const [resolveEnabled, setResolveEnabled] = useState(false);
-  const [resolveStart, setResolveStart] = useState('0');
-  const [resolveEnd, setResolveEnd] = useState('-1');
+  const [retrieveEnabled, setRetrieveEnabled] = useState(false);
+  const [retrieveStart, setRetrieveStart] = useState('0');
+  const [retrieveEnd, setRetrieveEnd] = useState('-1');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -220,25 +245,35 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
   };
 
   const buildRule = (): AuthorizationRule => {
-    const principal = splitPathInput(form.principal);
+    const user = form.user.trim();
+    const route = form.principalKind === 'remote' ? splitPathInput(form.journal) : [];
+    if (form.principalKind === 'remote' && route.length === 0) {
+      throw new Error('Remote user requires a Journal location.');
+    }
+    const principal: JournalPath = form.principalKind === 'public'
+      ? ['*public*']
+      : [...route, '*state*', user];
     const kind = principalKind(principal);
-    if (kind === 'empty') throw new Error('Share with is required.');
+    if (kind === 'empty') throw new Error('Principal is required.');
     if (kind === 'invalid') throw new Error(invalidPrincipalMessage);
     const remotePrincipal = kind === 'remote';
-    const resolve = resolveEnabled
-      ? parseRange(resolveStart, resolveEnd, 'Resolve window')
+    const retrieve = retrieveEnabled
+      ? parseRange(retrieveStart, retrieveEnd, 'Retrieve window')
       : false;
     const keyIndex = remotePrincipal ? [...REMOTE_KEY_INDEX] as [number, number] : undefined;
-    if (!form.get && !form.set && resolve === false) {
+    if (!form.readOnlyUse && !form.put && !form.mutatingUse && !form.run && retrieve === false) {
       throw new Error('Select at least one allowed function.');
     }
     return {
       principal,
       ...(keyIndex ? { 'key-index': keyIndex } : {}),
       path: parseHumanPathInput(form.path),
-      get: form.get,
-      'set!': form.set,
-      resolve,
+      'put!': form.put,
+      'use!': form.mutatingUse
+        ? { 'read-only?': false }
+        : form.readOnlyUse ? { 'read-only?': true } : false,
+      'run!': form.run,
+      retrieve,
     };
   };
 
@@ -252,12 +287,20 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
     try {
       const rule = buildRule();
       if (rule.principal.length === 0) throw new Error('Principal is required.');
-      await journalService.authorize(managedNamespace(), rule);
+      const exactRule = JSON.stringify(rule);
+      if (rulesRef.current.some((current) => JSON.stringify(current) === exactRule)) {
+        throw new Error('Access rule already exists; no change was made.');
+      }
+      const changed = await journalService.authorize(managedNamespace(), rule);
+      if (!changed) throw new Error('Access rule was not added; Journal reported no change.');
+      if (!await loadRules(activeNamespaceRef.current, false)
+          || !rulesRef.current.some((current) => JSON.stringify(current) === exactRule)) {
+        throw new Error('Access rule could not be confirmed in the refreshed rule set.');
+      }
       setForm(emptyRuleForm);
-      setResolveEnabled(false);
-      setResolveStart('0');
-      setResolveEnd('-1');
-      await loadRules(activeNamespace, false);
+      setRetrieveEnabled(false);
+      setRetrieveStart('0');
+      setRetrieveEnd('-1');
       setStatus('Access rule added.');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not add access rule');
@@ -298,6 +341,7 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
   };
 
   const mutationLocked = isSaving || confirmation !== null;
+  const useEnabled = form.readOnlyUse || form.mutatingUse;
 
   return (
     <div className="access-panel">
@@ -321,7 +365,7 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
         <div className="access-card-header">
           <div>
             <h2>Add rule</h2>
-            <p>Rules are local to this journal, apply under <code>{namespaceDisplay(activeNamespace)}</code>, and are checked before reads, writes, and resolves.</p>
+            <p>Rules for <code>{namespaceDisplay(activeNamespace)}</code> independently grant put, use, retrieve, and run operations.</p>
           </div>
         </div>
         <form className="access-form" onSubmit={handleAddRule}>
@@ -329,36 +373,70 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
             <div className="access-wide-field access-namespace-target">
               <label>
                 Manage namespace
-                <input value={namespaceInput} onChange={(event) => setNamespaceInput(event.target.value)} placeholder="example: bob or *state* bob" disabled={mutationLocked} />
+                <input value={namespaceInput} onChange={(event) => setNamespaceInput(event.target.value)} placeholder="example: bob" disabled={mutationLocked} />
               </label>
               <button className="button button-secondary" type="button" onClick={handleLoadNamespace} disabled={mutationLocked}>Load namespace</button>
             </div>
           )}
-          <label className="access-wide-field">
-            Share with principal
-            <input value={form.principal} onChange={(event) => setForm({ ...form, principal: event.target.value })} placeholder="example: peer *state* alice" disabled={mutationLocked} />
+          <label>
+            Principal kind
+            <select
+              value={form.principalKind}
+              onChange={(event) => {
+                const principalKind = event.target.value as 'local' | 'remote' | 'public';
+                setForm({
+                  ...form,
+                  principalKind,
+                  mutatingUse: form.mutatingUse,
+                  run: principalKind === 'public' ? false : form.run,
+                });
+              }}
+              disabled={mutationLocked}
+            >
+              <option value="local">Local user</option>
+              <option value="remote">Remote user</option>
+              <option value="public">Public</option>
+            </select>
           </label>
+          {form.principalKind === 'remote' && (
+            <label>
+              Journal location
+              <input value={form.journal} onChange={(event) => setForm({ ...form, journal: event.target.value })} placeholder="example: peer archive" disabled={mutationLocked} />
+            </label>
+          )}
+          {form.principalKind !== 'public' && (
+            <label>
+              User
+              <input value={form.user} onChange={(event) => setForm({ ...form, user: event.target.value })} placeholder="example: alice" disabled={mutationLocked} />
+            </label>
+          )}
           <label className="access-wide-field">
             Path under your namespace
             <input value={form.path} onChange={(event) => setForm({ ...form, path: event.target.value })} placeholder="example: docs project" disabled={mutationLocked} />
           </label>
           <div className="access-toggles" aria-label="Allowed functions">
-            <label className="access-switch-row">resolve <input type="checkbox" checked={resolveEnabled} onChange={(event) => setResolveEnabled(event.target.checked)} disabled={mutationLocked} /><span className="access-switch" /></label>
-            <label className="access-switch-row">get <input type="checkbox" checked={form.get} onChange={(event) => setForm({ ...form, get: event.target.checked })} disabled={mutationLocked} /><span className="access-switch" /></label>
-            <label className="access-switch-row">set! <input type="checkbox" checked={form.set} onChange={(event) => setForm({ ...form, set: event.target.checked })} disabled={mutationLocked} /><span className="access-switch" /></label>
+            <div className="access-permission-pill">
+              <label className="access-switch-row">put <input type="checkbox" checked={form.put} onChange={(event) => setForm({ ...form, put: event.target.checked })} disabled={mutationLocked} /><span className="access-switch" /></label>
+            </div>
+            <div className={`access-permission-pill ${useEnabled ? 'expanded' : ''}`}>
+              <label className="access-switch-row">use <input type="checkbox" checked={useEnabled} onChange={(event) => setForm({ ...form, readOnlyUse: false, mutatingUse: event.target.checked })} disabled={mutationLocked} /><span className="access-switch" /></label>
+              {useEnabled && (
+                <label className="access-secondary-toggle">read-only <input type="checkbox" checked={form.readOnlyUse} onChange={(event) => setForm({ ...form, readOnlyUse: event.target.checked, mutatingUse: !event.target.checked })} disabled={mutationLocked} /></label>
+              )}
+            </div>
+            <div className={`access-permission-pill ${retrieveEnabled ? 'expanded' : ''}`}>
+              <label className="access-switch-row">retrieve <input type="checkbox" checked={retrieveEnabled} onChange={(event) => setRetrieveEnabled(event.target.checked)} disabled={mutationLocked} /><span className="access-switch" /></label>
+              {retrieveEnabled && (
+                <div className="access-secondary-range">
+                  <label>index start <input type="number" value={retrieveStart} onChange={(event) => setRetrieveStart(event.target.value)} disabled={mutationLocked} /></label>
+                  <label>index end <input type="number" value={retrieveEnd} onChange={(event) => setRetrieveEnd(event.target.value)} disabled={mutationLocked} /></label>
+                </div>
+              )}
+            </div>
+            <div className="access-permission-pill">
+              <label className="access-switch-row">run <input type="checkbox" checked={form.run} onChange={(event) => setForm({ ...form, run: event.target.checked })} disabled={mutationLocked || form.principalKind === 'public'} /><span className="access-switch" /></label>
+            </div>
           </div>
-          <fieldset className="access-resolve-range access-range">
-            <legend>Document history window</legend>
-            <p className="access-range-help">Resolve Start and End govern which committed document-history indexes may be resolved.</p>
-            <label>
-              Resolve Start
-              <input type="number" value={resolveStart} onChange={(event) => setResolveStart(event.target.value)} disabled={mutationLocked || !resolveEnabled} />
-            </label>
-            <label>
-              Resolve End
-              <input type="number" value={resolveEnd} onChange={(event) => setResolveEnd(event.target.value)} disabled={mutationLocked || !resolveEnabled} />
-            </label>
-          </fieldset>
           <button className="button button-primary access-form-submit" type="submit" disabled={mutationLocked || isLoading}>
             Add
           </button>
@@ -379,22 +457,34 @@ const AccessPanel: React.FC<AccessPanelProps> = ({ journalService, currentUser, 
           <div className="access-empty">No explicit access rules yet. This namespace is private except to its owner and admins.</div>
         ) : (
           <div className="access-rule-list">
-            {rules.map((rule, index) => (
+            {rules.map((rule, index) => {
+              const principal = principalPresentation(rule.principal);
+              return (
               <article className="access-rule" key={`${formatPrincipal(rule.principal)}-${formatPath(rule.path)}-${index}`}>
                 <div className="access-rule-main">
-                  <div className="access-rule-principal">{formatPrincipal(rule.principal)}</div>
+                  <div className="access-rule-principal">{principal.kind}</div>
+                  {principal.kind !== 'Public' && (
+                    <div className="access-rule-principal-details">
+                      {principal.kind === 'Remote user' && <span>Journal: {principal.journal}</span>}
+                      <span>User: {principal.user}</span>
+                    </div>
+                  )}
                   <div className="access-rule-path">{formatPath(rule.path)}</div>
                 </div>
                 <div className="access-rule-permissions">
-                  {rule.get && <span>get</span>}
-                  {rule['set!'] && <span>set!</span>}
-                  {rule.resolve !== false && <span>Document history: {formatResolve(rule.resolve)}</span>}
+                  {rule['put!'] && <span>put</span>}
+                  {rule['use!'] !== false && (
+                    <span>{rule['use!']['read-only?'] ? 'use · read-only' : 'use'}</span>
+                  )}
+                  {rule.retrieve !== false && <span>retrieve · {formatRetrieve(rule.retrieve)}</span>}
+                  {rule['run!'] && <span>run</span>}
                 </div>
                 <button className="button button-primary" type="button" onClick={() => void handleDeleteRule(rule)} disabled={mutationLocked || isLoading}>
                   Delete
                 </button>
               </article>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

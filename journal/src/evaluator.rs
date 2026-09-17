@@ -15,6 +15,9 @@ use std::fmt::Write;
 use std::num::ParseIntError;
 use std::os::raw::c_char;
 
+use crate::Word;
+use crate::primitives::{sync_heap_read, sync_is_node};
+
 mod codec;
 pub use codec::{json2lisp, lisp2json, obj2str};
 
@@ -89,6 +92,12 @@ pub struct Evaluator {
     pub sc: *mut s7_scheme,
 }
 
+pub(crate) enum StatefulEvaluation {
+    Success { output: String, state: Word },
+    Error(String),
+    Invalid,
+}
+
 impl Evaluator {
     pub fn new(types: HashMap<i64, Type>, primitives: Vec<Primitive>) -> Self {
         let mut primitives_ = vec![
@@ -149,29 +158,50 @@ impl Evaluator {
         }
     }
 
+    unsafe fn evaluate_object(&self, code: &str) -> s7_pointer {
+        let handler = concat!(
+            "(let* ((type (car x)) ",
+            "(data (if (pair? (cdr x)) (cadr x) '())) ",
+            "(message (catch #t ",
+            "(lambda () (if (and (pair? data) (string? (car data))) ",
+            "(apply format (cons #f data)) ",
+            "(object->string data))) ",
+            "(lambda args (object->string data))))) ",
+            "`(error ',type ,message ((data ,data))))",
+        );
+        let wrapped = CString::new(format!(
+            "(catch #t (lambda () (eval (read (open-input-string \"{}\")))) (lambda x {}))",
+            code.replace("\\", "\\\\").replace("\"", "\\\""),
+            handler,
+        ))
+        .expect("failed to create CString for evaluation");
+        unsafe { s7_eval_c_string(self.sc, wrapped.as_ptr()) }
+    }
+
     pub fn evaluate(&self, code: &str) -> String {
+        unsafe { obj2str(self.sc, self.evaluate_object(code)) }
+    }
+
+    pub(crate) fn evaluate_stateful(&self, code: &str) -> StatefulEvaluation {
         unsafe {
-            unsafe {
-                // execute query and return
-                let handler = concat!(
-                    "(let* ((type (car x)) ",
-                    "(data (if (pair? (cdr x)) (cadr x) '())) ",
-                    "(message (catch #t ",
-                    "(lambda () (if (and (pair? data) (string? (car data))) ",
-                    "(apply format (cons #f data)) ",
-                    "(object->string data))) ",
-                    "(lambda args (object->string data))))) ",
-                    "`(error ',type ,message ((data ,data))))",
-                );
-                let wrapped = CString::new(format!(
-                    "(catch #t (lambda () (eval (read (open-input-string \"{}\")))) (lambda x {}))",
-                    code.replace("\\", "\\\\").replace("\"", "\\\""),
-                    handler,
-                ))
-                .expect("failed to create CString for evaluation");
-                let s7_obj = s7_eval_c_string(self.sc, wrapped.as_ptr());
-                obj2str(self.sc, s7_obj)
+            let value = self.evaluate_object(code);
+            if !s7_is_pair(value) {
+                return StatefulEvaluation::Invalid;
             }
+            let output = s7_car(value);
+            let state = s7_cdr(value);
+            if sync_is_node(state) {
+                return StatefulEvaluation::Success {
+                    output: obj2str(self.sc, output),
+                    state: sync_heap_read(s7_c_object_value(state)),
+                };
+            }
+            if s7_is_symbol(output)
+                && CStr::from_ptr(s7_symbol_name(output)).to_bytes() == b"error"
+            {
+                return StatefulEvaluation::Error(obj2str(self.sc, value));
+            }
+            StatefulEvaluation::Invalid
         }
     }
 }
@@ -511,3 +541,52 @@ static REMOVE: [&'static CStr; 83] = [
     c"write-char",
     c"write-string",
 ];
+
+#[cfg(test)]
+mod stateful_evaluation_tests {
+    use super::{Evaluator, StatefulEvaluation};
+    use crate::persistor::MemoryPersistor;
+    use crate::primitives::journal_evaluator;
+    use crate::{Session, SESSIONS};
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn stateful_evaluation_reads_the_result_pair_structurally() {
+        let evaluator = journal_evaluator();
+        let state = [7; 32];
+        SESSIONS.write().expect("sessions lock").insert(
+            evaluator.sc as usize,
+            Session::new(
+                [0; 32],
+                state,
+                MemoryPersistor::new(),
+                Arc::new(Mutex::new(HashMap::new())),
+            ),
+        );
+        let result = evaluator.evaluate_stateful(
+            r#"(cons '(error 'not-an-evaluation-error "data . #u8(0)") (sync-state))"#,
+        );
+        SESSIONS.write().expect("sessions lock").remove(&(evaluator.sc as usize));
+        match result {
+            StatefulEvaluation::Success { output, state: actual } => {
+                assert_eq!(output, "(error 'not-an-evaluation-error \"data . #u8(0)\")");
+                assert_eq!(actual, state);
+            }
+            _ => panic!("expected structured success"),
+        }
+    }
+
+    #[test]
+    fn stateful_evaluation_distinguishes_errors_and_malformed_results() {
+        let evaluator = Evaluator::new(HashMap::new(), vec![]);
+        assert!(matches!(
+            evaluator.evaluate_stateful(r#"(error 'api-error "boom")"#),
+            StatefulEvaluation::Error(_),
+        ));
+        assert!(matches!(
+            evaluator.evaluate_stateful("42"),
+            StatefulEvaluation::Invalid,
+        ));
+    }
+}

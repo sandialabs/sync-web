@@ -12,7 +12,12 @@
 
     (for-each
       (lambda (journal)
-        (test-submit ((*journal* journal 'set!) '(*state* network seed) (journal 'name)) :expect #t)
+        (test-submit ((*journal* journal 'put!) '(*state* network seed) (journal 'name)) :expect #t)
+        (if (eq? journal journal-3)
+            (test-submit
+              ((*journal* journal 'put!) '(*state* network programs echo)
+               '(lambda (journal . arguments) arguments))
+              :expect #t))
         (test-submit ((*journal* journal 'step!)) :expect 1))
       (list journal-1 journal-2 journal-3 journal-4))
     (test-report)
@@ -22,7 +27,7 @@
        '((user (*state* network))
          (rule ((principal (journal-2 journal-1 *state* alice))
                 (key-index (-20 -1)) (path (seed))
-                (get #t) (set! #t) (resolve #t)))))
+                (use! ((read-only? #t))) (put! #t) (retrieve #t)))))
       :expect #t)
 
     ;; Establish two independent edges concurrently with reversed response
@@ -69,10 +74,10 @@
     ;; terminal effect until ordinary reciprocal synchronization commits that
     ;; evidence back through the route.
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'get) '(*state* network seed))
+      ((alice journal-1 journal-2 journal-3 'use!) '(*state* network seed))
       :expect error-result?)
     (test-submit
-      ((*journal* journal-3 'get) '(*state* network seed))
+      ((*journal* journal-3 'use!) '(*state* network seed))
       :expect 'journal-3)
     (test-report)
     (test-submit ((*journal* journal-3 'step!)) :expect 3)
@@ -86,28 +91,59 @@
     (test-submit ((*journal* journal-1 'step!)) :expect 4)
     (test-report)
 
-    ;; After convergence, current two-hop get, set!, and resolve use the one
-    ;; deterministic journal-bound interface key without persisted key lists.
+    ;; After convergence, run! remains denied until independently granted to
+    ;; the exact two-hop route principal.
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'get) '(*state* network seed))
+      ((alice journal-1 journal-2 journal-3 'run!)
+       '(*state* network programs echo) '(remote denied))
+      :expect error-result?)
+    (test-report)
+    (define remote-call-rule
+      '((principal (journal-2 journal-1 *state* alice))
+        (key-index (-20 -1)) (path (programs echo))
+         (put! #f) (run! #t) (retrieve #f)))
+    (test-submit
+      ((*journal* journal-3 'authorize!)
+       `((user (*state* network)) (rule ,remote-call-rule)))
+      :expect #t)
+    (test-report)
+    (test-submit
+      ((alice journal-1 journal-2 journal-3 'run!)
+       '(*state* network programs echo) '(remote granted))
+      :expect '(remote granted))
+    (test-report)
+    (test-submit
+      ((*journal* journal-3 'deauthorize!)
+       `((user (*state* network)) (rule ,remote-call-rule)))
+      :expect #t)
+    (test-report)
+    (test-submit
+      ((alice journal-1 journal-2 journal-3 'run!)
+       '(*state* network programs echo) '(remote revoked))
+      :expect error-result?)
+
+    ;; Current two-hop get, set!, and retrieve use the one deterministic
+    ;; journal-bound interface key without persisted key lists.
+    (test-submit
+      ((alice journal-1 journal-2 journal-3 'use!) '(*state* network seed))
       :expect 'journal-3)
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'set!)
+      ((alice journal-1 journal-2 journal-3 'put!)
        '(*state* network seed) "two-hop" :expected 'journal-3)
       :expect #t)
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'set!)
+      ((alice journal-1 journal-2 journal-3 'put!)
        '(*state* network seed) "wrong" :expected 'journal-3)
       :expect #f)
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'get) '(*state* network seed))
+      ((alice journal-1 journal-2 journal-3 'use!) '(*state* network seed))
       :expect "two-hop")
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'resolve)
+      ((alice journal-1 journal-2 journal-3 'retrieve)
        '(-1 *state* network seed) :pinned? #f :proof? #f)
       :expect 'journal-3)
     (test-submit
-      ((alice journal-1 'resolve-batch)
+      ((alice journal-1 'retrieve-batch)
        '((-1 journal-2 -1 journal-3 -1 *state* network seed)
          (-1 journal-2 -1 journal-3 -1 *state* network seed)))
       :expect
@@ -120,18 +156,18 @@
 
     ;; Independent scheduled synchronization may overlap while both ends stage
     ;; ordinary writes. Each step still commits one coherent local head.
-    (test-submit ((*journal* journal-1 'set!) '(*state* network round) "origin") :expect #t)
-    (test-submit ((*journal* journal-4 'set!) '(*state* network round) "terminal") :expect #t)
+    (test-submit ((*journal* journal-1 'put!) '(*state* network round) "origin") :expect #t)
+    (test-submit ((*journal* journal-4 'put!) '(*state* network round) "terminal") :expect #t)
     (test-submit ((*journal* journal-3 'bridge!) journal-4) :schedule '(3 2) :expect #t)
     (test-submit ((*journal* journal-1 'step!)) :schedule '(1 3) :tick 1 :expect 5)
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'get) '(*state* network seed))
+      ((alice journal-1 journal-2 journal-3 'use!) '(*state* network seed))
       :tick 1 :expect "two-hop")
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'set!) '(*state* network seed) "advanced")
+      ((alice journal-1 journal-2 journal-3 'put!) '(*state* network seed) "advanced")
       :tick 1 :expect #t)
     (test-submit
-      ((alice journal-1 journal-2 journal-3 'resolve)
+      ((alice journal-1 journal-2 journal-3 'retrieve)
        '(-1 *state* network seed) :pinned? #f :proof? #f)
       :tick 1 :expect 'journal-3)
     (test-submit ((*journal* journal-4 'step!)) :tick 1 :expect 3)
@@ -167,20 +203,20 @@
 
     ;; Give Alice a direct application path whose signing key can be observed
     ;; across two ordinary interface-key rotations.
-    (test-submit ((*journal* journal-2 'set!) '(*state* network rotation) "available") :expect #t)
+    (test-submit ((*journal* journal-2 'put!) '(*state* network rotation) "available") :expect #t)
     (test-submit
       ((*journal* journal-2 'authorize!)
        '((user (*state* network))
          (rule ((principal (journal-1 *state* alice))
                 (key-index (-20 -1)) (path (rotation))
-                (get #t) (set! #t) (resolve #t)))))
+                (use! ((read-only? #t))) (put! #t) (retrieve #t)))))
       :expect #t)
     (test-submit ((*journal* journal-2 'step!)) :expect 6)
     (test-submit ((*journal* journal-1 'bridge!) journal-2) :schedule '(2 1) :tick 1 :expect #t)
     (test-report)
     (test-submit ((*journal* journal-1 'step!)) :expect 7)
     (test-submit
-      ((alice journal-1 journal-2 'get) '(*state* network rotation))
+      ((alice journal-1 journal-2 'use!) '(*state* network rotation))
       :schedule '(1 2 0 1) :expect "available")
     (test-report)
 
@@ -192,23 +228,23 @@
       ;; Until the replacement public key propagates through a committed peer
       ;; view, the stale route fails closed without an old-key fallback.
       (test-submit
-        ((alice journal-1 journal-2 'get) '(*state* network rotation))
+        ((alice journal-1 journal-2 'use!) '(*state* network rotation))
         :schedule '(2 1 0 1) :expect error-result?)
       (test-submit
-        ((alice journal-1 journal-2 'set!)
+        ((alice journal-1 journal-2 'put!)
          '(*state* network rotation) "uncommitted")
         :schedule '(2 1 0 1) :expect error-result?)
       (test-submit
-        ((alice journal-1 journal-2 'resolve)
+        ((alice journal-1 journal-2 'retrieve)
          '(-1 *state* network rotation) :pinned? #f :proof? #f)
         :schedule '(2 1 0 1) :expect error-result?)
-      (test-submit ((*journal* journal-1 'set!) `(*state* alice ,marker) marker) :expect #t)
+      (test-submit ((*journal* journal-1 'put!) `(*state* alice ,marker) marker) :expect #t)
       (test-submit ((*journal* journal-1 'step!)) :schedule '(1 2) :tick 1 :expect expected-origin-size)
       (test-report)
       ;; Committing retires the old private key before the peer has committed
       ;; the new public key, so the stale route is temporarily unusable.
       (test-submit
-        ((alice journal-1 journal-2 'get) '(*state* network rotation))
+        ((alice journal-1 journal-2 'use!) '(*state* network rotation))
         :schedule '(1 2 0 1) :expect error-result?)
       (test-submit ((*journal* journal-1 'bridge!) journal-2) :schedule '(2 1) :tick 1 :expect #t)
       (test-report)
@@ -217,14 +253,14 @@
       (test-report)
       (test-submit ((*journal* journal-1 'step!)) :expect (+ expected-origin-size 1))
       (test-submit
-        ((alice journal-1 journal-2 'get) '(*state* network rotation))
+        ((alice journal-1 journal-2 'use!) '(*state* network rotation))
         :schedule '(2 1 0 1) :tick 1 :expect "available")
       (test-submit
-        ((alice journal-1 journal-2 'set!)
+        ((alice journal-1 journal-2 'put!)
          '(*state* network rotation) "available")
         :schedule '(2 1 0 1) :expect #t)
       (test-submit
-        ((alice journal-1 journal-2 'resolve)
+        ((alice journal-1 journal-2 'retrieve)
          '(-1 *state* network rotation) :pinned? #f :proof? #f)
         :schedule '(2 1 0 1) :expect "available")
       (test-report))
@@ -243,8 +279,8 @@
       (and (pair? result) (eq? (car result) 'error)))
 
     (test-report)
-    (test-submit ((*journal* journal-10 'set!) '(*state* seed) "ten") :expect #t)
-    (test-submit ((*journal* journal-11 'set!) '(*state* seed) "eleven") :expect #t)
+    (test-submit ((*journal* journal-10 'put!) '(*state* seed) "ten") :expect #t)
+    (test-submit ((*journal* journal-11 'put!) '(*state* seed) "eleven") :expect #t)
     (test-submit ((*journal* journal-10 'step!)) :expect 1)
     (test-submit ((*journal* journal-11 'step!)) :expect 1)
     (test-report)
@@ -269,9 +305,9 @@
     (define (collect action)
       (test-submit action)
       (test-await))
-    (test-submit ((*journal* journal-12 'set!) '(*state* seed) "twelve")
+    (test-submit ((*journal* journal-12 'put!) '(*state* seed) "twelve")
                  :expect #t)
-    (test-submit ((*journal* journal-13 'set!) '(*state* seed) "thirteen")
+    (test-submit ((*journal* journal-13 'put!) '(*state* seed) "thirteen")
                  :expect #t)
     (test-submit ((*journal* journal-12 'step!)) :expect 1)
     (test-submit ((*journal* journal-13 'step!)) :expect 1)
@@ -287,13 +323,12 @@
                                     (federation
                                      (sync-eval
                                       ((root 'get) '(root object federation))))
-                                    (identity ((ledger 'config) '(public identity)))
-                                    (id (cadr (assoc 'id identity)))
+                                    (salt ((ledger 'config) '(public key-derivation-salt)))
                                     (key
                                      (crypto-generate
                                       (expression->byte-vector
                                        (list 'sync-web/federation-continuation-signing-key/v1
-                                             id
+                                             salt
                                              (sync-hash
                                               (expression->byte-vector
                                                ,(journal-12 'url))))))))
@@ -319,7 +354,7 @@
        :expect 'local))
     (test-report))
 
-  ;; Stable random journal identities salt root-secret-derived signing keys.
+  ;; Stable random derivation salts domain-separate root-secret-derived signing keys.
   ;; Existing peers verify only missing K0 -> K1 -> K2 transitions after
   ;; skipping both rotations, while history and the relationship survive.
   (with-let (make-interface-harness :journals 2 :journal-start 20 :users '(alice bob))
@@ -339,28 +374,14 @@
                      (lambda (root)
                        (let* ((ledger
                                (sync-eval ((root 'get) '(root object ledger))))
-                              (identity
-                               (cadr
-                                (assoc 'identity
-                                       (cadr (assoc 'public
-                                                    ((ledger 'config)))))))
-                              (identity-id (cadr (assoc 'id identity))))
+                              (salt ((ledger 'config) '(public key-derivation-salt))))
                          (car
                           (crypto-generate
                            (expression->byte-vector
                             (list 'sync-web/journal-signing-key/v1
-                                  identity-id
+                                  salt
                                   (sync-hash
                                    (expression->byte-vector ,common-secret))))))))))))
-
-    (define (identity-digest journal root-secret nonce)
-      (collect
-       (raw journal
-            `(*call* ,root-secret
-                     (lambda (root)
-                       (sync-hash
-                        (expression->byte-vector
-                         (list 'sync-web/journal-id/v1 ',nonce))))))))
 
     (define (signed-head journal root-secret)
       (collect
@@ -371,14 +392,14 @@
                          'signed-head) -1))))))
 
     (test-report)
-    (test-submit ((*journal* journal-20 'set!) '(*state* alice seed) "origin") :expect #t)
-    (test-submit ((*journal* journal-21 'set!) '(*state* bob document) "stable") :expect #t)
+    (test-submit ((*journal* journal-20 'put!) '(*state* alice seed) "origin") :expect #t)
+    (test-submit ((*journal* journal-21 'put!) '(*state* bob document) "stable") :expect #t)
     (test-submit
       ((*journal* journal-21 'authorize!)
        '((user (*state* bob))
          (rule ((principal (journal-20 *state* alice))
                 (key-index (-20 -1)) (path (document))
-                (get #t) (set! #f) (resolve #t)))))
+                (use! ((read-only? #t))) (put! #f) (retrieve #t)))))
       :expect #t)
     (test-submit ((*journal* journal-20 'step!)) :expect 1)
     (test-submit ((*journal* journal-21 'step!)) :expect 1)
@@ -386,12 +407,8 @@
 
     (let* ((info-20 (collect ((*anonymous* journal-20 'info))))
            (info-21 (collect ((*anonymous* journal-21 'info))))
-           (identity-20 (cadr (assoc 'identity info-20)))
-           (identity-21 (cadr (assoc 'identity info-21)))
-           (identity-id-20 (cadr (assoc 'id identity-20)))
-           (computed-id-20
-            (identity-digest journal-20 "pass-20"
-                             (cadr (assoc 'nonce identity-20))))
+           (salt-20 (cadr (assoc 'key-derivation-salt info-20)))
+           (salt-21 (cadr (assoc 'key-derivation-salt info-21)))
            (initial-key (cadr (assoc 'public-key info-20)))
            (initial-head (signed-head journal-20 "pass-20"))
            (same-secret-key-20
@@ -401,15 +418,14 @@
       (test-submit
         ((*anonymous* journal-20 'info))
         :expect (lambda (result)
-                  (and (= (length identity-20) 2)
-                       (= (length identity-id-20) 32)
-                       (= (length (cadr (assoc 'nonce identity-20))) 32)
-                       (equal? identity-id-20 computed-id-20))))
+                  (and (not (assoc 'identity result))
+                       (= (length salt-20) 32))))
       (test-submit
         ((*anonymous* journal-21 'info))
         :expect (lambda (result)
-                  (not (equal? (cadr (assoc 'id identity-20))
-                               (cadr (assoc 'id identity-21))))))
+                  (and (not (assoc 'identity result))
+                       (= (length salt-21) 32)
+                       (not (equal? salt-20 salt-21)))))
       (test-submit
         ((*anonymous* journal-20 'info))
         :expect (lambda (result)
@@ -425,7 +441,7 @@
         (raw journal-20 '(*step* "pass-20" (ledger-step #t)))
         :expect 2)
       (test-submit
-        ((alice journal-20 journal-21 'get) '(*state* bob document))
+        ((alice journal-20 journal-21 'use!) '(*state* bob document))
         :expect "stable")
       (test-report)
 
@@ -466,10 +482,6 @@
                                  (sync-eval
                                   ((root 'get) '(root object ledger))))
                                 (config ((ledger 'config)))
-                                (identity
-                                 (cadr
-                                  (assoc 'identity
-                                         (cadr (assoc 'public config)))))
                                 (index
                                  (car
                                   (reverse
@@ -481,7 +493,7 @@
                                                     (assoc 'private
                                                            config)))))))))
                                 (rotation
-                                 ((ledger 'resolve) index
+                                 ((ledger 'retrieve) index
                                   `(*crypto* journal rotation) #f))
                                 (forged
                                  (map (lambda (entry)
@@ -489,8 +501,7 @@
                                             '(signature #u(1 2 3)) entry))
                                       rotation)))
                            ((ledger '~rotation-verify)
-                            identity forged
-                            (cadr (assoc 'previous-key rotation)))))))
+                            2 #f forged (cadr (assoc 'previous-key rotation)))))))
         :expect error-result?)
 
       ;; Sparse rotation export follows only the strictly decreasing committed
@@ -513,7 +524,7 @@
                             ((ledger 'config)
                              '(public journal latest-rotation-index)))
                            (rotation
-                            ((ledger 'resolve)
+                            ((ledger 'retrieve)
                              `(,latest *crypto* journal rotation) #f))
                            (replacement
                             (map (lambda (entry)
@@ -582,7 +593,7 @@
                       (tag
                        (lambda ()
                          ((federation '~signature-verify)
-                          changed ,identity-id-20 ,initial-key 0)))))
+                          changed ,initial-key 0)))))
                   (let* ((ledger (sync-eval stored-ledger))
                          (head
                           ((standard 'deserialize)
@@ -592,7 +603,7 @@
                     (list
                      (equal?
                       ((federation '~signature-verify)
-                       head ,identity-id-20 ,initial-key 0)
+                       head ,initial-key 0)
                       current-key)
                      (malformed 'index 'next)
                      (malformed 'previous-index 0)
@@ -602,11 +613,11 @@
                     integrity-error))
 
       (let* ((rotated-info (collect ((*anonymous* journal-20 'info))))
-             (rotated-identity (cadr (assoc 'identity rotated-info)))
+             (rotated-salt (cadr (assoc 'key-derivation-salt rotated-info)))
              (rotated-key (cadr (assoc 'public-key rotated-info))))
         (test-submit
           ((*anonymous* journal-20 'info))
-          :expect (lambda (result) (equal? identity-20 rotated-identity)))
+          :expect (lambda (result) (equal? salt-20 rotated-salt)))
         (test-submit
           ((*anonymous* journal-20 'info))
           :expect (lambda (result) (not (equal? initial-key rotated-key))))
@@ -628,26 +639,17 @@
                                     ((root 'get) '(root object federation))))
                                   (head
                                    ((standard 'deserialize)
-                                    ((ledger 'signed-head) -1)))
-                                  (config ((ledger 'config)))
-                                  (identity-id
-                                   (cadr
-                                    (assoc 'id
-                                           (cadr
-                                            (assoc 'identity
-                                                   (cadr
-                                                    (assoc 'public
-                                                           config))))))))
+                                    ((ledger 'signed-head) -1))))
                              (list
                               ((standard 'deep-get)
                                head '(2 (*crypto* journal rotation)))
                               ((federation '~signature-verify)
-                               head identity-id #f -1))))))
+                               head #f -1))))))
           :expect (lambda (result)
                     (and (equal? (car result) '(unknown))
                          (equal? (cadr result) rotated-key))))
         (test-submit
-          ((*journal* journal-20 'resolve)
+          ((*journal* journal-20 'retrieve)
            '(0 *state* alice seed) :pinned? #f :proof? #f)
           :expect "origin")
 
@@ -658,7 +660,7 @@
            '((path (private bridge journal-20 public-key))))
           :expect initial-key)
         (test-submit
-          ((*journal* journal-20 'resolve)
+          ((*journal* journal-20 'retrieve)
            '(2 *crypto* journal rotation) :pinned? #f :proof? #f)
           :expect (lambda (rotation)
                     (equal? (cadr (assoc 'previous-key rotation)) initial-key)))
@@ -671,7 +673,7 @@
         (test-submit
           ((*journal* journal-21 'config)
            '((path (private bridge-identity journal-20))))
-          :expect identity-id-20)
+          :expect '())
         (test-submit
           (raw journal-21
                `(*call* "pass-21"
@@ -688,7 +690,7 @@
                                   (old-head
                                    ((standard 'deserialize) ',initial-head)))
                              ((federation '~signature-verify)
-                              old-head ',identity-id-20 ',rotated-key
+                              old-head ',rotated-key
                               (cadr
                                (assoc 'last-index
                                       (cadr
@@ -706,7 +708,7 @@
           (raw journal-20 '(*step* "root-20-v3" (ledger-step #t)))
           :expect 5)
         (test-submit
-          ((alice journal-20 journal-21 'get) '(*state* bob document))
+          ((alice journal-20 journal-21 'use!) '(*state* bob document))
           :expect "stable")
         (test-report)
 
@@ -729,7 +731,7 @@
             (raw journal-20 '(*step* "root-20-v3" (ledger-step #t)))
             :expect 6)
           (test-submit
-            ((alice journal-20 journal-21 'get) '(*state* bob document))
+            ((alice journal-20 journal-21 'use!) '(*state* bob document))
             :expect "stable")
 
           ;; A refused reinstall leaves retired crypto continuity intact.
@@ -751,7 +753,7 @@
              '((path (private bridge journal-21 public-key))))
             :expect rotated-key-21)
           (test-submit
-            ((alice journal-20 journal-21 'get) '(*state* bob document))
+            ((alice journal-20 journal-21 'use!) '(*state* bob document))
             :expect "stable"))))
 
     (test-report)))

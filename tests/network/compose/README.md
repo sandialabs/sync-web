@@ -17,10 +17,10 @@ The generator accepts environment overrides and otherwise uses:
 - `INTERFACE_SECRET=interface-password`
 - `ADMIN_PASSWORD=admin-pass`
 - `CONNECTIVITY=2`
-- `PERIOD=2`
+- `PERIOD=8`
 - `WINDOW=1024`
 - `SIZE=32`
-- `ACTIVITY=4` — one controlled activity cycle per fixture user every four seconds
+- `ACTIVITY=8` — one controlled activity cycle per fixture user every eight seconds
 - `USERS=1` — non-admin users created on every journal
 - `SEGMENTS=2` — maximum federated walk length for same-user private access; bounded walks may revisit journals
 - `WORDS=8`
@@ -31,7 +31,7 @@ The generator accepts environment overrides and otherwise uses:
 
 `ACTIVITY` is the number of seconds between continuous activity cycles. Use the positive default for controlled workflow and integration tests; `ACTIVITY=0` removes the delay and runs maximum-throughput saturation traffic. Set `ACTIVITY_DISABLED=1` for setup-only runs with no continuous activity. Each node receives a distinct journal secret derived from `SECRET` so reciprocal journal identities remain distinct.
 
-When `BATCH` is absent, activity retains the scalar `get`/`set` and `pin`/`unpin` workflows. A positive `BATCH=N` keeps setup and readiness scalar but uses `get-batch`/`set-batch` or `pin-batch`/`unpin-batch` for each activity cycle. The existing random anchor still chooses the exact route and access group; the remaining paths are sampled uniquely from that same user, route, and group. Historical paths keep the current latest `-1` index at the origin and each hop. Configuration fails rather than reducing `N` when it exceeds `1024`, `SIZE`, or any selectable public/private route-group capacity; because `SIZE` is split between public and private, the practical bound is often `floor(SIZE / 2)`. `BATCH=1` deliberately exercises batch endpoint overhead.
+When `BATCH` is absent, activity retains the scalar read-only `use`/`put` and `pin`/`unpin` workflows. A positive `BATCH=N` keeps setup and readiness scalar but uses read-only `use-batch`/`put-batch` or `pin-batch`/`unpin-batch` for each activity cycle. The existing random anchor still chooses the exact route and access group; the remaining paths are sampled uniquely from that same user, route, and group. Historical paths keep the current latest `-1` index at the origin and each hop. Configuration fails rather than reducing `N` when it exceeds `1024`, `SIZE`, or any selectable public/private route-group capacity; because `SIZE` is split between public and private, the practical bound is often `floor(SIZE / 2)`. `BATCH=1` deliberately exercises batch endpoint overhead.
 
 Optional image overrides:
 
@@ -66,7 +66,7 @@ Useful overrides:
 COMPOSE_PROJECT_NAME=sync-federation-4 \
 NODE_COUNT=4 \
 CONNECTIVITY=2 \
-ACTIVITY=4 \
+ACTIVITY=8 \
 USERS=2 \
 SEGMENTS=2 \
 CONTAINER_RUNTIME=podman \
@@ -107,8 +107,8 @@ Routers expose HTTP ports starting at `8192`. WebDAV is available under each rou
 
 ## Federation behavior
 
-Social agents create deterministic non-admin users (`alice` through `zara`, then suffixed cycles such as `alice-2`) on every journal; disposable fixture passwords use `<username>-pass` so they satisfy Kratos's supported minimum length. `SIZE` is per user per journal, split between `<user>/data/public` and `<user>/data/private`, with an odd extra key assigned to public. Public keys are readable/resolvable by everyone and remotely read-only. Private keys admit only the same username over every bounded walk of at most `SEGMENTS` hops, including finite walks that revisit a journal. Each exact walk receives its own rule; different users, non-enumerated routes, and longer routes receive no implicit authority. Agents configure only path-scoped `get`, `set!`, and `resolve`; they do not install remote administrators or federate pin/unpin.
+Social agents create deterministic non-admin users (`alice` through `zara`, then suffixed cycles such as `alice-2`) on every journal; disposable fixture passwords use `<username>-pass` so they satisfy Kratos's supported minimum length. `SIZE` is per user per journal, split between `<user>/data/public` and `<user>/data/private`, with an odd extra key assigned to public. Public keys are readable/retrievable by everyone and remotely read-only. Private keys admit only the same username over every bounded walk of at most `SEGMENTS` hops, including finite walks that revisit a journal. Each exact walk receives its own rule; different users, non-enumerated routes, and longer routes receive no implicit authority. Agents configure only path-scoped `put!`, read-only `use!`, and `retrieve`; they do not install remote administrators or federate pin/unpin.
 
 Ancestor traversal remains implicit: descendant grants expose ordinary immediate names in parent listings while unauthorized values remain unreadable. Activity runs independently per user and updates existing local or same-user private keys in place; per-user attempts/successes are exported in metrics and benchmark snapshots. HTTP request throughput remains separate from logical path-operation throughput: a successful batch request counts once as a request and `N` times as logical path operations. Dashboards lead with logical path operations per second and retain requests per second alongside it; these are logical-operation, not byte-throughput, claims. Re-running setup preserves identities, bridge state, fixture values, and grants. Remote retention sends one canonical full path directly to `pin`; Interface resolves and verifies the remote proof before pinning it at the origin, including across concurrent origin advancement, and activity then unpins the same path without a redundant client-side proof resolve. Batch activity sends the corresponding unique latest-index paths through `pin-batch` and `unpin-batch`; it does not add a standalone resolve workload. Before positive activity begins, each agent waits for signed reads across exercised routes so identity setup, bridge commits, authorization, and reciprocal synchronization are readiness rather than benchmark failures.
 
-With `ACTIVITY=0`, each agent continuously runs activity cycles without sleeping, saturating the federated workload for throughput and concurrency testing. Ordinary workflow and integration tests should use a controlled positive interval such as `ACTIVITY=4`. Use `ACTIVITY_DISABLED=1` when agents should perform bootstrap/setup and exit without entering the request loop.
+With `ACTIVITY=0`, each agent continuously runs activity cycles without sleeping, saturating the federated workload for throughput and concurrency testing. Ordinary workflow and integration tests should use a controlled positive interval such as `ACTIVITY=8`. Use `ACTIVITY_DISABLED=1` when agents should perform bootstrap/setup and exit without entering the request loop.

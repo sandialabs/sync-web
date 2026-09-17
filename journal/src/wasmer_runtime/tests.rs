@@ -359,3 +359,13 @@ fn sync_all_many_roots_fails_before_unbounded_materialization() {
         PERSISTOR.root_delete(record).unwrap();
     }
 }
+
+
+#[test]
+fn scheme_capability_strings_use_the_structural_reader() {
+    assert_eq!(parse_scheme_string(r#""https://example.test/a""#).unwrap(), "https://example.test/a");
+    assert!(parse_scheme_string(r#""https://example.test/a" trailing"#).is_err());
+    assert!(parse_scheme_string(r#"prefix "https://example.test/a""#).is_err());
+    assert!(parse_scheme_string(r#"("https://example.test/a")"#).is_err());
+    assert!(parse_scheme_string("\"unterminated").is_err());
+}

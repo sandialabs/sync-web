@@ -1,6 +1,6 @@
 # Synchronic Web Ledger Compose Network
 
-This compose stack runs one journal with gateway, explorer, workbench, router, identity-provider, and the WebDAV `file-system` service.
+This Compose application runs a core Sync Web stack consisting of Journal, Gateway, identity provider, and Router. Explorer, Workbench, and the WebDAV `file-system` service are independent optional profiles.
 
 The journal service uses the generic `journal-sdk` image directly. The general interface is assembled at startup from mounted deployment inputs:
 
@@ -10,7 +10,7 @@ The journal service uses the generic `journal-sdk` image directly. The general i
 
 For a fresh database, `run.sh` installs the general interface from the mounted Lisp files. Installation is fail-closed: only the exact successful installer result is accepted. A process error, Scheme error value, or malformed result exits nonzero; the version marker is not written, the server is not started, and result or credential content is omitted from diagnostics. With `JOURNAL_UPDATE=0`, a correctly version-marked database reopens normally without reinstalling or interpreting mounted record source during startup.
 
-The 1.5 Interface is fresh-install-only: `JOURNAL_UPDATE=1` against any existing database fails atomically. Before replacing a 1.4.x deployment, preserve its database, exact runtime image, configuration, and secrets as a restorable read-only historical archive; start 1.5 with a new database volume. There is no in-repository migration or conversion path.
+The final 1.6 Interface supports exactly one in-place transition from a version-marked 1.5.0 database when `JOURNAL_UPDATE=1`. It preserves history, derived keys, relationships, and authorization meaning, and writes the 1.6.0 marker only after exact Interface success. Every other version mismatch or unmarked existing database fails closed.
 
 Before release or deployment, bind every mutable image tag to a clean source commit/tree using the image manifest and run the fresh single-node plus sticky federation journeys in [`tests/release-qa/README.md`](../../../tests/release-qa/README.md). A no-build repeat rejects changed image IDs/digests before startup.
 
@@ -30,13 +30,15 @@ Default local ports are adjacent and non-privileged:
 - `HTTP_PORT` default `8192`
 - `HTTPS_PORT` default `8193`
 
-Example local stack:
+Example local core-only stack:
 
 ```bash
 COMPOSE_PROJECT_NAME=sync-dev SECRET=root-password INTERFACE_SECRET=interface-password \
 ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 HTTPS_PORT=8193 \
 docker compose -f deploy/compose/general/compose.yaml up -d
 ```
+
+Default startup is core-only. Add profiles explicitly for optional services; see [Optional service profiles](#optional-service-profiles).
 
 Example public stack using standard ports:
 
@@ -54,10 +56,38 @@ ADMIN_PASSWORD=admin-pass HTTP_PORT=8192 HTTPS_PORT=8193 \
 podman-compose -f deploy/compose/general/compose.yaml up -d
 ```
 
+## Optional service profiles
+
+The optional profile names are `explorer`, `workbench`, and `file-system`. Each profile starts only that service plus its genuine core dependencies. Router remains in the core stack and resolves optional upstreams at request time, so disabling an optional service does not prevent Router startup; its route responds as unavailable until that service is enabled.
+
+Use the same project name and required secrets for each command. The abbreviated examples show only the profile selection:
+
+```bash
+# Core only: Journal, Gateway, identity provider, and Router
+docker compose -f deploy/compose/general/compose.yaml up -d
+
+# One optional service
+docker compose -f deploy/compose/general/compose.yaml --profile explorer up -d
+docker compose -f deploy/compose/general/compose.yaml --profile workbench up -d
+docker compose -f deploy/compose/general/compose.yaml --profile file-system up -d
+
+# Representative combinations
+docker compose -f deploy/compose/general/compose.yaml \
+  --profile explorer --profile workbench up -d
+docker compose -f deploy/compose/general/compose.yaml \
+  --profile explorer --profile file-system up -d
+
+# Complete service set
+docker compose -f deploy/compose/general/compose.yaml \
+  --profile explorer --profile workbench --profile file-system up -d
+```
+
+`podman compose` and `podman-compose` accept the equivalent profile flags for runtimes that implement the Compose profile specification. Stopping with `down` removes containers and the project network for both core and currently selected profiles; add the same profile flags when required by an older Compose frontend.
+
 ## Configuration
 
 - `COMPOSE_PROJECT_NAME` (recommended): stack/project identity used for generated volumes and parameterized container/network names
-- `SYNC_WEB_VERSION` (default `1.5.0`): platform image version; fresh databases record this value and later starts reject missing or mismatched volume markers
+- `SYNC_WEB_VERSION` (default `1.6.0`): platform image version; fresh databases record this value and later starts reject missing or mismatched volume markers
 - `SECRET` (required): Root secret supplied only to Journal
 - `INTERFACE_SECRET` (required): independently rotatable Interface bearer supplied to Journal and Gateway and persisted in private Root state; it must differ from `SECRET` at installation and after rotation in either direction
 - `INTERFACE_ADMINS` (default `admin`): comma-separated local usernames seeded as `(*state* <name>)` interface administrators on fresh installation
@@ -68,15 +98,15 @@ podman-compose -f deploy/compose/general/compose.yaml up -d
 - `ORIGIN` (default `http://localhost:8192`): public origin used by the identity provider and as the default base for the raw journal interface URL; set this explicitly when using non-default/public ports or hostnames
 - `INTERFACE` (default `${ORIGIN}/api/v1/journal/interface`): public raw journal interface endpoint advertised to bridge peers
 - `JOURNAL_NAME` (default `INTERFACE`): public journal display/peer name advertised to bridge peers
-- `PERIOD` (default `2`): seconds between outer Interface steps; each newly committed Ledger index launches the optional `(*state* *periodic*)` program once
+- `PERIOD` (default `8`): seconds between outer Interface steps; each newly committed Ledger index launches the optional `(*state* *periodic*)` program once
 - `WINDOW` (default `1024`): retained historical state window
-- `JOURNAL_UPDATE` (default empty): startup update switch; unsupported for existing databases by this fresh-install-only 1.5 Interface
+- `JOURNAL_UPDATE` (default empty): set to `1` only for the supported, version-marked 1.5.0-to-1.6.0 transition; ordinary 1.6.0 reopen leaves it unset
 - `TLS_CERT_HOST_PATH` (default `./tls/tls.crt`): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (default `./tls/tls.key`): host key file mounted into router
 - `ACME_WEBROOT_HOST_PATH` (default `./acme-challenge`): host directory mounted at `/var/www/acme-challenge` for HTTP-01 challenge files
 - `TLS_CERT_FILE` (default `/etc/nginx/certs/tls.crt`): in-container certificate path used by router
 - `TLS_KEY_FILE` (default `/etc/nginx/certs/tls.key`): in-container key path used by router
-- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.5.0`): image used by the `file-system` service
+- `FILE_SYSTEM_IMAGE` (default `ghcr.io/sandialabs/sync-web/file-system:1.6.0`): image used by the `file-system` service
 - `SYNC_FS_MAX_OBJECT_BYTES` (default `1048576`): maximum WebDAV object size
 
 Gateway note:
@@ -86,7 +116,7 @@ Gateway note:
 - Public/client-facing API traffic should go to `gateway` under `/api/v1/general/*` and `/api/v1/root/*`.
 - WebDAV traffic is exposed through the router under `/webdav/`.
 - The raw `/interface` endpoint is still present for direct journal transport use and bridge-oriented internals.
-- The journal's periodic scheduler uses the raw Root call `(*step* "<root-secret>")`. The non-mutating outer step commits through its internal continuation, then launches the optional `(*state* *periodic*)` procedure once via detached `call!` only when that commit created a new index.
+- The journal's periodic scheduler uses the raw Root call `(*step* "<root-secret>")`. The non-mutating outer step commits through its internal continuation, then launches the optional `(*state* *periodic*)` procedure once via detached `run!` only when that commit created a new index.
 
 Monitoring note:
 

@@ -42,6 +42,25 @@ describe('WorkingRouteBar', () => {
     expect(onSelectHop.mock.calls).toEqual([[0], [1], [2]]);
   });
 
+  it('decodes names for display while preserving exact route aliases', () => {
+    const onChoosePeer = jest.fn();
+    render(
+      <WorkingRouteBar
+        route={['two%20words']}
+        peerChoices={['peer%2Freader']}
+        onRemoveHop={jest.fn()}
+        onSelectHop={jest.fn()}
+        onOpenPeerPicker={jest.fn()}
+        onClosePeerPicker={jest.fn()}
+        onChoosePeer={onChoosePeer}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'two words' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'peer/reader' }));
+    expect(onChoosePeer).toHaveBeenCalledWith('peer%2Freader');
+  });
+
   it('disables moving back at Self', () => {
     render(
       <WorkingRouteBar

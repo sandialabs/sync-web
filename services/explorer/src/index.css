@@ -50,6 +50,8 @@ code {
   --toolbar-bg: #171a1f;
   --toolbar-text: #ffffff;
   --error-bg: #ffeeee;
+  --object-chip-bg: #00658f;
+  --object-chip-fg: #ffffff;
 }
 
 /* Dark theme */
@@ -67,4 +69,6 @@ code {
   --toolbar-bg: #101318;
   --toolbar-text: #f3f6fb;
   --error-bg: #3a1a1a;
+  --object-chip-bg: #38b9d6;
+  --object-chip-fg: #071a24;
 }

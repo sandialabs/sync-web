@@ -72,9 +72,9 @@ class StickyReadinessUnitTests(unittest.TestCase):
     def test_gateway_failure_counter_ignores_success(self) -> None:
         metrics = "\n".join(
             (
-                'sync_gateway_journal_requests_total{function="get",result="success"} 11',
-                'sync_gateway_journal_requests_total{function="get",result="error"} 2',
-                'sync_gateway_journal_requests_total{function="resolve",result="error"} 3',
+                'sync_gateway_journal_requests_total{function="use!",result="success"} 11',
+                'sync_gateway_journal_requests_total{function="use!",result="error"} 2',
+                'sync_gateway_journal_requests_total{function="retrieve",result="error"} 3',
             )
         )
         self.assertEqual(sticky.metric_failures(metrics), 5)

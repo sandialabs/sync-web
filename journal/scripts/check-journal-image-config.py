@@ -156,7 +156,7 @@ require(
         "COPY journal/scripts/llvm-config-musl-static /src/scripts/llvm-config-musl-static",
         "LLVM_CONFIG_PATH=/src/scripts/llvm-config-musl-static",
         "g++ -x c++ -std=c++17 - -o /tmp/cxx-probe",
-        "openssl-libs-static=3.5.7-r0",
+        "openssl-libs-static=3.5.8-r0",
         "scripts/check-clang-static-toolchain.sh",
         "scripts/check-clang-feature-graph.sh musl",
         'sync-web.variant="alpine-native-musl"',

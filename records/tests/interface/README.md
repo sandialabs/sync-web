@@ -109,7 +109,7 @@ receives a source-bound environment constructor:
 
     (test-submit write :expect #t)
     (test-submit
-      ((alice journal-1 journal-2 'get) '(*state* bob shared))
+      ((alice journal-1 journal-2 'use!) '(*state* bob shared) :read-only? #t)
       :schedule '(2 1) :tick 1 :expect "shared")
 
     (test-report)))

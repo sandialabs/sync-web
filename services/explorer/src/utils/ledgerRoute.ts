@@ -2,34 +2,52 @@ import { JournalPath, LedgerHop } from '../types';
 
 export const LEDGER_LATEST = 'latest';
 
-const normalizeSnapshotValue = (value: string): string => {
+export const normalizeSnapshotInput = (value: string, maximum: number): string => {
+  const safeMaximum = Math.max(0, maximum);
   const trimmed = value.trim().toLowerCase();
-  if (trimmed === '' || trimmed === LEDGER_LATEST) {
-    return LEDGER_LATEST;
-  }
-
+  if (!/^-?\d+$/.test(trimmed)) return String(safeMaximum);
   const parsed = Number.parseInt(trimmed, 10);
-  if (Number.isNaN(parsed) || parsed >= 0) {
-    return LEDGER_LATEST;
-  }
-  return String(parsed);
+  if (!Number.isSafeInteger(parsed)) return String(safeMaximum);
+  if (parsed >= 0) return String(Math.min(parsed, safeMaximum));
+  return String(Math.max(0, safeMaximum + parsed + 1));
 };
 
-export const normalizeSnapshotInput = (value: string): string => normalizeSnapshotValue(value);
+export const normalizePublicSnapshotInput = (
+  value: string,
+  maximum: number,
+): string | null => {
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return normalizeSnapshotInput(trimmed, maximum);
+};
 
-export const stepSnapshotValue = (value: string, direction: 'older' | 'newer'): string => {
-  const normalized = normalizeSnapshotValue(value);
-  const current = normalized === LEDGER_LATEST ? -1 : Number.parseInt(normalized, 10);
+export const stepSnapshotValue = (
+  value: string,
+  maximum: number,
+  direction: 'older' | 'newer',
+): string => {
+  const current = Number.parseInt(normalizeSnapshotInput(value, maximum), 10);
+  return String(direction === 'older'
+    ? Math.max(0, current - 1)
+    : Math.min(Math.max(0, maximum), current + 1));
+};
 
-  if (direction === 'older') {
-    return String(current - 1);
+export const retainedLedgerRootPath = (
+  hops: LedgerHop[],
+  rootIndex: number,
+): JournalPath => {
+  if (hops.length <= 1) {
+    return [rootIndex >= 0 ? rootIndex : 0];
   }
-
-  if (current >= -2) {
-    return LEDGER_LATEST;
+  const terminal = hops[hops.length - 1];
+  const snapshot = terminal.snapshot.trim().toLowerCase();
+  if (snapshot === '' || snapshot === LEDGER_LATEST) {
+    return [terminal.maximum ?? -1];
   }
-
-  return String(current + 1);
+  const parsed = Number.parseInt(snapshot, 10);
+  return [Number.isNaN(parsed) ? -1 : parsed];
 };
 
 const firstHopToRootIndex = (snapshot: string, rootIndex: number): number => {
@@ -46,12 +64,10 @@ const firstHopToRootIndex = (snapshot: string, rootIndex: number): number => {
   return parsed;
 };
 
-const bridgeHopToIndex = (snapshot: string): number => {
-  const normalized = normalizeSnapshotValue(snapshot);
-  if (normalized === LEDGER_LATEST) {
-    return -1;
-  }
-  return Number.parseInt(normalized, 10);
+const bridgeHopToIndex = (hop: LedgerHop): number => {
+  const trimmed = hop.snapshot.trim().toLowerCase();
+  if (trimmed === '' || trimmed === LEDGER_LATEST) return hop.maximum ?? -1;
+  return Number.parseInt(trimmed, 10);
 };
 
 export const buildLedgerRouteBasePath = (
@@ -66,7 +82,7 @@ export const buildLedgerRouteBasePath = (
   const path: JournalPath = [firstHopToRootIndex(first.snapshot, rootIndex)];
 
   for (const hop of rest) {
-    path.push(hop.name, bridgeHopToIndex(hop.snapshot));
+    path.push(hop.name, bridgeHopToIndex(hop));
   }
 
   return path;

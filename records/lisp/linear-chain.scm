@@ -46,6 +46,16 @@
     ;;     integer: chain size.
     (byte-vector->expression (self '(1 0))))
 
+  (define-method (indices self)
+    ;; Return ascending materialized indexes and structural completeness.
+    (let ((size ((self 'size))))
+      (let loop ((index 0) (indexes '()) (complete? #t))
+        (if (= index size) `(chain ,(reverse indexes) ,complete?)
+            (let ((available? (not (equal? ((self 'get) index) '(unknown)))))
+              (loop (+ index 1)
+                    (if available? (cons index indexes) indexes)
+                    (and complete? available?)))))))
+
   (define-method (index self index~)
     ;; Normalize index with bounds checking.
     ;;   Args:
@@ -109,14 +119,16 @@
     ;;   Args:
     ;;     index (integer): oldest range endpoint to hide, inclusive.
     ;;   Returns:
-    ;;     sync node: detached proof material for the hidden range.
-    (let ((index ((self '~adjust) index))
-          (garbage (sync-null)))
-      (let ((chain (let loop ((node (self '(1 1))) (i (- ((self 'size)) 1)))
-                     (if (= i index)
-                         (begin (set! garbage node) (sync-cut node))
-                         (sync-cons (sync-car node) (loop (sync-cdr node) (- i 1)))))))
-        (set! (self '(1 1)) chain) garbage)))
+    ;;     boolean: #t after mutation.
+    (let ((index ((self '~adjust) index)))
+      (set! (self '(1 1))
+            (let loop ((node (self '(1 1))) (i (- ((self 'size)) 1)))
+              (cond ((sync-stub? node) node)
+                    ((= i index) (sync-cut node))
+                    (else
+                     (sync-cons (sync-car node)
+                                (loop (sync-cdr node) (- i 1)))))))
+      #t))
 
   (define-method (~adjust self index)
     ;; Normalize index into [0,size) or raise.

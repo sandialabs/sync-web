@@ -60,7 +60,7 @@ The application uses a developer-focused design with a monospace font and IDE-li
 
 ## API Catalog
 
-`public/help-api.json` is audited against the active Interface query dispatcher in `records/lisp/interface.scm` and the six exposed root forms in `records/lisp/root.scm`. It is metadata and examples only; Workbench remains a raw Scheme client and does not alter endpoint authorization.
+`public/help-api.json` is audited against the active Interface query dispatcher in `records/lisp/interface.scm` and the six exposed root forms in `records/lisp/root.scm`. It is metadata and examples only; Workbench remains a raw Scheme client and does not alter endpoint authorization. The catalog includes an exact user `copy!` example, a visibly destructive Self-local administrator/root `truncate!` example, and local-administrator `prune!` / `prune-batch!` retained-evidence examples; selecting an example only populates the editor and never executes it.
 
 Permission filters describe the minimum caller role. Every user/admin template includes an explicit `authentication.identity`; omitting identity means the root journal caller and would not demonstrate that labeled tier.
 
@@ -68,12 +68,12 @@ Permission filters are:
 
 - `any` / **Anon** — no caller identity required.
 - `user` — authenticated operations available under ownership or explicit authorization.
-- `admin` — configured local Interface-administrator operations. `call!`, bridge/config administration, admin/window controls, and interface-secret rotation are in this class.
+- `admin` — configured local Interface-administrator operations. Retained-evidence pruning, `run!`, bridge/config administration, admin/window controls, and interface-secret rotation are in this class.
 - `root` — the separate six-operation root plane.
 
 The admin-only `*secret*` operation rotates the journal-wide Interface authentication secret and corresponding Interface public signing key; it is not a per-user password change.
 
-Authorization examples keep terminal authentication `key-index (-32 -1)` separate from Resolve document history `(0 -1)` and use the identical complete rule for `authorize!` and `deauthorize!`. Exact local/public rules omit `key-index`. Committed and federated paths are flat, for example `(-1 peer-a -1 *state* key)`.
+Authorization examples keep terminal authentication `key-index (-32 -1)` separate from Retrieve document history `(0 -1)` and use the identical complete rule for `authorize!` and `deauthorize!`. Exact local/public rules omit `key-index`. Committed and federated paths are flat, for example `(-1 peer-a -1 *state* key)`.
 
 Peer-internal `route` and `synchronize!` are intentionally not advertised as ordinary Workbench operations.
 

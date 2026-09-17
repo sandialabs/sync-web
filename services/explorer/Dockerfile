@@ -39,6 +39,7 @@ RUN set -eu; \
     rm -rf /usr/share/nginx/html/*
 
 COPY --from=build /app/build /usr/share/nginx/html
+RUN chmod 644 /usr/share/nginx/html/logo.png
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.sh /sync-entrypoint.sh
 RUN chmod +x /sync-entrypoint.sh

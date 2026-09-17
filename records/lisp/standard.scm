@@ -26,8 +26,8 @@
            (err '(error 'method-error "Method not recognized: ~S" arg))
            (common `(((*name*) ',name) ((*api*) '(*name* *api* *class* ,@(map car methods))) ((*class*) ',class)))
            (shared-methods
-            '(deep-get deep-set! deep-slice! deep-prune! deep-merge! deep-copy!
-              deep-call deep-call! serialize))
+            '(deep-get deep-set! deep-slice! deep-prune! deep-merge!
+              deep-copy! deep-call deep-call! serialize))
            (prep
             (lambda (method)
               (let* ((direct
@@ -271,21 +271,21 @@
             result))))
 
   (define-method (deep-call! self object path function)
-    ;; Call function on node at path and rebuild the resulting node state.
+    ;; Return callback result and the rebuilt root after one nested mutation.
     (let ((object (sync-eval object)))
       (if (null? path)
           (sync-eval
            (sync-cons
             (expression->byte-vector
              `(lambda (node)
-                (let ((object (sync-eval (sync-cdr node))))
-                  (,function object)
-                  (object))))
+                (let* ((object (sync-eval (sync-cdr node)))
+                       (result (,function object)))
+                  (list result (object)))))
             (object)))
           (let* ((child ((object 'get) (car path)))
-                 (child ((self 'deep-call!) child (cdr path) function)))
-            ((object 'set!) (car path) child)
-            (object)))))
+                 (called ((self 'deep-call!) child (cdr path) function)))
+            ((object 'set!) (car path) (cadr called))
+            (list (car called) (object))))))
 
   (define-method (serialize self node query)
     ;; Serialize node with a traversal query into compact form.

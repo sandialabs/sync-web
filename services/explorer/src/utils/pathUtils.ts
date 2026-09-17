@@ -1,4 +1,14 @@
-import { JournalPath } from '../types';
+import { JournalPath, JournalPathSegment } from '../types';
+
+export const pathSegmentIdentity = (value: JournalPathSegment): string => {
+  if (typeof value === 'number') {
+    return `integer:${JSON.stringify(value)}`;
+  }
+  if (typeof value === 'string') {
+    return `symbol:${JSON.stringify(value)}`;
+  }
+  return `string:${JSON.stringify(value['*type/string*'])}`;
+};
 
 /**
  * Encode a JournalPath to a URL-safe string
@@ -28,6 +38,14 @@ export const decodeHashToPath = (hash: string): JournalPath | null => {
 export const stripLeadingIndex = (path: JournalPath): JournalPath =>
   typeof path[0] === 'number' ? path.slice(1) : [...path];
 
+const terminalNamespaceIndex = (path: JournalPath): number =>
+  Math.max(...['*state*', '*transition*', '*crypto*'].map((marker) => path.lastIndexOf(marker)));
+
+const isHistorySelector = (path: JournalPath, index: number): boolean => {
+  const terminal = terminalNamespaceIndex(path);
+  return typeof path[index] === 'number' && (terminal < 0 || index < terminal);
+};
+
 export const findLastMarkerIndex = (path: JournalPath, marker: string): number => {
   for (let i = path.length - 1; i >= 0; i--) {
     if (path[i] === marker) return i;
@@ -55,7 +73,7 @@ export const generateExpandedNodesFromPath = (path: JournalPath): Set<string> =>
  * Extract the marker/key segments without history indices, for comparison purposes.
  */
 export const getBasePath = (path: JournalPath): string => {
-  return JSON.stringify(path.filter(segment => typeof segment !== 'number'));
+  return JSON.stringify(path.filter((_segment, index) => !isHistorySelector(path, index)));
 };
 
 /**
@@ -76,7 +94,7 @@ export const buildVersionPath = (
   let indexCount = 0;
 
   for (let i = 0; i < modifiedPath.length; i++) {
-    if (typeof modifiedPath[i] === 'number') {
+    if (isHistorySelector(modifiedPath, i)) {
       indexCount++;
       if (indexCount === tabIndex + 1) {
         modifiedPath[i] = versionOffset;
@@ -93,9 +111,9 @@ export const buildVersionPath = (
  */
 export const getVersionAtTab = (path: JournalPath, tabIndex: number): number | null => {
   let indexCount = 0;
-  for (const segment of path) {
-    if (typeof segment === 'number') {
-      if (indexCount === tabIndex) return segment;
+  for (let index = 0; index < path.length; index++) {
+    if (isHistorySelector(path, index)) {
+      if (indexCount === tabIndex) return path[index] as number;
       indexCount++;
     }
   }

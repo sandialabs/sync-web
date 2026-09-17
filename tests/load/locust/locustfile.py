@@ -16,7 +16,7 @@ class HelloWorldUser(HttpUser):
             "expression?": True,
         }
         response = self.client.post(
-            "/api/v1/general/set",
+            "/api/v1/general/put",
             json=request_data,
             headers={"Authorization": f"Bearer {os.environ['API_TOKEN']}"},
         )

@@ -15,8 +15,8 @@ Use this glossary as a quick reference for recurring terms used across usage, op
 - **Service**: A process that adapts journal functionality for HTTP APIs, browsers, filesystems, identity, or other clients.
 - **Index**: An integer selecting an entry in one journal or nested bridged journal history; `-1` means the latest entry relative to that history.
 - **Path**: A flat ordered list of indexes, namespace markers, bridge aliases, and data segments used to address staged or committed objects.
-- **Reciprocal bridge**: A root-signed relationship in which one designated initiator exchanges both journals' signed heads. A bridge establishes identity and proof reachability but grants no application access.
+- **Reciprocal bridge**: A signed relationship in which one designated initiator exchanges both journals' signed heads. A bridge establishes proof reachability and receiver-local signing-key continuity but grants no application access; its alias remains the local authorization name.
 - **Working route**: The current `Self`-relative bridge-alias route used for live federated scalar/dedicated-batch Stage access and as the journal-name skeleton for Ledger resolution.
-- **Historical cursor**: One independently selected Ledger index for `Self` and each hop in a working route; used only by federated `resolve`.
+- **Historical cursor**: One independently selected Ledger index for `Self` and each hop in a working route; used only by federated `retrieve`.
 - **Terminal journal**: The final journal selected by a working route. It receives the signed application invocation directly and applies its own local authorization policy.
 - **Pin**: Origin-local retention of selected proof material in `Self`'s permanent chain; it is not a request to change terminal-journal retention.

@@ -9,7 +9,7 @@ head: []
 import { TabItem, Tabs } from '@astrojs/starlight/components';
 
 This section covers day-to-day interaction patterns for users who need to read, write, pin, and synchronize state.
-It focuses on the Sync Web 1.5 `general` interface shape.
+It focuses on the Sync Web 1.6 `general` interface shape.
 
 ## Graphical Interface
 
@@ -26,9 +26,9 @@ It has four explicit modes:
   - route-based browsing of committed state across bridges and snapshots
 - `Stage`
   - editable staged state at `Self` or the selected working journal
-  - document and directory oriented editing actions using federated `get`/`set!` when routed
+  - document and directory oriented editing actions using federated blank read-only `use!`/`put!` when routed
 - `Access`
-  - Self-local path-scoped `get`, `set!`, and `resolve` grants
+  - Self-local management of path-scoped blank read-only `use!`, `put!`, `run!`, and `retrieve` grants for authenticated local and remote principals
   - unavailable while a remote working route is selected
 - `Admin`
   - visible only to local interface admins and available only at `Self`
@@ -39,10 +39,10 @@ Typical Explorer workflow:
 
 1. Start in `Ledger` and synchronize to the latest committed root.
 2. Use the working route to select `Self` or a terminal journal. Every breadcrumb is clickable: selecting `Self`, an intermediate journal, or the current terminal verifies that route prefix and resets both Stage and Ledger to its shared `(*state*)` namespace root while preserving prefix Ledger snapshots. Adding or removing a hop follows the same rule; owner-relative suffixes are not carried between journals. The permanent `*state*` row above the tree children returns to the exact current Stage route or Ledger route/snapshot root. The signed-in user's existing folder is sorted first and emphasized without renaming it. Other user folders remain navigable when public or explicit sharing grants permit access. When grants begin deeper in a namespace, each ancestor exposes its ordinary immediate folder names for navigation, while opening a child still requires applicable public or principal-specific authority. Explicit deep links remain exact, and Ledger synchronization or snapshot changes preserve an accessible current path with namespace-root fallback. Use Ledger's mirrored index controls for historical snapshots.
-3. Select a document to switch among `Content`, view-only `Raw`, and (in Ledger) proof/verification views. Raw preserves exact stored bytes: inert UTF-8/source where valid, allowlisted browser-native media previews selected by bounded magic-byte checks and safe document-name hints, and hex/download fallback otherwise.
-4. Use the `Stage` and `Ledger` tabs as Self-root navigation controls: every click, including the active tab, returns the working route and both selections to Self `(*state*)`, then selects that mode. Use Stage when you want to edit staged documents and directories. Raw remains view-only in Stage and Ledger.
+3. Select a document to open `Raw` in a standalone, reloadable browser tab or, in Ledger, inspect its proof. The credential-free Raw URL rechecks the current session and existing authorization on every request. A Stage URL follows the current value at its typed path; a Ledger URL uses proof-derived concrete indexes from the loaded response and remains fixed to that committed selection. Exact UTF-8 bytes display inertly as plain text, allowlisted raster images may display natively, and unproven media or unknown binary downloads without rewriting bytes.
+4. Use the `Stage` and `Ledger` tabs as Self-root navigation controls: every click, including the active tab, returns the working route and both selections to Self `(*state*)`, then selects that mode. Use Stage when you want to edit staged documents and directories. Raw remains view-only in Stage and Ledger, uses no capability URL or implicit pin, and can be shared only as an identifier: recipients still need their own session and grant.
 5. Use stage actions to create documents/directories, upload documents, edit content, and download documents. A denied tree expansion shows an alert beneath that row without replacing the tree, so allowed siblings and upward navigation remain available.
-6. Return the working route to `Self` before using `Access` or `Admin` to manage local policy, bridges, retention settings, or administrators. In Access, a structurally remote principal automatically receives the fixed `key-index (-32 -1)` used for terminal-local bridge-state authentication; Explorer does not expose controls for this range. Exact local `(*state* USER)` and `(*public*)` principals omit the field. The independent `Document history window`, initially `0 … -1`, applies only to resolve and governs committed document-history indexes. The complete stored rule is retained so deletion uses its exact identity. Owner-relative rule paths accept ordinary whitespace-separated segments or quoted human segments such as `data "private documents"`; backslash escapes literal separators, quotes, and backslashes. Each human segment is encoded exactly once (`a%20b` becomes stored `a%2520b`), decoded for display, and retained raw for exact deletion. Administrators explicitly load a username or exact `*state* USER`, and stale namespace responses cannot replace the selected target.
+6. Return the working route to `Self` before using `Access` or `Admin` to manage local policy, bridges, retention settings, or administrators. In Access, a structurally remote principal automatically receives the fixed `key-index (-32 -1)` used for terminal-local bridge-state authentication; Explorer does not expose controls for this range. Exact local `(*state* USER)` and `(*public*)` principals omit the field. The independent `Document history window`, initially `0 … -1`, applies only to retrieve and governs committed document-history indexes. The complete stored rule is retained so deletion uses its exact identity. A blank relative path `[]` is the selected user's recursive home directory under `(*state* USER)`, displayed as `(home)`; it never grants Journal Root authority. Owner-relative rule paths accept ordinary whitespace-separated segments or quoted human segments such as `data "private documents"`; backslash escapes literal separators, quotes, and backslashes. Each human segment is encoded exactly once (`a%20b` becomes stored `a%2520b`), decoded for display, and retained raw for exact deletion. Administrators explicitly load a username or exact `*state* USER`, and stale namespace responses cannot replace the selected target.
 
 Admin mutations are serialized and failed values remain editable until a mutation and authoritative reload both succeed. Bridge deletion and incoming-preapproval removal require confirmation. Retention-window decreases show authoritative old/new values and warn that pruned unpinned history cannot be resurrected by widening; equal/increased windows proceed without confirmation, and an unknown current size refuses mutation.
 
@@ -57,7 +57,7 @@ Use it when you want precise control over requests, fast iteration on payload sh
 
 Typical Workbench workflow:
 
-1. Start from a known request pattern (for example `get`, `set!`, `pin!`, or `bridge!`).
+1. Start from a known request pattern (for example blank read-only `use!`, `put!`, `pin!`, or `bridge!`).
 2. Run the request in Scheme form and inspect the returned value.
 3. Iterate on arguments/authentication until behavior matches intent.
 4. Use the final request as a template for automation or service integration.
@@ -156,6 +156,10 @@ Public ledger/interface paths use flat token lists. In Scheme, write local paths
 
 An optional leading integer selects the local head; each optional integer after a bridge name selects that destination journal's head. Every omitted index defaults to the current head (`-1`). A namespace marker such as `*state*` ends traversal, so remaining tokens are ordinary terminal-local path segments. Nested list paths are an internal ledger representation and are not accepted as public API input.
 
+Terminal path keys remain typed. JSON number `123`, JSON string `"123"`, and JSON wrapped Scheme string `{"*type/string*":"123"}` identify distinct Tree keys corresponding to Scheme integer `123`, symbol `|123|`, and string `"123"`. A number before the terminal namespace remains a history selector; a number after `*state*` is an ordinary integer key. Clients must preserve directory-entry segment values exactly rather than converting them with `String()` or decoding and re-encoding them.
+
+Scheme-to-JSON conversion retains JSON objects for proper symbol-key alists with unique keys. If a symbol-key alist repeats any key text, it becomes an ordered array of two-element arrays so no entry is lost: `((a 1) (a 2))` converts to `[["a",1],["a",2]]` and round-trips exactly.
+
 ### Authentication and Authorization
 
 #### Authentication
@@ -199,12 +203,13 @@ A remote rule names the exact terminal-relative principal and the allowed applic
 ((principal (partner *state* alice))
  (key-index (-1 -1))
  (path (shared inbox))
- (get #t)
- (set! #t)
- (resolve (0 -1)))
+ (put! #t)
+ (use! ((read-only? #t)))
+ (run! #f)
+ (retrieve (0 -1)))
 ```
 
-`key-index` is required for remote principals and constrains which terminal-local committed bridge state may authenticate the remote signing key. The separate `resolve` range constrains document-history indexes. Local and public rules omit `key-index`. Bridge creation alone grants no application access. Gateway `authorize` and `deauthorize` transport the complete exact rule and remain Self-local; `$federation` is rejected.
+`key-index` is required for remote principals and constrains which terminal-local committed bridge state may authenticate the remote signing key. The separate `retrieve` range constrains document-history indexes. `run!` is independently path-scoped: namespace ownership and blank read-only `use!` do not imply it, and nested operations preserve and recheck the original caller. Root/configured local Interface administrators retain default authority. Local and public rules omit `key-index`; public `run!` rules are rejected. Bridge creation alone grants no application access. Gateway `authorize` and `deauthorize` transport the complete exact rule and remain Self-local; `$federation` is rejected.
 
 A `(*public*)` rule applies to every caller for the enabled operations. Grants do not need separate parent rules for navigation: a descendant grant permits reading the ordinary immediate listing of each ancestor directory. For example, a public grant at `(data public)` lets callers traverse `admin → data` and see the names of all folders beneath `data`; opening any non-public folder still requires its own principal-specific grant.
 
@@ -214,11 +219,11 @@ A `(*public*)` rule applies to every caller for the enabled operations. Grants d
 | --- | --- | --- |
 | Root | omitted local `identity` | All local query-interface operations. |
 | Local admin | Local principal path in the admin list | All local query-interface operations. |
-| Owner | Local `(*state* <user>)` principal | Own namespace and own authorization rules; cannot invoke `call!` unless separately configured as an Interface administrator. |
-| Granted principal | Exact local or bridge-derived principal | Only explicitly granted `get`, `set!`, and/or `resolve` paths. Authorization rules do not grant `call!`. |
+| Owner | Local `(*state* <user>)` principal | Own namespace and own authorization rules; ownership alone does not grant `run!`. |
+| Granted principal | Exact local or bridge-derived principal | Only explicitly granted blank read-only `use!`, `put!`, `run!`, and/or `retrieve` paths. `run!` is independent of blank read-only `use!`. |
 | Public | `(*public*)` | Only explicitly public data/proof and constrained bridge-control structure. |
 
-Interface administrators must be local principals. Bridge-derived principals cannot be administrators. Staged `get-batch`/`set-batch!` may use one signed working route, while `resolve-batch` groups canonical committed paths and routes compatible groups internally. Pin/unpin batches retain or cut proofs only at the origin. Bridge management, configuration, access management, retention mutation, and secret/window changes remain local-only.
+Interface administrators must be local principals. Bridge-derived principals cannot be administrators. Staged `use-batch!`/`put-batch!` may use one signed working route, while `retrieve-batch` groups canonical committed paths and routes compatible groups internally. Pin/unpin batches retain or cut proofs only at the origin. Bridge management, configuration, access management, retention mutation, and secret/window changes remain local-only.
 
 ### Request Envelope
 
@@ -240,14 +245,15 @@ That keeps client implementations simple and makes troubleshooting easier across
 These examples are intentionally minimal and map directly to frequently used workflows.
 You can copy them into Workbench first, then move them into automation once validated.
 
-#### Read (`get`)
+#### Read (blank read-only `use!`)
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
 
 ```scheme
-((function get)
- (arguments ((path (*state* docs article hash))))
+((function use!)
+ (arguments ((path (*state* docs article hash))
+             (read-only? #t)))
  (authentication ((identity (*state* alice)) (credentials "password"))))
 ```
 
@@ -256,9 +262,10 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```json
 {
-  "function": "get",
+  "function": "use!",
   "arguments": {
-    "path": ["*state*", "docs", "article", "hash"]
+    "path": ["*state*", "docs", "article", "hash"],
+    "read-only?": true
   },
   "authentication": {
     "identity": ["*state*", "alice"],
@@ -270,15 +277,15 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-> **Info:** `get` reads current Stage. Use `resolve` with `pinned?` and `proof?` for committed history and verifiable proof material.
+> **Info:** blank read-only `use!` reads current Stage. Use `retrieve` with `pinned?` and `proof?` for committed history and verifiable proof material.
 >
-#### Write (`set!`)
+#### Write (`put!`)
 
 <Tabs syncKey="lisp-json">
   <TabItem label="Lisp">
 
 ```scheme
-((function set!)
+((function put!)
  (arguments ((path (*state* docs article hash))
              (value "0xabc123")
              (expression? #t)))
@@ -290,7 +297,7 @@ You can copy them into Workbench first, then move them into automation once vali
 
 ```json
 {
-  "function": "set!",
+  "function": "put!",
   "arguments": {
     "path": ["*state*", "docs", "article", "hash"],
     "value": "0xabc123",
@@ -306,23 +313,22 @@ You can copy them into Workbench first, then move them into automation once vali
   </TabItem>
 </Tabs>
 
-#### Federated committed read (`resolve`)
+#### Federated committed read (`retrieve`)
 
-Gateway JSON callers add a reserved `$federation` context to the ordinary operation arguments. Only `get`, `set`, and `resolve` accept a non-empty route; only `resolve` accepts `history`, with one index for `Self` plus one for every route hop.
+Gateway JSON callers add a reserved `$federation` context to the ordinary operation arguments. Blank read-only `use!`, `put!`, `run!`, `retrieve`, and their dedicated batch forms accept one non-empty route. The route selects exactly one responder; for `retrieve` and `retrieve-batch`, the committed path is interpreted against that responder's Ledger and must already be materialized in its permanent retention. `pinned?` remains only the optional origin-local retention report and is forced false on the signed wire. Federated `run!` still requires an exact terminal-local `run!` grant independent of blank read-only `use!`. Neither provider search nor outward federation history is exposed.
 
 ```json
 {
-  "path": [7, "*state*", "bob", "shared", "message"],
+  "path": [12, "archive", 7, "*state*", "bob", "shared", "message"],
   "pinned?": true,
   "proof?": true,
   "$federation": {
-    "route": ["carol", "bob"],
-    "history": [-1, 4, 7]
+    "route": ["retention-provider"]
   }
 }
 ```
 
-The Gateway removes `$federation` from arguments, the origin journal signs a direct terminal invocation, and the returned proof is checked against the exact selected terminal object.
+The Gateway removes `$federation` from arguments, the origin journal signs a direct terminal invocation, and the returned proof is checked against the exact selected responder object. Here `retention-provider` is contacted and interprets the path locally: its index `12`, retained `archive` Chain index `7`, and attributed `bob` state. A trailing path such as `[12, "archive"]` returns `(chain (<exact indexes>) <complete?>)`; omitting the integer while continuing, `[12, "archive", "*state*", ...]`, selects that Chain's `-1` head. Each terminal-provider `-1` resolves recursively to the greatest materialized index in its containing permanent Chain, not to a newer temp-only or unknown logical tail. The terminal constructs its response proof from the permanent object authenticated by the invocation. The origin anchors that proof digest and independently re-derives every such selection from the proof before merging richer same-root route evidence to verify content at the exact selected paths. Temp-only evidence, missing or unauthorized state, malformed proof, and network failure terminate without contacting `archive` or another provider.
 
 #### Pin (`pin!`)
 
@@ -352,7 +358,21 @@ The Gateway removes `$federation` from arguments, the origin journal signs a dir
   </TabItem>
 </Tabs>
 
-Pin and unpin are always local retention operations. For remote content, first perform a federated `resolve` with `proof?` enabled, then pin the returned proof at its full `Self`-relative bridge/history path. Explorer performs this two-step workflow automatically; it never asks the terminal journal to pin on the origin's behalf.
+Pin and unpin are always local retention operations. Unpin rejects a complete scalar or batch call before permanent retention changes when any target directly or ancestrally encompasses committed `*crypto*` material. For remote content, first perform a federated `retrieve` with `proof?` enabled, then pin the returned proof at its full `Self`-relative bridge/history path. Explorer performs this two-step workflow automatically; it never asks the terminal journal to pin on the origin's behalf.
+
+#### Prune retained evidence (`prune!`, `prune-batch!`)
+
+```scheme
+((function prune-batch!)
+ (arguments
+  ((paths ((-1 *state* alice old-data)
+           (-1 *state* alice archive)))))
+ (authentication
+  ((identity (*state* admin))
+   (credentials "password"))))
+```
+
+Pruning is available only to Root or configured local Interface administrators; namespace ownership, ordinary grants, and federation cannot confer it. Each canonical committed leaf or directory is removed from both temporary and permanent retention. A target that directly names committed `*crypto*` material, or an ancestor that would encompass it, rejects the complete scalar or batch call before either retained field changes. A batch validates and prepares both complete candidates before installing either one, so malformed members leave both unchanged. Missing paths, duplicates, and ancestor/descendant overlaps are idempotent. Pruning preserves Stage and committed history roots, digests, signatures, size, and numbering; it makes no secure-erasure claim and cannot recall copies held elsewhere.
 
 #### Bridge (`bridge!`)
 

@@ -5,6 +5,12 @@ import type { ApiTokenEntry, KratosClient } from "./kratos";
 import type { JournalClient } from "./journal";
 import { JournalSemanticError } from "./journal";
 import { GatewayEventBroker, isGatewayEventPath } from "./events";
+import {
+  RAW_RESPONSE_HEADERS,
+  classifyRawBytes,
+  decodeRawSelection,
+  extractRawBytes,
+} from "./raw";
 
 export interface GatewayRoutesOptions {
   journal: JournalClient;
@@ -12,6 +18,24 @@ export interface GatewayRoutesOptions {
   journalSecret: string;
   kratos: KratosClient;
 }
+
+class GatewayRequestError extends Error {
+  readonly statusCode: number;
+  readonly code: "invalid_request" | "unsupported_media_type";
+
+  constructor(code: "invalid_request" | "unsupported_media_type", message: string) {
+    super(message);
+    this.name = "GatewayRequestError";
+    this.code = code;
+    this.statusCode = code === "unsupported_media_type" ? 415 : 400;
+  }
+}
+
+const invalidRequest = (message: string): GatewayRequestError =>
+  new GatewayRequestError("invalid_request", message);
+
+const unsupportedMediaType = (message: string): GatewayRequestError =>
+  new GatewayRequestError("unsupported_media_type", message);
 
 const getContentType = (request: FastifyRequest): string =>
   String(request.headers["content-type"] || "")
@@ -30,10 +54,119 @@ const isDefaultSchemeProxyContentType = (contentType: string): boolean =>
 const isJsonContentType = (contentType: string): boolean =>
   contentType === "application/json";
 
+const SCHEME_FEDERATION_ROUTE_HEADER = "x-sync-web-federation-route";
+const schemeFederationOperations = new Set(["put!", "use!", "retrieve"]);
+
+const extractSchemeFederationRoute = (
+  request: FastifyRequest,
+  functionName: string,
+  root: boolean,
+  contentType: string,
+): string[] | undefined => {
+  const header = request.headers[SCHEME_FEDERATION_ROUTE_HEADER];
+  if (header === undefined) return undefined;
+  if (!isSchemeContentType(contentType)) {
+    throw invalidRequest("X-Sync-Web-Federation-Route requires application/scheme");
+  }
+  if (contentType !== "application/scheme") {
+    throw invalidRequest("X-Sync-Web-Federation-Route is not allowed with text/plain");
+  }
+  if (root || !schemeFederationOperations.has(functionName)) {
+    throw invalidRequest(`X-Sync-Web-Federation-Route is not allowed for ${functionName}`);
+  }
+  if (typeof header !== "string") {
+    throw invalidRequest("X-Sync-Web-Federation-Route must occur exactly once");
+  }
+
+  let route: unknown;
+  try {
+    route = JSON.parse(header);
+  } catch {
+    throw invalidRequest("X-Sync-Web-Federation-Route must be a JSON array of bridge names");
+  }
+  if (!Array.isArray(route) || route.length === 0
+      || !route.every((name) => typeof name === "string" && !name.includes("\0"))) {
+    throw invalidRequest(
+      "X-Sync-Web-Federation-Route must be a nonempty JSON array of bridge names"
+    );
+  }
+  return route;
+};
+
+const duplicateTopLevelJsonNames = Symbol("duplicateTopLevelJsonNames");
+
+type ClassifiedJsonRequest = FastifyRequest & {
+  [duplicateTopLevelJsonNames]?: boolean;
+};
+
+const skipJsonString = (source: string, start: number): number => {
+  let index = start + 1;
+  while (index < source.length) {
+    if (source[index] === "\\") {
+      index += 2;
+    } else if (source[index] === '"') {
+      return index + 1;
+    } else {
+      index += 1;
+    }
+  }
+  return source.length;
+};
+
+const hasDuplicateTopLevelJsonNames = (source: string): boolean => {
+  const skipWhitespace = (start: number): number => {
+    let index = start;
+    while (/\s/.test(source[index] ?? "")) index += 1;
+    return index;
+  };
+
+  let index = skipWhitespace(0);
+  if (source[index] !== "{") return false;
+  index = skipWhitespace(index + 1);
+  const names = new Set<string>();
+
+  while (index < source.length && source[index] !== "}") {
+    if (source[index] !== '"') return false;
+    const nameStart = index;
+    index = skipJsonString(source, index);
+    const name = JSON.parse(source.slice(nameStart, index)) as string;
+    if (names.has(name)) return true;
+    names.add(name);
+
+    index = skipWhitespace(index);
+    if (source[index] !== ":") return false;
+    index = skipWhitespace(index + 1);
+    let objectDepth = 0;
+    let arrayDepth = 0;
+    while (index < source.length) {
+      const character = source[index];
+      if (character === '"') {
+        index = skipJsonString(source, index);
+        continue;
+      }
+      if (character === "{") objectDepth += 1;
+      else if (character === "[") arrayDepth += 1;
+      else if (character === "}" && objectDepth > 0) objectDepth -= 1;
+      else if (character === "]") arrayDepth -= 1;
+      else if ((character === "," || character === "}") && objectDepth === 0 && arrayDepth === 0) break;
+      index += 1;
+    }
+    if (source[index] === ",") index = skipWhitespace(index + 1);
+  }
+  return false;
+};
+
 const escapeLispString = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
-const extractJsonArguments = (body: unknown, allowArgumentsKey = false): unknown => {
+const functionsWithArgumentsField = new Set([
+  "use!", "use-batch!", "run!", "retrieve", "retrieve-batch",
+]);
+
+const extractJsonArguments = (
+  body: unknown,
+  allowArgumentsField = false,
+): unknown => {
   if (body === undefined) {
     return undefined;
   }
@@ -41,22 +174,23 @@ const extractJsonArguments = (body: unknown, allowArgumentsKey = false): unknown
     return body;
   }
   if (!body || typeof body !== "object") {
-    throw new Error(
-      "JSON body must provide an argument object/array."
-    );
+    throw invalidRequest("JSON body must provide an argument object/array.");
   }
   const record = body as Record<string, unknown>;
 
-  if ("arguments" in record && !allowArgumentsKey) {
-    throw new Error(
-      "Gateway JSON bodies must provide operation arguments directly, not under an arguments wrapper."
-    );
+  if ("function" in record || "authentication" in record) {
+    throw invalidRequest("Gateway JSON bodies should provide only operation arguments.");
   }
 
-  if ("function" in record || "authentication" in record) {
-    throw new Error(
-      "Gateway JSON bodies should provide only operation arguments."
-    );
+  if ("arguments" in record) {
+    if (!allowArgumentsField) {
+      throw invalidRequest(
+        "Gateway JSON bodies must provide operation arguments directly, not under an arguments wrapper."
+      );
+    }
+    if (!Array.isArray(record.arguments)) {
+      throw invalidRequest("The operation arguments field must be an array.");
+    }
   }
 
   // Treat plain object bodies as direct keyword argument objects.
@@ -64,9 +198,88 @@ const extractJsonArguments = (body: unknown, allowArgumentsKey = false): unknown
 };
 
 const extractSchemeArguments = (body: unknown): string => {
-  if (typeof body === "string") return body;
-  if (Buffer.isBuffer(body)) return body.toString("utf8");
-  throw new Error("Scheme requests must provide plain text argument expression body");
+  const expression = typeof body === "string"
+    ? body
+    : Buffer.isBuffer(body) ? body.toString("utf8") : null;
+  if (expression === null) {
+    throw invalidRequest("Scheme requests must provide plain text argument expression body");
+  }
+  if (expression.includes("\0")) {
+    throw invalidRequest("Scheme requests cannot contain a null byte");
+  }
+  return expression;
+};
+
+export const buildSchemeArgumentsProjection = (argsExpression: string): string =>
+  `'(gateway-use-arguments . ${argsExpression})`;
+
+const isCompleteArgumentPairCollection = (
+  entries: unknown[]
+): entries is [string, unknown][] => {
+  const names = new Set<string>();
+  for (const entry of entries) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" ||
+        names.has(entry[0])) {
+      return false;
+    }
+    names.add(entry[0]);
+  }
+  return true;
+};
+
+const projectedSchemeArgumentPairs = (projection: unknown): [string, unknown][] | null => {
+  if (!projection || typeof projection !== "object" || Array.isArray(projection)) return null;
+  const object = projection as Record<string, unknown>;
+  if (Object.keys(object).length !== 1 || !Array.isArray(object["*type/quoted*"])) return null;
+  const [tag, ...entries] = object["*type/quoted*"];
+  return tag === "gateway-use-arguments" && isCompleteArgumentPairCollection(entries)
+    ? entries : null;
+};
+
+export const isProjectedSchemeReadOnlyUse = (projection: unknown): boolean =>
+  projectedSchemeArgumentPairs(projection)
+    ?.some(([name, value]) => name === "read-only?" && value === true) ?? false;
+
+const exactSchemeOperationFields: Record<string, Set<string>> = {
+  "put!": new Set(["path", "value", "expression?", "object?", "expected"]),
+  "use!": new Set(["path", "method", "arguments", "read-only?", "expression?"]),
+  retrieve: new Set([
+    "path", "method", "arguments", "pinned?", "proof?", "index?", "expression?",
+  ]),
+};
+
+const validateProjectedSchemeArguments = (
+  functionName: string,
+  projection: unknown,
+): [string, unknown][] => {
+  const entries = projectedSchemeArgumentPairs(projection);
+  const allowed = exactSchemeOperationFields[functionName];
+  if (!entries || !allowed || entries.some(([name]) => !allowed.has(name))) {
+    throw invalidRequest(`${functionName} requires one exact collection of unique supported argument pairs`);
+  }
+  const fields = new Map(entries);
+  if (!Array.isArray(fields.get("path"))) {
+    throw invalidRequest(`${functionName} path must be one complete Scheme list`);
+  }
+  if (functionName === "put!" && !fields.has("value")) {
+    throw invalidRequest("put! requires exactly one value field");
+  }
+  if (fields.has("arguments")
+      && fields.get("arguments") !== null
+      && !Array.isArray(fields.get("arguments"))) {
+    throw invalidRequest(`${functionName} arguments must be one complete Scheme list`);
+  }
+  if (fields.has("method")
+      && fields.get("method") !== null
+      && typeof fields.get("method") !== "string") {
+    throw invalidRequest(`${functionName} method must be one exact Scheme symbol or empty`);
+  }
+  for (const name of ["expression?", "object?", "read-only?", "pinned?", "proof?", "index?"]) {
+    if (fields.has(name) && typeof fields.get(name) !== "boolean") {
+      throw invalidRequest(`${functionName} ${name} must be boolean`);
+    }
+  }
+  return entries;
 };
 
 const buildSchemeExpression = (
@@ -74,22 +287,11 @@ const buildSchemeExpression = (
   argsExpression: string,
   authSecret?: string,
   identityId?: string,
-  routeTarget?: string[],
-  historyIndexes?: number[]
 ): string => {
   const parts = [`(function ${functionName})`, `(arguments ${argsExpression})`];
   if (authSecret) {
-    if (routeTarget && routeTarget.length > 0) {
-      parts.push(
-        `(invocation ((identity ${identityId}) (route-source ()) ` +
-        `(route-target (${routeTarget.join(" ")})) ` +
-        `${historyIndexes ? `(history-indexes (${historyIndexes.join(" ")})) ` : ""}` +
-        `(credentials "${escapeLispString(authSecret)}")))`
-      );
-    } else {
-      const identityPart = identityId ? `(identity (*state* ${identityId})) ` : "";
-      parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
-    }
+    const identityPart = identityId ? `(identity (*state* ${identityId})) ` : "";
+    parts.push(`(authentication (${identityPart}(credentials "${escapeLispString(authSecret)}")))`);
   }
   return `(${parts.join(" ")})`;
 };
@@ -112,11 +314,11 @@ const extractFederationContext = (body: unknown): {
   const route = federation.route;
   const history = federation.history;
   if (!Array.isArray(route) || !route.every((name) => typeof name === "string")) {
-    throw new Error("$federation.route must be an array of bridge names");
+    throw invalidRequest("$federation.route must be an array of bridge names");
   }
   if (history !== undefined &&
       (!Array.isArray(history) || !history.every((index) => Number.isInteger(index)))) {
-    throw new Error("$federation.history must be an array of integer indexes");
+    throw invalidRequest("$federation.history must be an array of integer indexes");
   }
   const { $federation: _ignored, ...argsBody } = record;
   return {
@@ -134,17 +336,17 @@ const validateFederationContext = (
 ): void => {
   if (!context.present) return;
   if (root) {
-    throw new Error("Federation context is not allowed on root operations");
+    throw invalidRequest("Federation context is not allowed on root operations");
   }
   const route = context.routeTarget ?? [];
   if (route.length === 0) {
-    throw new Error("Federation context requires a nonempty route");
+    throw invalidRequest("Federation context requires a nonempty route");
   }
-  if (!new Set(["get", "set!", "get-batch", "set-batch!"]).has(functionName)) {
-    throw new Error(`Federation context is not allowed for ${functionName}`);
+  if (!new Set(["put!", "copy!", "use!", "put-batch!", "copy-batch!", "use-batch!", "run!", "retrieve", "retrieve-batch"]).has(functionName)) {
+    throw invalidRequest(`Federation context is not allowed for ${functionName}`);
   }
   if (context.historyIndexes) {
-    throw new Error("Federation history is not part of the public Gateway envelope");
+    throw invalidRequest("Federation history is not part of the public Gateway envelope");
   }
 };
 
@@ -160,6 +362,17 @@ const buildRootSchemeExpression = (
   return `(${functionName} "${escapeLispString(authSecret)}" ${trimmed})`;
 };
 
+export const isJsonReadOnlyUse = (args: unknown): boolean => {
+  if (Array.isArray(args)) {
+    if (!isCompleteArgumentPairCollection(args)) return false;
+    return args.some(([name, value]) => name === "read-only?" && value === true);
+  }
+  return !!args
+    && typeof args === "object"
+    && !Buffer.isBuffer(args)
+    && (args as Record<string, unknown>)["read-only?"] === true;
+};
+
 const callWithNegotiation = async (input: {
   request: FastifyRequest;
   journal: JournalClient;
@@ -168,7 +381,7 @@ const callWithNegotiation = async (input: {
   root?: boolean;
   journalSecret: string;
   kratos: KratosClient;
-}): Promise<unknown> => {
+}): Promise<{ result: unknown; readOnlyUse: boolean }> => {
   const { request, journal, functionName, requiresAuth, root = false, journalSecret, kratos } = input;
   const resolved = requiresAuth
     ? await resolveIdentity(request, journalSecret, kratos)
@@ -176,6 +389,9 @@ const callWithNegotiation = async (input: {
   const authSecret = resolved?.journalSecret;
   const identityId = resolved?.identityId;
   const contentType = getContentType(request);
+  const schemeFederationRoute = extractSchemeFederationRoute(
+    request, functionName, root, contentType,
+  );
 
   if (isSchemeContentType(contentType)) {
     const argsExpression = extractSchemeArguments(request.body);
@@ -183,13 +399,34 @@ const callWithNegotiation = async (input: {
       root && authSecret
         ? buildRootSchemeExpression(functionName, argsExpression, authSecret)
         : buildSchemeExpression(functionName, argsExpression, authSecret, identityId);
-    return root
-      ? journal.callRootScheme({ expression, functionName })
-      : journal.callScheme({ expression, functionName });
+    let readOnlyUse = false;
+    let projectedArguments: [string, unknown][] | undefined;
+    if (!root && (functionName === "use!" || functionName === "use-batch!"
+        || (contentType === "application/scheme" && schemeFederationOperations.has(functionName)))) {
+      const projection = await journal.schemeToJson(buildSchemeArgumentsProjection(argsExpression));
+      if (contentType === "application/scheme" && schemeFederationOperations.has(functionName)) {
+        projectedArguments = validateProjectedSchemeArguments(functionName, projection);
+      }
+      readOnlyUse = isProjectedSchemeReadOnlyUse(projection);
+    }
+    if (schemeFederationRoute) {
+      const result = await journal.callJson({
+        functionName,
+        args: projectedArguments,
+        authentication: authSecret,
+        identityId,
+        routeTarget: schemeFederationRoute,
+      });
+      return { result, readOnlyUse };
+    }
+    const result = root
+      ? await journal.callRootScheme({ expression, functionName })
+      : await journal.callScheme({ expression, functionName });
+    return { result, readOnlyUse };
   }
 
   if (!isJsonContentType(contentType)) {
-    throw new Error(
+    throw unsupportedMediaType(
       "Unsupported content-type. Use application/json or text/plain (or application/scheme)."
     );
   }
@@ -198,22 +435,22 @@ const callWithNegotiation = async (input: {
   validateFederationContext(functionName, federation, root);
   const rawArgs = extractJsonArguments(
     federation.argsBody,
-    !root && functionName === "call!"
+    !root && functionsWithArgumentsField.has(functionName)
   );
-  if (!root && functionName === "call!") {
+  if (!root && functionName === "run!") {
     if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs) ||
         !Array.isArray((rawArgs as Record<string, unknown>).arguments)) {
-      throw new Error("Gateway JSON bodies must provide call arguments as an array");
+      throw invalidRequest("Gateway JSON bodies must provide call arguments as an array");
     }
   }
   const args = rawArgs;
-  return root
-    ? journal.callRootJson({
+  const result = root
+    ? await journal.callRootJson({
         functionName,
         args,
         authentication: authSecret,
       })
-    : journal.callJson({
+    : await journal.callJson({
         functionName,
         args,
         authentication: authSecret,
@@ -221,6 +458,11 @@ const callWithNegotiation = async (input: {
         ...(federation.routeTarget ? { routeTarget: federation.routeTarget } : {}),
         ...(federation.historyIndexes ? { historyIndexes: federation.historyIndexes } : {}),
       });
+  const readOnlyUse = !root
+    && (functionName === "use!" || functionName === "use-batch!")
+    && !(request as ClassifiedJsonRequest)[duplicateTopLevelJsonNames]
+    && isJsonReadOnlyUse(args);
+  return { result, readOnlyUse };
 };
 
 const extractEventPath = (body: unknown): Array<string | number> | undefined => {
@@ -241,20 +483,25 @@ const writeEventStreamHeaders = (reply: FastifyReply): void => {
 };
 
 const generalAliases = {
-  get: "get",
-  "get-batch": "get-batch",
-  set: "set!",
+  put: "put!",
+  copy: "copy!",
+  use: "use!",
   pin: "pin!",
   "pin-batch": "pin-batch!",
   unpin: "unpin!",
   "unpin-batch": "unpin-batch!",
-  call: "call!",
-  "set-batch": "set-batch!",
+  prune: "prune!",
+  "prune-batch": "prune-batch!",
+  run: "run!",
+  "put-batch": "put-batch!",
+  "use-batch": "use-batch!",
+  "copy-batch": "copy-batch!",
+  retrieve: "retrieve",
+  "retrieve-batch": "retrieve-batch",
+  truncate: "truncate!",
   info: "info",
   size: "size",
   "synchronize!": "synchronize!",
-  resolve: "resolve",
-  "resolve-batch": "resolve-batch",
   trace: "trace",
   "trace-batch": "trace-batch",
   route: "route",
@@ -282,13 +529,20 @@ const rootAliases = {
 
 const publicGeneralFunctions = new Set<string>(["synchronize!", "trace", "trace-batch", "route"]);
 const eventedGeneralOperations = new Set<string>([
-  "set",
+  "put",
+  "copy",
+  "use",
+  "use-batch",
   "pin",
   "pin-batch",
   "unpin",
   "unpin-batch",
-  "call",
-  "set-batch",
+  "prune",
+  "prune-batch",
+  "run",
+  "put-batch",
+  "copy-batch",
+  "truncate",
   "bridge",
   "delete-bridge",
   "synchronize!",
@@ -299,6 +553,11 @@ const eventedGeneralOperations = new Set<string>([
   "authorize",
   "deauthorize",
 ]);
+export const publishesGeneralChange = (
+  operation: string,
+  readOnlyUse = false,
+): boolean => eventedGeneralOperations.has(operation) && !readOnlyUse;
+
 const eventedRootOperations = new Set<string>([
   "step",
   "set-secret",
@@ -306,32 +565,47 @@ const eventedRootOperations = new Set<string>([
   "set-query",
 ]);
 const requestModeDescription =
-  "JSON mode: Content-Type application/json with a keyword argument object. Legacy array arguments are also accepted for compatibility. Scheme mode: Content-Type text/plain or application/scheme with a raw Scheme arguments expression (the gateway wraps it into the full journal transport call).";
+  "JSON mode: Content-Type application/json with a keyword argument object. Legacy array arguments are also accepted for compatibility. Scheme mode: Content-Type text/plain or application/scheme with a raw Scheme arguments expression (the gateway wraps it into the full journal transport call). Only application/scheme put, use, and retrieve may carry X-Sync-Web-Federation-Route as one nonempty JSON array of aliases; each string becomes the exact same s7 symbol through Journal's JSON codec without narrowing the existing $federation.route vocabulary. The s7 reader first validates one unique supported argument-pair collection.";
 const authorizationDescription =
-  "Authorization is Self-local. `user` is the local owner namespace, normally [`*state*`, `USER`], and `rule.path` is owner-relative. A remote `rule.principal` is the exact terminal-relative bridge principal and requires `key-index`, the terminal-local committed bridge-state authentication window. Exact local [`*state*`, `USER`] and [`*public*`] principals omit `key-index`. `resolve` is separate: true enables all retained document history, false disables it, and a two-integer range constrains document-history indexes.";
+  "Authorization is Self-local. `user` is the local owner namespace and `rule.path` is owner-relative. Rules grant `put!`, qualified `use!`, `run!`, and `retrieve`; `(use! ((read-only? #t)))` grants read-only use only while `#f` grants both modes. Remote principals require a `key-index` authentication window. `retrieve` may be true, false, or a two-index history range.";
 const authorizationBodyDescription =
   "Authorization body. The schema stays permissive so existing object and legacy-array transports remain accepted; the example shows canonical fields and tuple shapes.";
 
 const generalOperationDocs: Record<string, { summary: string; description: string }> = {
-  get: {
-    summary: "Read staged state",
+  put: {
+    summary: "Stage inert content or an active resource",
     description:
-      "Calls general function `get`. Reads the current staged view only.",
+      "Calls canonical `put!`. With `object?` false it preserves inert set semantics; with true it stores one uninitialized Standard class shell without running user code.",
   },
-  "get-batch": {
-    summary: "Read ordered staged paths",
+  use: {
+    summary: "Exercise staged content or an active resource",
     description:
-      "Calls `get-batch`. Returns ordered path/content entries from one staged Ledger snapshot, preserves duplicate paths, and optionally uses one signed working route.",
+      "Calls `use!` with separate optional `method` and `arguments`. Object successors persist only when their digest changes; inert use requires both fields blank.",
   },
-  set: {
-    summary: "Stage a state write",
+  copy: {
+    summary: "Atomically copy staged content",
     description:
-      "Calls general function `set!`. Writes to staged state; pair with root `step` for durable chain progression.",
+      "Calls `copy!`. Copies raw file or directory content from `source` to target `path` in one staged snapshot. Optional `expected` compares the target before mutation, and one signed working route may carry the complete operation.",
   },
-  "set-batch": {
-    summary: "Atomically stage ordered writes",
+  "put-batch": {
+    summary: "Atomically stage ordered inert or object writes",
     description:
-      "Calls `set-batch!`. Validates all path/value cardinalities, compares optional expected values against one staged snapshot, applies every write atomically in request order, and optionally uses one signed working route.",
+      "Calls `put-batch!`. Parallel object flags select inert content or uninitialized Standard shells; expectations compare one snapshot and the ordered batch persists atomically.",
+  },
+  "use-batch": {
+    summary: "Atomically exercise ordered resources",
+    description:
+      "Calls `use-batch!`. Duplicate paths observe prior staged successors, results retain request order, and any failure rolls back the complete batch.",
+  },
+  "copy-batch": {
+    summary: "Atomically copy ordered staged content",
+    description:
+      "Calls `copy-batch!`. Captures every raw source and optional target expectation before mutation, then applies ordered target replacements with last-write-wins duplicate targets. The complete operation may use one signed working route.",
+  },
+  truncate: {
+    summary: "Truncate local committed history",
+    description:
+      "Calls administrative `truncate!`. Irreversibly releases locally available committed history through the inclusive `index` while preserving logical chain identity, numbering, retained suffix, staged state, and future appends. The operation is Self-local and cannot recall remote copies or backups.",
   },
   pin: {
     summary: "Pin state/proof into permanent history",
@@ -353,10 +627,20 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls `unpin-batch!`. Applies digest-preserving proof cuts for all authorized paths in one local mutation.",
   },
-  call: {
-    summary: "Call a staged Scheme program",
+  prune: {
+    summary: "Prune retained committed evidence",
     description:
-      "Calls general function `call!`. Interface evaluates the staged procedure from `path` outside `sync-let` in a masked environment for a configured administrator/root, supplies the authenticated journal capability, and applies the explicit `arguments` list. Owners, policy grantees, and federated principals cannot invoke it.",
+      "Calls local administrative `prune!`. Removes one canonical committed leaf or directory from temporary and permanent retention while preserving staged state and committed history identity.",
+  },
+  "prune-batch": {
+    summary: "Atomically prune retained committed evidence",
+    description:
+      "Calls local administrative `prune-batch!`. Removes the union of up to 1,024 canonical committed paths from temporary and permanent retention, installing both complete candidates or neither.",
+  },
+  run: {
+    summary: "Run a staged Scheme orchestration program",
+    description:
+      "Calls canonical `run!`. Interface evaluates the staged procedure outside `sync-let`, supplies the authenticated journal capability, and preserves original-caller nested authorization.",
   },
   info: {
     summary: "Get public info",
@@ -368,15 +652,15 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
     description:
       "Calls public peer function `synchronize!`. Applies the initiator head and returns the acceptor head in one reciprocal exchange.",
   },
-  resolve: {
+  retrieve: {
     summary: "Resolve committed chain content",
     description:
-      "Calls general function `resolve`. The path contains the origin index, optional alias/index hops, and terminal state path; Interface performs federation normalization.",
+      "Calls general function `retrieve`. Without `$federation`, Interface resolves the canonical origin/alias path. With one explicit route, the selected responder interprets the committed path locally and requires permanent retention; a trailing alias returns its structural Chain inventory. Optional `index?` appends exact selected indexes.",
   },
-  "resolve-batch": {
+  "retrieve-batch": {
     summary: "Resolve ordered committed paths",
     description:
-      "Calls `resolve-batch`. Paths may span local and federated route/history groups; verified multiproofs remain internal and results preserve request order.",
+      "Calls `retrieve-batch`. Canonical paths may use ordinary grouped resolution, or one `$federation.route` may send the complete batch to one responder for permanent-only local interpretation. Verified multiproofs remain internal, order is preserved, and optional `index?` appends exact selected indexes.",
   },
   trace: {
     summary: "Trace remote content against a chain index",
@@ -411,12 +695,12 @@ const generalOperationDocs: Record<string, { summary: string; description: strin
   admins: {
     summary: "Read interface admins",
     description:
-      "Calls general function `*admins-get*`. Returns the interface admin username list.",
+      "Calls general function `*admins-get*`. Returns null when empty or an object keyed by each exact local username.",
   },
   "set-admins": {
     summary: "Replace interface admins",
     description:
-      "Calls general function `*admins-set*`. Replaces the interface admin username list wholesale.",
+      "Calls general function `*admins-set*`. Atomically replaces admins from an object whose exact username keys match its local-principal values.",
   },
   authorizations: {
     summary: "List authorization rules",
@@ -513,31 +797,37 @@ const authorizationRuleExample = {
   principal: ["peer-a", "*state*", "bob"],
   "key-index": [-32, -1],
   path: ["docs"],
-  get: true,
-  "set!": false,
-  resolve: [0, -1],
+  "put!": false,
+  "use!": { "read-only?": true },
+  "run!": false,
+  retrieve: [0, -1],
 };
 const authorizationSchemeRuleExample =
-  "((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (get #t) (set! #f) (resolve (0 -1)))";
+  "((principal (peer-a *state* bob)) (key-index (-32 -1)) (path (docs)) (put! #f) (use! ((read-only? #t))) (run! #f) (retrieve (0 -1)))";
 
 const generalOperationExamples: Record<string, unknown> = {
-  get:          { path: ["*state*", "mykey"], "expression?": true },
-  "get-batch": { paths: [["*state*", "a"], ["*state*", "b"]], "expression?": true },
-  set:          { path: ["*state*", "mykey"], value: "myvalue", expected: "oldvalue", "expression?": true },
+  put:          { path: ["*state*", "mykey"], value: "myvalue", expected: "oldvalue", "expression?": true },
+  use:          { path: ["*state*", "mykey"], "read-only?": true, "expression?": true },
+  "put-batch": { paths: [["*state*", "a"]], values: ["value"], "expression?": true },
+  "use-batch": { paths: [["*state*", "a"]], "read-only?": true, "expression?": true },
+  run:          { path: ["*state*", "alice", "programs", "example"], arguments: [] },
+  copy:         { source: ["*state*", "source"], path: ["*state*", "target"], expected: "oldvalue", "expression?": true },
   pin:          { path: [-1, "peer-a", -1, "*state*", "mykey"] },
   "pin-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]] },
   unpin:        { path: [-1, "peer-a", -1, "*state*", "mykey"] },
   "unpin-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]] },
-  resolve:      { path: [-1, "peer-a", -1, "*state*", "mykey"], "pinned?": true, "proof?": false, "expression?": true },
-  "resolve-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]], "pinned?": true, "expression?": true },
-  call:         { path: ["*state*", "alice", "programs", "example"], arguments: [] },
-  "set-batch": { paths: [["*state*", "mykey"]], values: ["myvalue"], expected: ["oldvalue"], "expression?": true },
+  prune:        { path: [-1, "peer-a", -1, "*state*", "mykey"] },
+  "prune-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]] },
+  retrieve:     { path: [-1, "peer-a", -1, "*state*", "mykey"], "pinned?": true, "proof?": false, "index?": true, "expression?": true },
+  "retrieve-batch": { paths: [[-1, "peer-a", -1, "*state*", "a"], [-1, "*state*", "local"]], "pinned?": true, "index?": true, "expression?": true },
+  "copy-batch": { sources: [["*state*", "source"]], paths: [["*state*", "target"]], expected: ["oldvalue"], "expression?": true },
+  truncate:     { index: 0 },
   info:         {},
   bridge:       { name: "peer-a", interface: "http://peer-a/interface", "remote-name": "my-journal" },
   "update-config": { path: ["public", "bridge-accept"], value: "preapproved" },
   config:       {},
   admins:       {},
-  "set-admins": { admins: [["*state*", "admin"], ["*state*", "alice"]] },
+  "set-admins": { admins: { admin: ["*state*", "admin"], alice: ["*state*", "alice"] } },
   "set-window": { value: 128 },
   "set-secret": { secret: "new-secret" },
   authorizations: { user: ["*state*", "alice"] },
@@ -550,23 +840,28 @@ const generalOperationExamples: Record<string, unknown> = {
 };
 
 const generalSchemeExamples: Record<string, string> = {
-  get:          "((path (*state* mykey)))",
-  "get-batch": "((paths ((*state* a) (*state* b))))",
-  set:          "((path (*state* mykey)) (value myvalue) (expected oldvalue))",
+  put:          "((path (*state* mykey)) (value myvalue) (expected oldvalue))",
+  use:          "((path (*state* mykey)) (read-only? #t))",
+  "put-batch": "((paths ((*state* a))) (values (value)))",
+  "use-batch": "((paths ((*state* a))) (read-only? #t))",
+  run:          "((path (*state* alice programs example)) (arguments ()))",
+  copy:         "((source (*state* source)) (path (*state* target)) (expected oldvalue) (expression? #t))",
   pin:          "((path (-1 peer-a -1 *state* mykey)))",
   "pin-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))",
   unpin:        "((path (-1 peer-a -1 *state* mykey)))",
   "unpin-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))",
-  resolve:      "((path (-1 peer-a -1 *state* mykey)) (pinned? #t) (proof? #f))",
-  "resolve-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))) (pinned? #t))",
-  call:         "((path (*state* alice programs example)) (arguments ()))",
-  "set-batch": "((paths ((*state* mykey))) (values (myvalue)) (expected (oldvalue)) (expression? #t))",
+  prune:        "((path (-1 peer-a -1 *state* mykey)))",
+  "prune-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))))",
+  retrieve:     "((path (-1 peer-a -1 *state* mykey)) (pinned? #t) (proof? #f) (index? #t))",
+  "retrieve-batch": "((paths ((-1 peer-a -1 *state* a) (-1 *state* local))) (pinned? #t) (index? #t))",
+  "copy-batch": "((sources ((*state* source))) (paths ((*state* target))) (expected (oldvalue)) (expression? #t))",
+  truncate:     "((index 0))",
   info:         "()",
   bridge:       "((name peer-a) (interface \"http://peer-a/interface\") (remote-name my-journal))",
   "update-config": "((path (public bridge-accept)) (value preapproved))",
   config:       "()",
   admins:       "()",
-  "set-admins": "((admins ((*state* admin) (*state* alice))))",
+  "set-admins": "((admins ((admin (*state* admin)) (alice (*state* alice)))))",
   "set-window": "((value 128))",
   "set-secret": "((secret new-secret))",
   authorizations: "((user (*state* alice)))",
@@ -603,6 +898,22 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
 ) => {
   const rootRoutePath = "/api/v1/root";
   const eventBroker = new GatewayEventBroker();
+  const defaultJsonParser = app.getDefaultJsonParser("error", "error");
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      const source = body as string;
+      defaultJsonParser(request, source, (error, parsed) => {
+        if (!error) {
+          (request as ClassifiedJsonRequest)[duplicateTopLevelJsonNames] =
+            hasDuplicateTopLevelJsonNames(source);
+        }
+        done(error, parsed);
+      });
+    },
+  );
   const eventKeepalive = setInterval(() => eventBroker.keepalive(), 25_000);
   eventKeepalive.unref?.();
   app.addHook("onClose", async () => {
@@ -671,6 +982,9 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         align-items: center;
         gap: 12px;
         flex-wrap: wrap;
+      }
+      .toolbar-logo-link {
+        display: inline-flex;
       }
       .toolbar-logo {
         width: 36px;
@@ -805,7 +1119,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   <body>
     <div class="toolbar">
       <div class="toolbar-left">
-        <img class="toolbar-logo" src="/gateway-logo.png" alt="Synchronic Web" />
+        <a class="toolbar-logo-link" href="/gateway"><img class="toolbar-logo" src="/gateway-logo.png" alt="Synchronic Web" /></a>
         <nav class="toolbar-nav" aria-label="Gateway sections">
           <span class="toolbar-pill active">Gateway</span>
           <a class="toolbar-pill" href="/api/v1/docs">API Reference</a>
@@ -872,12 +1186,12 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
       <p>Public size call:</p>
       <pre><code>curl http://127.0.0.1:8180/api/v1/general/size</code></pre>
       <p>Authenticated call (pass session cookie from browser):</p>
-      <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
+      <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/use \\
   -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: application/json" \\
   -d '{"path":["*state*","docs"]}'</code></pre>
       <p>Scheme body call:</p>
-      <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/get \\
+      <pre><code>curl -X POST http://127.0.0.1:8180/api/v1/general/use \\
   -H "Cookie: ory_kratos_session=&lt;session&gt;" \\
   -H "Content-Type: text/plain" \\
   -d '((path (*state* docs)))'</code></pre>
@@ -1063,6 +1377,78 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
   );
 
   app.get(
+    "/api/v1/raw",
+    { schema: { hide: true } },
+    async (request, reply) => {
+      Object.entries(RAW_RESPONSE_HEADERS).forEach(([name, value]) => reply.header(name, value));
+      const resolved = await resolveSessionIdentity(request, journalSecret, kratos);
+      let selection;
+      try {
+        const query = request.query as Record<string, unknown>;
+        if (Object.keys(query).length !== 1 || typeof query.selection !== "string") {
+          throw new Error("invalid raw query");
+        }
+        selection = decodeRawSelection(query.selection);
+      } catch {
+        return reply.code(400).send({ error: "invalid_raw_selection" });
+      }
+
+      let result: unknown;
+      try {
+        result = selection.mode === "stage"
+          ? await journal.callJson({
+              functionName: "use!",
+              args: { path: selection.path, "read-only?": true, "expression?": false },
+              authentication: resolved.journalSecret,
+              identityId: resolved.identityId,
+              ...(selection.route.length > 0 ? { routeTarget: selection.route } : {}),
+            })
+          : await journal.callJson({
+              functionName: "retrieve",
+              args: {
+                path: selection.path,
+                "expression?": false,
+                "pinned?": false,
+                "proof?": false,
+                "index?": false,
+              },
+              authentication: resolved.journalSecret,
+              identityId: resolved.identityId,
+            });
+      } catch (error) {
+        if (error instanceof JournalSemanticError) {
+          const authorization = new Set(["authentication-error", "authorization-error"])
+            .has(error.code);
+          const unavailable = new Set([
+            "availability-error",
+            "bridge-error",
+            "bridge-index-error",
+            "index-error",
+          ]).has(error.code);
+          return reply.code(error.statusCode).send({
+            error: authorization ? "authorization_error" : unavailable ? "unavailable" : "journal_error",
+          });
+        }
+        return reply.code(502).send({ error: "gateway_error" });
+      }
+
+      const extracted = extractRawBytes(result);
+      if (extracted.kind === "missing") return reply.code(404).send({ error: "not_found" });
+      if (extracted.kind === "unavailable") return reply.code(503).send({ error: "unavailable" });
+      if (extracted.kind === "unsupported") return reply.code(415).send({ error: "raw_value_required" });
+
+      const classification = classifyRawBytes(extracted.bytes);
+      reply.header("content-type", classification.contentType);
+      reply.header(
+        "content-disposition",
+        classification.disposition === "inline" ? "inline" : 'attachment; filename="raw.bin"',
+      );
+      reply.header("content-length", String(extracted.bytes.byteLength));
+      return reply.send(extracted.bytes);
+    },
+  );
+
+  app.get(
     "/api/v1/events",
     {
       schema: {
@@ -1135,7 +1521,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         },
       },
       async (request) => {
-        const result = await callWithNegotiation({
+        const { result, readOnlyUse } = await callWithNegotiation({
           request,
           journal,
           functionName,
@@ -1143,7 +1529,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           journalSecret,
           kratos,
         });
-        if (eventedGeneralOperations.has(operation)) {
+        if (publishesGeneralChange(operation, readOnlyUse)) {
           eventBroker.publish({
             operation: functionName,
             path: extractEventPath(request.body),
@@ -1169,7 +1555,7 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
           },
         },
         async (request) => {
-          const result = await callWithNegotiation({
+          const { result } = await callWithNegotiation({
             request,
             journal,
             functionName,
@@ -1314,6 +1700,20 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
     }
   );
 
+  app.setNotFoundHandler(async (request, reply) => {
+    const pathname = new URL(request.raw.url ?? "/", "http://gateway.invalid").pathname;
+    if (pathname.startsWith("/api/v1/raw/")) {
+      Object.entries(RAW_RESPONSE_HEADERS).forEach(([name, value]) => reply.header(name, value));
+      await resolveSessionIdentity(request, journalSecret, kratos);
+      return reply.code(400).send({ error: "invalid_raw_selection" });
+    }
+    return reply.code(404).send({
+      message: `Route ${request.method}:${request.raw.url} not found`,
+      error: "Not Found",
+      statusCode: 404,
+    });
+  });
+
   app.setErrorHandler((error, request, reply) => {
     const asRecord =
       typeof error === "object" && error !== null
@@ -1336,30 +1736,22 @@ export const gatewayRoutes: FastifyPluginAsync<GatewayRoutesOptions> = async (
         message: errorMessage,
       });
     }
+    if (asRecord.code === "FST_ERR_CTP_INVALID_JSON_BODY") {
+      return reply.code(400).send({
+        error: "invalid_request",
+        message: errorMessage,
+      });
+    }
     if (error instanceof UnauthorizedError) {
       return reply.code(401).send({
         error: "unauthorized",
         message: "Valid Kratos session cookie required",
       });
     }
-    if (errorMessage.includes("Unsupported content-type")) {
-      return reply.code(415).send({
-        error: "unsupported_media_type",
-        message: errorMessage,
-      });
-    }
-    if (
-      errorMessage.includes("JSON body must provide") ||
-      errorMessage.includes("JSON body must use") ||
-      errorMessage.includes("Gateway JSON bodies must provide") ||
-      errorMessage.includes("Gateway JSON bodies should provide") ||
-      errorMessage.includes("Scheme requests must provide") ||
-      errorMessage.includes("Federation context") ||
-      errorMessage.includes("Federation history")
-    ) {
-      return reply.code(400).send({
-        error: "invalid_request",
-        message: errorMessage,
+    if (error instanceof GatewayRequestError) {
+      return reply.code(error.statusCode).send({
+        error: error.code,
+        message: error.message,
       });
     }
     if (error instanceof JournalSemanticError) {

@@ -31,7 +31,7 @@ Required/important environment variables:
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD`: independent identity-provider bootstrap account
 - `HTTP_PORT` (default `8192`): published HTTP port
 - `HTTPS_PORT` (default `8193`): published HTTPS port
-- `PERIOD` (default `2`): stepping cadence parameter passed to journal
+- `PERIOD` (default `8`): stepping cadence parameter passed to journal
 - `WINDOW` (default `1024`): retention window for unpinned history
 - `TLS_CERT_HOST_PATH` (optional): host certificate file mounted into router
 - `TLS_KEY_HOST_PATH` (optional): host key file mounted into router
@@ -89,12 +89,13 @@ The default stack includes:
 
 The compose stack does not use a separate immutable `general` image. Instead,
 `journal-sdk` starts through `deploy/compose/general/run.sh`, which reads mounted
-`records/lisp/*.scm` files. Sync Web 1.5 supports fresh database installation
-only. Its installer rejects every nonfresh root atomically, so
-`JOURNAL_UPDATE=1` cannot update an existing database with this release line.
-Compose startup accepts only the exact successful installer result. A process
-failure, Scheme error value, or malformed result exits nonzero before writing the
-fresh version marker or launching the server, and result/credential content is
+`records/lisp/*.scm` files. Final Sync Web 1.6 supports one transition from a
+version-marked 1.5.0 database when `JOURNAL_UPDATE=1`. The minimal nonfresh
+Interface path preserves required history, derived keys, relationships, and
+authorization meaning; incompatible required state fails atomically. Compose
+startup accepts only the exact successful installer result. A process failure,
+Scheme error value, or malformed result exits nonzero before writing or advancing
+the version marker or launching the server, and result/credential content is
 omitted from diagnostics. With `JOURNAL_UPDATE=0`, a correctly version-marked
 database reopens normally without reinstalling or interpreting mounted record
 source during startup.
@@ -125,7 +126,7 @@ service. Keep the archive read-only: do not run periodic steps, writes, or bridg
 synchronization against it. Start 1.5 with a new database volume, recreate local
 policy and reciprocal bridges, and import only application values selected for
 the new history. A logical import does not preserve old Merkle roots, signatures,
-pins, or journal identity.
+pins, or cryptographic lineage.
 
 ## Routing
 
@@ -158,9 +159,8 @@ Permission boundaries are central to safe operation, so operators should treat f
 | Family | Description | Functions |
 | --- | --- | --- |
 | Public bridge/control/proof | Direct protocol operations with no signed application invocation. Outward Gateway `$federation` context is rejected. | `size`, `info`, `route`, `synchronize!`, constrained `trace`, `trace-batch` |
-| Authenticated application | Local calls use session/API-token authentication; signed federation is limited to scalar staged access, dedicated staged batch access, and committed scalar resolution. | `get`, `set!`, `get-batch`, `set-batch!`, `resolve` |
-| Authenticated committed batch | Gateway outward federation context is rejected; Interface groups canonical committed paths and routes compatible remote groups internally. | `resolve-batch` |
-| Local retention/policy/admin | Authenticated and always mutated at Self; outward federation context is rejected. | `pin!`, `unpin!`, `pin-batch!`, `unpin-batch!`, authorization, config, bridge, admin, window, and secret operations |
+| Authenticated application | Local calls use session/API-token authentication; signed federation is limited to scalar staged access, dedicated staged batch access, path-scoped staged `run!`, and committed retrieval from one selected responder. | blank read-only `use!`, `put!`, `copy!`, `use-batch!`, `put-batch!`, `copy-batch!`, `run!`, `retrieve`, `retrieve-batch` |
+| Local retention/policy/admin | Authenticated and always mutated at Self; outward federation context is rejected. | `pin!`, `unpin!`, `pin-batch!`, `unpin-batch!`, admin-only `prune!`, `prune-batch!`, `truncate!`, authorization, config, bridge, admin, window, and secret operations |
 | Root/Admin | Root commands for runtime mutation and administrative lifecycle management. | `*eval*`, `*call*`, `*step*`, `*set-secret*`, `*set-step*`, `*set-query*` |
 
 ### Function Reference
@@ -183,21 +183,24 @@ The same function names appear in Explorer/Workbench, automated scripts, and inc
 
 | Function | Purpose |
 | --- | --- |
-| `get` | Read current Stage, locally or through a signed working route |
-| `set!` | Stage a write locally or through a signed working route |
-| `resolve` | Resolve exact committed content locally or through a signed route/history cursor |
-| `call!` | Execute a staged Scheme program locally as the root caller or a configured Interface administrator; rules and ownership cannot grant it |
+| blank read-only `use!` | Read current Stage, locally or through a signed working route |
+| `put!` | Stage a write locally or through a signed working route |
+| `retrieve` | Retrieve exact committed content locally, through a canonical committed route, or from one explicitly routed responder's permanently retained history |
+| `run!` | Execute a staged Scheme program with root/admin default authority or an independent recursive path-scoped `run!` grant; ownership and blank read-only `use!` do not imply it |
 | `pin!` / `unpin!` | Mutate only Self's retained permanent proof state |
-| `authorize!` / `deauthorize!` / `authorizations` | Manage Self-local path-scoped `get`/`set!`/`resolve` grants |
+| `authorize!` / `deauthorize!` / `authorizations` | Manage Self-local path-scoped blank read-only `use!`/`put!`/`run!`/`retrieve` grants; `run!` remains independent of ownership and blank read-only `use!` |
 | `bridge!` / `delete-bridge!` | Manage reciprocal bridges locally |
 | `config` / `update-config!` | Read or update local ledger configuration under local policy |
-| `get-batch` / `set-batch!` | Perform ordered snapshot reads or atomic prewrite-snapshot mutations locally or over one signed working route; conditional writes require both read and write authority for every member |
-| `resolve-batch` / `pin-batch!` / `unpin-batch!` | Perform grouped committed resolution and atomic origin-local retention changes without outward Gateway federation context |
+| `use-batch!` / `put-batch!` | Perform ordered snapshot reads or atomic prewrite-snapshot mutations locally or over one signed working route; conditional writes require both read and write authority for every member |
+| `copy!` / `copy-batch!` | Copy raw staged files or complete directories from one pre-mutation snapshot; optional target expectations add read authority requirements |
+| `truncate!` | Irreversibly release locally available history through an inclusive cutoff as Root or a configured local Interface administrator; grants and federation cannot confer it |
+| `prune!` / `prune-batch!` | As Root/configured local administrator, remove selected committed leaves/directories from both temporary and permanent retention while preserving Stage and committed history identity; grants and federation cannot confer it |
+| `retrieve-batch` / `pin-batch!` / `unpin-batch!` | Retrieve ordered committed paths, including one explicitly routed responder-local permanent view, or atomically mutate origin-local retention |
 | `*secret*` | Rotate the local interface secret/key material |
 | `*admins-get*` / `*admins-set*` | Read/replace local administrator principals |
 | `*window-set*` | Update the local public retention window |
 
-Deleting a bridge removes its active route/configuration and associated grants but retains the alias↔journal-root identity binding. Re-establishing the same alias/root is valid and idempotent; substituting another root or moving the root to another alias is rejected as an identity conflict.
+Deleting a bridge removes its active and retired relationship state but preserves alias-scoped authorization rules and unused signing-key preapprovals. No permanent alias-to-Journal binding remains. Reusing an alias creates an ordinary new relationship, and the existing route-shaped grants apply to that alias deliberately and unchanged.
 
 #### Root/Admin Functions
 
@@ -220,8 +223,8 @@ These are the public root methods exposed by the root module's base record objec
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `get` | `((root 'get) path)` | Read value at path; returns value, `(nothing)`, or a directory listing. |
-| `set!` | `((root 'set!) path value)` | Write value at path; supports structured node/object values and deletion via `(nothing)`. |
+| blank read-only `use!` | `((root 'get) path)` | Read value at path; returns value, `(nothing)`, or a directory listing. |
+| `put!` | `((root 'set!) path value)` | Write value at path; supports structured node/object values and deletion via `(nothing)`. |
 | `copy!` | `((root 'copy!) source target)` | Copy `source` to `target`; a missing source deletes the target. |
 | `equal?` | `((root 'equal?) source target)` | Exact structural equality check between two paths. |
 | `equivalent?` | `((root 'equivalent?) source target)` | Digest-equivalence check between two paths. |
@@ -252,13 +255,17 @@ It also handles remote bridge fetch/merge flows before handing the final operati
 | --- | --- | --- |
 | `size`, `info` | Public control | Return local public metadata. |
 | `route`, `synchronize!`, constrained `trace` | Public control | Operate on bridge/proof control structure, never as signed application calls. |
-| `get` | Authenticated/federatable | Read current staged content under terminal-local policy. |
-| `set!` | Authenticated/federatable | Stage a write under terminal-local policy; optional `expected` content makes it conditional and requires read authority. |
-| `call!` | Local admin | Interface loads the current staged procedure once, evaluates it outside `sync-let` in a masked environment, and runs it non-atomically as root or a configured local Interface administrator. Namespace owners, policy grantees, and remote principals are denied before program loading. |
-| `resolve` | Authenticated/federatable | Resolve exact committed content and verify optional returned proof. |
-| `pin!`, `unpin!` | Local authenticated | Retain/remove proof only in Self's permanent chain. |
-| `get-batch`, `set-batch!` | Local authenticated | Read one staged snapshot or atomically write staged paths; optional `expected` values make every write conditional. |
-| `resolve-batch`, `pin-batch!`, `unpin-batch!` | Authenticated paths; local mutation | Resolve ordered committed paths or atomically mutate Self's retained proof state. |
+| blank read-only `use!` | Authenticated/federatable | Read current staged content under terminal-local policy. |
+| `put!` | Authenticated/federatable | Stage a write under terminal-local policy; optional `expected` content makes it conditional and requires read authority. |
+| `run!` | Root/admin or explicit grant | Interface loads the current staged procedure once, evaluates it outside `sync-let` in a masked environment, and runs it non-atomically. Local non-admin and authenticated remote route principals require an explicit recursive `run!` rule; every nested operation preserves and rechecks the original caller before effects. |
+| `truncate!` | Local admin | Irreversibly release both local Ledger history representations through one inclusive positive/negative cutoff while preserving logical chain identity, indexes, Stage, retained suffix, and future append. |
+| `prune!`, `prune-batch!` | Local admin | Remove one path or a complete path union from both retained Ledger fields atomically; direct or ancestral committed `*crypto*` targets reject the complete call, while missing ordinary paths are idempotent and Stage/history roots, digests, signatures, size, and numbering remain unchanged. |
+| `retrieve` | Authenticated/federatable | Retrieve exact committed content and verify optional returned proof. An outward `$federation.route` selects one responder; that responder evaluates the path locally and requires permanent evidence. |
+| `pin!`, `unpin!` | Local authenticated | Retain/remove proof only in Self's permanent chain; unpin rejects direct or ancestral committed `*crypto*` targets before mutation. |
+| `use-batch!`, `put-batch!` | Local authenticated | Read one staged snapshot or atomically write staged paths; optional `expected` values make every write conditional. |
+| `copy!`, `copy-batch!` | Local authenticated/federatable | Copy raw staged content atomically within one terminal Journal; optional target expectations require direct target read authority. |
+| `retrieve-batch`, `pin-batch!`, `unpin-batch!` | Authenticated paths; local mutation | Retrieve ordered committed paths or atomically mutate Self's retained proof state. |
+| `prune-batch!` | Local admin | Atomically remove the union of up to 1,024 canonical committed paths from both retained fields. |
 | `authorizations`, `authorize!`, `deauthorize!` | Local authenticated | Inspect or mutate Self-local grants. |
 | `bridge!`, `delete-bridge!` | Local admin | Manage reciprocal bridges. |
 | `config`, `update-config!` | Local admin | Inspect or mutate local ledger configuration. |
@@ -271,28 +278,32 @@ Public ledger/interface paths use flat Scheme lists or JSON arrays, for example 
 
 #### Dedicated batch and conditional-write contract
 
-Every dedicated batch accepts at most 1,024 paths. Malformed, over-limit, and mismatched-cardinality requests fail before mutation. Empty read/write/retention batches are identity operations; `trace-batch` alone requires at least one path because it must select a history anchor. Results preserve request order and duplicates; a missing value is `(nothing)`, not `#f` or `(unknown)`. There is deliberately no arbitrary mixed `batch!` endpoint and no general copy endpoint. Application-specific orchestration belongs in administrator-only staged `call!` programs.
+Every dedicated batch accepts at most 1,024 paths. Malformed, over-limit, and mismatched-cardinality requests fail before mutation. Empty read/write/retention batches are identity operations; `trace-batch` alone requires at least one path because it must select a history anchor. Results preserve request order and duplicates; a missing value is `(nothing)`, not `#f` or `(unknown)`. There is deliberately no arbitrary mixed `batch!` endpoint. Application-specific orchestration beyond the dedicated copy operations belongs in staged `run!` programs under Root/configured-admin default authority or an explicit recursive path-scoped `run!` rule.
 
-`get-batch` reads every staged path from one snapshot. `resolve-batch` groups complete origin-relative paths by exact route and history anchor, verifies one compact proof per compatible remote group, and returns only ordered content plus optional origin-local `pinned?` status. `trace-batch` requires one history anchor and returns the compact serialized union proof itself. `pin-batch!` resolves and verifies all required remote proof groups before one atomic Self-local retention mutation; `unpin-batch!` atomically applies digest-preserving local cuts. Any malformed or failed member rolls back the entire retention change.
+`use-batch!` reads every staged path from one snapshot. `retrieve-batch` groups complete origin-relative paths by exact route and history anchor, or sends one complete batch to one explicit `$federation.route` responder for permanent-only local interpretation. Mixed responder contexts are not representable and are rejected. It verifies one compact proof per compatible group and returns only ordered content plus optional origin-local `pinned?` status. `trace-batch` requires one history anchor and returns the compact serialized union proof itself. `pin-batch!` retrieves and verifies all required remote proof groups before one atomic Self-local retention mutation; `unpin-batch!` validates its complete list, rejects direct or ancestral committed `*crypto*` targets, then atomically applies permanent-only digest-preserving cuts. Administrator-only `prune-batch!` uses the same protected-path validation, prepares both complete retained-field candidates, and installs both or neither; duplicates and ancestor/descendant overlaps equal their union. Any malformed, protected, or failed member rolls back the entire retention change.
 
-Conditional `set!` distinguishes an omitted `expected` field from every explicit value, including `#f` and `(nothing)`. Conditional `set-batch!` requires one expected value per path. All expectations compare against the same pre-write Stage snapshot before any replacement is applied; duplicate paths therefore compare with the same old value, while successful replacements retain input order and the last duplicate wins. A mismatch returns `#f` without changing Stage or its transition history. Conditional writes require both exact `get` and `set!` authorization because equality is observable. Concurrent writers using the same expected value have one winner; colliding Journal evaluations retry against the new root and return `#f` after the winner commits.
+Linear and log Chain objects expose read-only `indices`, returning `(chain (<ascending materialized indexes>) <complete?>)` without evaluating payloads. A trailing retained bridge alias selects this inventory; an alias followed by an integer selects that payload, and continued traversal after an alias implies its `-1` head. At a terminal retention provider, each explicit or implicit `-1` selects the greatest materialized index in that containing permanent Chain; a newer temp-only or unknown logical tail is ineligible. The terminal constructs the response proof from the exact permanent object authenticated by the invocation. The origin anchors that returned proof digest, independently derives those selections through the proof's authenticated embedded Chain implementation, and merges richer same-root route evidence only to verify content at those exact paths. Historical Chains without `indices` execute their own complete embedded Chain-size and element-read fallback inside `sync-let`; malformed results and evaluator exhaustion fail the complete request.
+
+`retrieve` and `retrieve-batch` accept optional boolean `index?`. Absent or false preserves the existing response exactly. When true, each successful result appends `indexes`, a left-to-right list of nonnegative absolute indexes corresponding to every integer selector in the requested committed path. A scalar local result always has one index; a federated result has one origin index followed by one index per hop. Raw scalar content is wrapped as `((content VALUE) (indexes (...)))`. Existing scalar metadata keeps its order and `indexes` is last. Every batch item appends its own `indexes` after existing fields; the echoed path remains the original request, and order and duplicates are unchanged. Replacing the request's integer selectors with the returned indexes produces the fixed path for the selected roots, subject to retention. Missing `(nothing)` and available `(unknown)` results still carry selected indexes; failures before root selection do not.
+
+Conditional `put!` distinguishes an omitted `expected` field from every explicit value, including `#f` and `(nothing)`. Conditional `put-batch!` requires one expected value per path. All expectations compare against the same pre-write Stage snapshot before any replacement is applied; duplicate paths therefore compare with the same old value, while successful replacements retain input order and the last duplicate wins. A mismatch returns `#f` without changing Stage or its transition history. Conditional writes require both exact blank read-only `use!` and `put!` authorization because equality is observable. Concurrent writers using the same expected value have one winner; colliding Journal evaluations retry against the new root and return `#f` after the winner commits.
 
 Scheme examples:
 
 ```scheme
-((function get-batch)
+((function use-batch!)
  (arguments ((paths ((*state* alice one) (*state* alice missing)))
              (expression? #t)))
  (authentication ((identity (*state* alice)) (credentials "secret"))))
 
-((function set-batch!)
+((function put-batch!)
  (arguments ((paths ((*state* alice one) (*state* alice two)))
              (values (new-one new-two))
              (expected (old-one old-two))
              (expression? #t)))
  (authentication ((identity (*state* alice)) (credentials "secret"))))
 
-((function resolve-batch)
+((function retrieve-batch)
  (arguments ((paths ((-1 *state* alice one)
                      (-1 peer-a -1 *state* bob shared)))
              (pinned? #t) (expression? #t)))
@@ -310,7 +321,7 @@ Equivalent Gateway JSON:
 }
 ```
 
-The Gateway exposes dedicated `/api/v1/general/{get-batch,set-batch,resolve-batch,trace-batch,pin-batch,unpin-batch}` routes. JSON and Scheme requests use the same argument shapes and receive the same Journal semantic errors. HTTP body, response, and timeout limits still apply independently of the 1,024-path cap.
+The Gateway exposes dedicated `/api/v1/general/{use-batch!,set-batch,retrieve-batch,trace-batch,pin-batch,unpin-batch}` routes. JSON and Scheme requests use the same argument shapes and receive the same Journal semantic errors. HTTP body, response, and timeout limits still apply independently of the 1,024-path cap.
 
 ### Monitoring
 
@@ -380,13 +391,14 @@ Secret rotation is the minimum operational hygiene task for any deployed environ
 
 ### Runtime lifecycle and configuration
 
-A configured local Interface administrator may stage one procedure at
-`(*state* *periodic*)`. When an outer periodic step creates a new Ledger index,
-Interface launches that program exactly once through nonblocking `call!` and
+Only Root or a configured local Interface administrator may configure the
+procedure at `(*state* *periodic*)`; ordinary path-scoped `run!` grants do not
+confer periodic configuration authority. When an outer periodic step creates a
+new Ledger index, Interface launches that program exactly once through nonblocking `run!` and
 passes the committed zero-based index as its sole argument. Unchanged steps and
 internal step continuations never launch it. Different indexes may
 run concurrently and finish out of order; program effects retain ordinary
-non-atomic `call!` semantics. Deleting the path disables later launches. This is
+non-atomic `run!` semantics. Deleting the path disables later launches. This is
 not a durable scheduler/outbox: process failure after commit but before detached
 dispatch can lose that launch.
 

@@ -97,26 +97,29 @@ run_startup() {
     checked_evaluate "Journal record installation" '"Installed interface"' "$expr"
 }
 
-fresh_install=0
+write_version_marker=0
 if [ -d database ] && [ -n "$(find database -mindepth 1 -print -quit 2>/dev/null)" ]; then
     if [ ! -f "$VERSION_MARKER" ]; then
-        echo "Existing database predates the fresh-only $PLATFORM_VERSION layout; preserve it and use a new volume" >&2
+        echo "Existing database has no supported Sync Web version marker" >&2
         exit 1
     fi
     installed_version=$(cat "$VERSION_MARKER")
     if [ "$installed_version" != "$PLATFORM_VERSION" ]; then
-        echo "Database version $installed_version cannot be opened by fresh-only $PLATFORM_VERSION" >&2
-        exit 1
+        if [ "$installed_version" != "1.5.0" ] || [ "$PLATFORM_VERSION" != "1.6.0" ] || [ "$JOURNAL_UPDATE" != "1" ]; then
+            echo "Database version $installed_version cannot be opened by $PLATFORM_VERSION" >&2
+            exit 1
+        fi
+        write_version_marker=1
     fi
     if [ "$JOURNAL_UPDATE" = "1" ]; then
         run_startup "#f"
     fi
 else
     run_startup "#t"
-    fresh_install=1
+    write_version_marker=1
 fi
 
-if [ "$fresh_install" = "1" ]; then
+if [ "$write_version_marker" = "1" ]; then
     printf '%s\n' "$PLATFORM_VERSION" > "$VERSION_MARKER"
 fi
 

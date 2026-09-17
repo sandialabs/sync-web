@@ -38,7 +38,7 @@ Compatibility/internal path retained for bridge communication:
 
 `/interface` is intentionally kept for existing journal-to-journal flows such as social-agent bridge wiring, but it is not the preferred public integration surface.
 
-Prometheus should scrape `http://gateway/metrics` from the private Compose network. The gateway has no host-published port, and the router returns `404` for exact public `/metrics` requests in HTTP and TLS modes. Public Gateway routes use the container network's DNS resolver with a five-second cache so an unchanged Router automatically follows a restarted Gateway at its new address.
+Prometheus should scrape `http://gateway/metrics` from the private Compose network. The gateway has no host-published port, and the router returns `404` for exact public `/metrics` requests in HTTP and TLS modes. Public Gateway routes use the container network's DNS resolver with a five-second cache so an unchanged Router automatically follows a restarted Gateway at its new address. Explorer, Workbench, and file-system/WebDAV upstreams also resolve at request time: Router starts without those optional Compose profiles and returns an upstream-unavailable response until the selected service is running.
 
 Request body limit:
 - router currently accepts up to `64 MiB` bodies

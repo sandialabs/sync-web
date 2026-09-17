@@ -146,7 +146,7 @@ The exact recursively allowed s7 scalar/container set should be implemented and 
 
 This boundary addresses capability isolation and copy correctness, not size/space denial of service. In particular, current C s7 can exhaust its C stack while printing an extremely deep ordinary top-level result even though `sync-let` copies and consumes the same structure iteratively. Sync Web 1.5 does not claim an execution meter, limit, budget, timeout, or cancellation accounting contract because none can yet be enforced reliably across stored evaluation, recursion/allocation, host primitives, and nested calls. Do not substitute an arbitrary depth cap, wall-clock timeout, dormant knob, or s7 `begin` hook.
 
-The compensating public authority boundary is explicit: `call!` is available only to the root caller and configured local Interface administrators. Namespace ownership and Authorization rules cannot grant execution, rules naming `call!` are rejected, and all remote/federated principals fail before stored program loading or effects. Shared operations should return bounded ordinary control data or sync-node handles.
+The final-1.6 authority boundary is explicit: root and configured local Interface administrators retain default `run!` access, while authenticated local non-admin and remote route principals require an independent recursive path-scoped `run!` Authorization rule. Namespace ownership and read-only `use!` do not imply execution. Shared operations should return bounded ordinary control data or sync-node handles.
 
 ## Isolated environment
 

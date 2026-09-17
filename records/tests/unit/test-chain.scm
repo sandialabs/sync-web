@@ -27,6 +27,7 @@
   (define chain-1 (sync-eval (assert ((standard 'init) chain-src) sync-node?)))
 
   (assert ((chain-1 'size)) 0)
+  (assert ((chain-1 'indices)) '(chain () #t))
 
   (assert ((chain-1 'push!) (expression->byte-vector "hello")) #t)
   (assert ((chain-1 'push!) (expression->byte-vector ",")) #t)
@@ -38,6 +39,9 @@
                 (byte-vector->expression ((chain-1 'get) 2))
                 (byte-vector->expression ((chain-1 'get) 3)))
           '("hello" "," "world" "!"))
+  (let ((digest (sync-digest (chain-1))))
+    (assert ((chain-1 'indices)) '(chain (0 1 2 3) #t))
+    (assert (sync-digest (chain-1)) digest))
 
   (let ((chain (sync-eval (chain-1))))
     (assert ((chain 'set!) 1 (expression->byte-vector ":")) #t)
@@ -45,23 +49,35 @@
 
   (let ((chain (sync-eval (chain-1))))
     (assert ((chain 'slice!) 1) #t)
-    (assert (byte-vector->expression ((chain 'get) 1)) ","))
+    (assert (byte-vector->expression ((chain 'get) 1)) ",")
+    (assert ((chain 'indices)) '(chain (1) #f)))
 
   (let ((chain (sync-eval (chain-1))))
     (assert ((chain 'prune!) 1) #t)
     (assert ((chain 'get) 1) '(unknown))
-    (assert (byte-vector->expression ((chain 'get) -1)) "!"))
+    (assert (byte-vector->expression ((chain 'get) -1)) "!")
+    (assert ((chain 'indices)) '(chain (0 2 3) #f)))
 
   (let ((chain (sync-eval (chain-1))))
     (let ((digest (sync-digest (chain))))
-      (assert ((chain 'truncate!) 1) (lambda (x) (sync-node? x)))
+      (assert ((chain 'truncate!) 1) #t)
       (assert (equal? digest (sync-digest (chain))) #t)
       (assert ((chain 'get) 0) '(unknown))
       (assert ((chain 'get) 1) '(unknown))
+      (assert ((chain 'indices)) '(chain (2 3) #f))
       (assert (byte-vector->expression ((chain 'get) 2)) "world")
       (assert (byte-vector->expression ((chain 'get) 3)) "!")
       (assert ((chain 'push!) (expression->byte-vector "next")) #t)
       (assert (byte-vector->expression ((chain 'get) -1)) "next")))
+
+  ;; Inventory inspects structure without evaluating payload code.
+  (let ((chain (sync-eval ((standard 'init) chain-src))))
+    ((chain 'push!)
+     (sync-cons
+      (expression->byte-vector
+       '(lambda (state) (error 'payload-executed "Inventory evaluated payload")))
+      (sync-null)))
+    (assert ((chain 'indices)) '(chain (0) #t)))
 
   ;; Truncation uses the same inclusive index contract in both chain classes.
   (let ((chain (sync-eval (chain-1))))
@@ -184,7 +200,7 @@
     ((chain 'truncate!) 252)
     ((chain 'push!) (expression->byte-vector 257))
     ((reference 'push!) (expression->byte-vector 257))
-    (assert ((chain 'truncate!) 253) (lambda (node) (sync-node? node)))
+    (assert ((chain 'truncate!) 253) #t)
     (assert ((chain 'get) 253) '(unknown))
     (assert (byte-vector->expression ((chain 'get) 254)) 254)
     (assert (byte-vector->expression ((chain 'get) 257)) 257)
@@ -195,21 +211,38 @@
                            (sync-digest ((reference 'previous) index))) #t))
          '(254 255 256 257)))))
 
-  ;; Widening is non-resurrecting: a lower requested cutoff keeps existing
-  ;; stumps while future appends and rolling truncation remain valid.
-  (if (eq? (chain-1 '*name*) 'log-chain)
-      (let ((chain (sync-eval ((standard 'init) chain-src))))
-        (let fill ((i 0))
-          (if (< i 64)
-          (begin ((chain 'push!) (expression->byte-vector i))
-                 (fill (+ i 1)))))
-    ((chain 'truncate!) 55)
-    ((chain 'truncate!) 47)
-    (assert ((chain 'get) 55) '(unknown))
-    ((chain 'push!) (expression->byte-vector 64))
-    (assert ((chain 'truncate!) 56) (lambda (node) (sync-node? node)))
-        (assert ((chain 'get) 56) '(unknown))
-        (assert (byte-vector->expression ((chain 'get) 64)) 64)))
+  ;; Equal and lower cutoffs are exact non-resurrecting no-ops for both chain
+  ;; representations. A later higher cutoff still advances after an append.
+  (let ((chain (sync-eval ((standard 'init) chain-src)))
+        (reference (sync-eval ((standard 'init) chain-src))))
+    (let fill ((i 0))
+      (if (< i 64)
+          (begin
+            ((chain 'push!) (expression->byte-vector i))
+            ((reference 'push!) (expression->byte-vector i))
+            (fill (+ i 1)))))
+    (let ((logical (sync-digest (chain))))
+      (assert ((chain 'truncate!) 55) #t)
+      (let ((stump (sync-digest (chain))))
+        (assert ((chain 'truncate!) 55) #t)
+        (assert (equal? stump (sync-digest (chain))) #t)
+        (assert ((chain 'truncate!) 47) #t)
+        (assert (equal? stump (sync-digest (chain))) #t))
+      (assert (equal? logical (sync-digest (chain))) #t)
+      (assert ((chain 'size)) 64)
+      (assert ((chain 'index) -1) 63)
+      (assert ((chain 'get) 55) '(unknown))
+      (assert (byte-vector->expression ((chain 'get) 56)) 56)
+      (assert (byte-vector->expression ((chain 'get) 63)) 63)
+      (assert ((chain 'push!) (expression->byte-vector 64)) #t)
+      (assert ((reference 'push!) (expression->byte-vector 64)) #t)
+      (assert ((chain 'truncate!) 56) #t)
+      (assert ((chain 'size)) 65)
+      (assert ((chain 'index) -1) 64)
+      (assert ((chain 'get) 56) '(unknown))
+      (assert (byte-vector->expression ((chain 'get) 57)) 57)
+      (assert (byte-vector->expression ((chain 'get) 64)) 64)
+      (assert (equal? (sync-digest (chain)) (sync-digest (reference))) #t)))
 
   ;; Pruning entries hides their values without preventing derivation of later
   ;; historical prefixes. Linear and log-structured chains share this public

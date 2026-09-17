@@ -195,14 +195,25 @@
       (equal? node new)))
 
   (define-method (~key->bytes self key)
-    ;; Encode a key to a tagged byte-vector.
+    ;; Encode a key to a tagged byte-vector. Symbol keys must survive the
+    ;; expression codec exactly so directory presentation remains readable.
     ;;   Args:
     ;;     key (any): lookup key.
     ;;   Returns:
     ;;     byte-vector: tagged encoding of key.
     (cond ((sync-node? key) (error 'type-error "Tree keys cannot be sync nodes: ~S" key))
           ((byte-vector? key) (append #u(0) key))
-          (else (append #u(1) (expression->byte-vector key)))))
+          (else
+           (let* ((encoded (expression->byte-vector key))
+                  (decoded (and (symbol? key) (byte-vector->expression encoded))))
+             (if (and (symbol? key)
+                      (not (and (symbol? decoded)
+                                (equal? (symbol->string decoded) (symbol->string key))
+                                (equal? encoded (expression->byte-vector decoded)))))
+                 (error 'path-error
+                        "Tree symbol key does not round trip through the expression codec: ~S"
+                        key))
+             (append #u(1) encoded)))))
 
   (define-method (~bytes->key self bytes)
     ;; Decode a tagged byte-vector into a key.
@@ -372,6 +383,44 @@
                "Tree batch paths and values must be equal-length proper lists"))
     (map (lambda (path value) ((self 'set!) path value)) paths values)
     #t)
+
+  (define-method (~complete? self node)
+    ;; Return whether a captured raw subtree contains no unavailable stub.
+    (cond ((sync-stub? node) #f)
+          ((sync-pair? node)
+           (and ((self '~complete?) (sync-car node))
+                ((self '~complete?) (sync-cdr node))))
+          (else #t)))
+
+  (define-method (copy-batch! self sources paths)
+    ;; Copy ordered raw sources captured before any target mutation.
+    (if (not (and (list? sources) (list? paths)
+                  (= (length sources) (length paths))))
+        (error 'argument-error
+               "Tree copy sources and paths must be equal-length proper lists"))
+    (if (> (length sources) 1024)
+        (error 'argument-error "Tree copy count exceeds 1024"))
+    (let* ((source-nodes
+            (map (lambda (source)
+                   ((self '~r-read) (map (self '~key->bytes) source)))
+                 sources))
+           (source-values (map (lambda (source) ((self 'get) source)) sources))
+           (targets (map (lambda (path) (map (self '~key->bytes) path)) paths)))
+      (for-each
+       (lambda (source-node value path)
+         (if (not ((self '~complete?) source-node))
+             (error 'availability-error "Copy source is unavailable"))
+         (if (and (null? path)
+                  (not (and (pair? value) (eq? (car value) 'directory))))
+             (error 'path-error "Tree root must remain a directory")))
+       source-nodes source-values paths)
+      (for-each
+       (lambda (source-node target path)
+         (if (sync-null? source-node)
+             ((self 'set!) path '(nothing))
+             ((self '~r-write!) target source-node)))
+       source-nodes targets paths)
+      #t))
 
   (define-method (copy! self source path)
     ;; Copy raw source to target; a missing source deletes the target.

@@ -272,38 +272,38 @@ class Qualifier:
             "accept": "application/json",
         }
         key_path = ["*state*", self.args.username, "data", "private", self.args.key]
-        get_response = self.request(
+        use_response = self.request(
             "POST",
-            f"{self.router[route.origin]}/api/v1/general/get",
+            f"{self.router[route.origin]}/api/v1/general/use",
             headers=headers,
-            json={"path": key_path, "$federation": {"route": list(route.hops)}},
+            json={"path": key_path, "read-only?": True, "$federation": {"route": list(route.hops)}},
         )
-        resolve_response = self.request(
+        retrieve_response = self.request(
             "POST",
-            f"{self.router[route.origin]}/api/v1/general/resolve",
+            f"{self.router[route.origin]}/api/v1/general/retrieve",
             headers=headers,
             json={"path": proof_path(route, key_path), "pinned?": False, "proof?": True},
         )
         try:
-            get_body = get_response.json()
+            use_body = use_response.json()
         except ValueError:
-            get_body = None
+            use_body = None
         try:
-            resolve_body = resolve_response.json()
+            retrieve_body = retrieve_response.json()
         except ValueError:
-            resolve_body = None
-        get_ok = get_response.ok and isinstance(get_body, dict) and isinstance(get_body.get("*type/byte-vector*"), str)
-        proof_check = structural_proof_check(resolve_body)
-        resolve_ok = resolve_response.ok and proof_check["ok"]
+            retrieve_body = None
+        use_ok = use_response.ok and isinstance(use_body, dict) and isinstance(use_body.get("*type/byte-vector*"), str)
+        proof_check = structural_proof_check(retrieve_body)
+        retrieve_ok = retrieve_response.ok and proof_check["ok"]
         return {
             "origin": route.origin,
             "route": list(route.hops),
-            "get_status": get_response.status_code,
-            "get_error": None if get_ok else get_body,
-            "resolve_status": resolve_response.status_code,
-            "resolve_error": None if resolve_ok else resolve_body,
+            "use_status": use_response.status_code,
+            "use_error": None if use_ok else use_body,
+            "retrieve_status": retrieve_response.status_code,
+            "retrieve_error": None if retrieve_ok else retrieve_body,
             "proof": proof_check,
-            "ok": get_ok and resolve_ok,
+            "ok": use_ok and retrieve_ok,
         }
 
     def run(self) -> int:

@@ -2,6 +2,7 @@ use std::env;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
+use url::Url;
 
 use crate::{
     records::{IndexedGraphRecord, RecordAdapter, RecordReader, RecordSelector},
@@ -94,7 +95,7 @@ impl RecordAdapter for SyncWebRecordAdapter {
 
     fn log(&mut self, record: &GraphRecord) -> Result<()> {
         let index = self.next_index;
-        self.client.set_record(index, record)?;
+        self.client.put_record(index, record)?;
         self.next_index += 1;
         Ok(())
     }
@@ -112,13 +113,13 @@ impl RecordReader for SyncWebRecordReader {
     ) -> Result<()> {
         match selector {
             RecordSelector::Index(index) => {
-                if let Some(record) = self.client.get_record(index)? {
+                if let Some(record) = self.client.use_record(index)? {
                     emit(IndexedGraphRecord { index, record })?;
                 }
             }
             RecordSelector::Range { start, end } => {
                 for index in start..end {
-                    if let Some(record) = self.client.get_record(index)? {
+                    if let Some(record) = self.client.use_record(index)? {
                         emit(IndexedGraphRecord { index, record })?;
                     }
                 }
@@ -145,19 +146,23 @@ impl SyncWebClient {
         })
     }
 
-    fn set_record(&self, index: u64, record: &GraphRecord) -> Result<()> {
+    fn put_record(&self, index: u64, record: &GraphRecord) -> Result<()> {
         let payload = hex::encode(serde_json::to_vec(record)?);
         let args = json!({
             "path": self.path(index),
             "value": {"*type/byte-vector*": payload}
         });
-        let response = self.call_general("set", "set!", args)?;
+        let response = self.call_general("put", "put!", args)?;
         ensure_not_error(&response)?;
         Ok(())
     }
 
-    fn get_record(&self, index: u64) -> Result<Option<GraphRecord>> {
-        let response = self.call_general("get", "get", json!({ "path": self.path(index) }))?;
+    fn use_record(&self, index: u64) -> Result<Option<GraphRecord>> {
+        let response = self.call_general(
+            "use",
+            "use!",
+            json!({ "path": self.path(index), "read-only?": true }),
+        )?;
         if is_nothing(&response) {
             return Ok(None);
         }
@@ -167,7 +172,7 @@ impl SyncWebClient {
             .and_then(Value::as_str)
         else {
             ensure_not_error(&response)?;
-            bail!("Sync Web get returned non-byte-vector value: {response}");
+            bail!("Sync Web use returned non-byte-vector value: {response}");
         };
         let bytes = hex::decode(hex).with_context(|| "decoding Sync Web byte-vector response")?;
         let record = serde_json::from_slice::<GraphRecord>(&bytes)
@@ -198,7 +203,7 @@ impl SyncWebClient {
     }
 
     fn call_gateway(&self, operation: &str, args: Value) -> Result<Value> {
-        let url = gateway_operation_url(&self.endpoint, operation);
+        let url = gateway_operation_url(&self.endpoint, operation)?;
         let SyncWebAuth::GatewayApiKey(token) = &self.auth else {
             bail!("gateway Sync Web mode requires API-key auth");
         };
@@ -270,15 +275,24 @@ pub fn secret_from_literal_or_env(
     }
 }
 
-fn gateway_operation_url(endpoint: &str, operation: &str) -> String {
-    let base = endpoint.trim_end_matches('/');
-    if base.ends_with("/api/v1/general") {
-        format!("{base}/{operation}")
-    } else if base.contains("/api/v1/general/") {
-        base.to_string()
-    } else {
-        format!("{base}/api/v1/general/{operation}")
+fn gateway_operation_url(endpoint: &str, operation: &str) -> Result<String> {
+    let mut url = Url::parse(endpoint)
+        .with_context(|| format!("parsing Sync Web endpoint {endpoint}"))?;
+    let mut segments = url
+        .path_segments()
+        .ok_or_else(|| anyhow!("Sync Web endpoint must use a hierarchical URL"))?
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let general = segments.ends_with(&["api", "v1", "general"]);
+    let operation_url = segments.len() >= 4
+        && segments[segments.len() - 4..segments.len() - 1] == ["api", "v1", "general"];
+    if general {
+        segments.push(operation);
+    } else if !operation_url {
+        segments.extend(["api", "v1", "general", operation]);
     }
+    url.set_path(&format!("/{}", segments.join("/")));
+    Ok(url.into())
 }
 
 fn read_json_response(response: ureq::Response) -> Result<Value> {
@@ -331,15 +345,24 @@ mod tests {
     }
 
     #[test]
-    fn builds_gateway_operation_urls() {
+    fn builds_gateway_operation_urls() -> Result<()> {
         assert_eq!(
-            gateway_operation_url("http://localhost:8192", "set"),
-            "http://localhost:8192/api/v1/general/set"
+            gateway_operation_url("http://localhost:8192", "put")?,
+            "http://localhost:8192/api/v1/general/put"
         );
         assert_eq!(
-            gateway_operation_url("http://localhost:8192/api/v1/general", "get"),
-            "http://localhost:8192/api/v1/general/get"
+            gateway_operation_url("http://localhost:8192/api/v1/general", "use")?,
+            "http://localhost:8192/api/v1/general/use"
         );
+        assert_eq!(
+            gateway_operation_url("http://localhost:8192/api/v1/general/put?next=/api/v1/general/use", "use")?,
+            "http://localhost:8192/api/v1/general/put?next=/api/v1/general/use"
+        );
+        assert_eq!(
+            gateway_operation_url("http://localhost:8192/prefix-api/v1/general/use#api/v1/general/put", "put")?,
+            "http://localhost:8192/prefix-api/v1/general/use/api/v1/general/put#api/v1/general/put"
+        );
+        Ok(())
     }
 
     #[test]
@@ -384,43 +407,59 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].index, 5);
         assert_eq!(records[0].record.id(), "msg_sync_web_test");
-        assert!(requests[0].starts_with("POST /api/v1/general/set HTTP/1.1"));
-        assert!(requests[1].starts_with("POST /api/v1/general/get HTTP/1.1"));
+        assert!(requests[0].starts_with("POST /api/v1/general/put HTTP/1.1"));
+        assert!(requests[1].starts_with("POST /api/v1/general/use HTTP/1.1"));
         assert!(requests[0].contains("authorization: Bearer test-token"));
         assert!(requests[0]
             .contains("\"path\":[\"*state*\",\"agent-recorder\",\"test\",\"entry-000000000005\"]"));
+        assert!(requests[1].contains("\"read-only?\":true"));
         Ok(())
     }
 
     #[test]
-    fn direct_journal_adapter_sends_journal_secret() -> Result<()> {
+    fn direct_journal_adapter_uses_canonical_resource_operations() -> Result<()> {
         let record = sample_record();
+        let encoded = hex::encode(serde_json::to_vec(&record)?);
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
-        let server = thread::spawn(move || -> Result<String> {
-            let (mut stream, _) = listener.accept()?;
-            let request = read_http_request(&mut stream)?;
-            let response_body = "true";
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
-                response_body.len(),
-                response_body
-            );
-            stream.write_all(response.as_bytes())?;
-            Ok(request)
+        let server = thread::spawn(move || -> Result<Vec<String>> {
+            let mut requests = Vec::new();
+            for response_body in [
+                "true".to_string(),
+                json!({"*type/byte-vector*": encoded}).to_string(),
+            ] {
+                let (mut stream, _) = listener.accept()?;
+                requests.push(read_http_request(&mut stream)?);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes())?;
+            }
+            Ok(requests)
         });
 
         let mut config =
             SyncWebConfig::direct_journal(format!("http://{addr}/interface"), "journal-secret");
         config.path_prefix = parse_path_prefix("*state*/agent-recorder/direct")?;
-        let mut writer = SyncWebRecordAdapter::create(config)?;
+        let mut writer = SyncWebRecordAdapter::create(config.clone())?;
         writer.log(&record)?;
+        let reader = SyncWebRecordReader::create(config)?;
+        reader.read(RecordSelector::Index(0), &mut |_| Ok(()))?;
 
-        let request = server.join().expect("mock server panicked")?;
-        assert!(request.starts_with("POST /interface HTTP/1.1"));
-        assert!(request.contains("\"function\":\"set!\""));
-        assert!(request.contains("\"credentials\":{\"*type/string*\":\"journal-secret\"}"));
-        assert!(request.contains(
+        let requests = server.join().expect("mock server panicked")?;
+        assert!(requests
+            .iter()
+            .all(|request| request.starts_with("POST /interface HTTP/1.1")));
+        assert!(requests[0].contains("\"function\":\"put!\""));
+        assert!(requests[1].contains("\"function\":\"use!\""));
+        assert!(requests[1].contains("\"read-only?\":true"));
+        assert!(requests
+            .iter()
+            .all(|request| request
+                .contains("\"credentials\":{\"*type/string*\":\"journal-secret\"}")));
+        assert!(requests[0].contains(
             "\"path\":[\"*state*\",\"agent-recorder\",\"direct\",\"entry-000000000000\"]"
         ));
         Ok(())

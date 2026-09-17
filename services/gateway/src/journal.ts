@@ -17,6 +17,7 @@ export interface JournalClient {
   callRootScheme(input: { expression: string; functionName: string }): Promise<unknown>;
   proxyJson(body: unknown): Promise<unknown>;
   proxyScheme(expression: string): Promise<string>;
+  schemeToJson(expression: string): Promise<unknown>;
 }
 
 export interface JournalClientOptions {
@@ -319,6 +320,11 @@ export const createJournalClient = (
     }
   };
 
+  const schemeToJsonEndpoint = new URL(journalEndpoint);
+  schemeToJsonEndpoint.pathname = `${schemeToJsonEndpoint.pathname.replace(/\/$/, "")}/scheme-to-json`;
+  schemeToJsonEndpoint.search = "";
+  schemeToJsonEndpoint.hash = "";
+
   return {
     async callJson(input: JournalCall): Promise<unknown> {
       return callJsonEndpoint(journalEndpoint, input);
@@ -444,6 +450,22 @@ export const createJournalClient = (
           signal: controller.signal,
         });
         return response.text();
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+    async schemeToJson(expression: string): Promise<unknown> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        const response = await fetch(schemeToJsonEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/scheme" },
+          body: expression,
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Journal codec error (${response.status})`);
+        return JSON.parse(await response.text());
       } finally {
         clearTimeout(timeout);
       }

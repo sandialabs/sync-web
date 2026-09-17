@@ -1,5 +1,11 @@
 # Federation
 
+> **Historical Sync Web 1.5 design — superseded.** This document preserves the
+> identity-bound 1.5 rationale and is not normative for final 1.6. In particular,
+> its Journal-ID/audience, tombstone, ID-preapproval, and administrator-only
+> `call!` statements do not describe final-1.6 behavior. Use the current Records,
+> operation documentation, and tests for final-1.6 semantics.
+
 Design and records-layer implementation note for Sync Web 1.5 reciprocal bridges, verifiable route establishment, journal-to-journal authentication, and federated function invocation.
 
 Status: the federation protocol is implemented on `dev-1.5` across the Scheme records, Gateway, Explorer, deployment configuration, and social-agent model. Signed application federation is explicitly limited to staged `get`/`set!`, dedicated `get-batch`/`set-batch!`, and committed `resolve`. Dedicated Scheme tests cover multi-journal semantics, while the social-agent stack exercises real HTTP transport and the Explorer working/history route UI. The former publisher/subscriber and push/pull policy machinery has been removed rather than carried into federation.

@@ -93,7 +93,7 @@ for package in (
     "musl-dev=1.2.5-r23",
     "ncurses-dev=6.5_p20251123-r0",
     "ncurses-static=6.5_p20251123-r0",
-    "xz-static=5.8.3-r0",
+    "xz-static=5.8.4-r0",
     "zlib-dev=1.3.2-r0",
     "zlib-static=1.3.2-r0",
     "zstd-dev=1.5.7-r2",

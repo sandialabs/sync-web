@@ -125,14 +125,14 @@ fn cwd_from_row(value: &Value) -> Option<String> {
     let text = set_messages
         .iter()
         .filter_map(|message| text_from_content(message.get("content").unwrap_or(&Value::Null)))
-        .find(|text| text.contains("Workspace Directories:"))?;
+        .find(|text| text.lines().any(|line| line.trim() == "- **Workspace Directories:**"))?;
     workspace_dir_from_context(&text)
 }
 
 fn workspace_dir_from_context(text: &str) -> Option<String> {
     let mut in_workspace_section = false;
     for line in text.lines() {
-        if line.contains("Workspace Directories:") {
+        if line.trim() == "- **Workspace Directories:**" {
             in_workspace_section = true;
             continue;
         }
@@ -141,7 +141,7 @@ fn workspace_dir_from_context(text: &str) -> Option<String> {
             if let Some(path) = trimmed.strip_prefix("- ") {
                 return Some(path.trim().to_string());
             }
-            if trimmed.starts_with("**") || trimmed.is_empty() {
+            if (trimmed.starts_with("- **") && trimmed.ends_with(":**")) || trimmed.is_empty() {
                 in_workspace_section = false;
             }
         }
@@ -221,4 +221,32 @@ fn metadata(value: &Value) -> Value {
         "session-id": string_field(value, "sessionId"),
         "kind": string_field(value, "kind"),
     })
+}
+
+
+#[cfg(test)]
+mod workspace_context_tests {
+    use super::workspace_dir_from_context;
+
+    #[test]
+    fn parses_only_the_exact_workspace_section_header() {
+        assert_eq!(
+            workspace_dir_from_context(
+                "<session_context>\n- **Workspace Directories:**\n  - /work/exact\n- **Directory Structure:**\n"
+            ),
+            Some("/work/exact".to_string())
+        );
+        assert_eq!(
+            workspace_dir_from_context(
+                "user text Workspace Directories:\n- /work/spoofed\n"
+            ),
+            None
+        );
+        assert_eq!(
+            workspace_dir_from_context(
+                "- **Not Workspace Directories:**\n- /work/spoofed\n"
+            ),
+            None
+        );
+    }
 }

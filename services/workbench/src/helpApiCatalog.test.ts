@@ -8,12 +8,13 @@ const catalog = JSON.parse(source) as Record<string, ApiEntry>;
 const expectedPermissions: Record<ApiPermission, string[]> = {
   any: ['size', 'trace', 'trace-batch', 'info'],
   user: [
-    'resolve', 'resolve-batch', 'get', 'get-batch', 'set!', 'pin!', 'pin-batch!',
-    'unpin!', 'unpin-batch!', 'set-batch!',
+    'put!', 'put-batch!', 'use!', 'use-batch!', 'copy!',
+    'retrieve', 'retrieve-batch', 'run!',
+    'pin!', 'pin-batch!', 'unpin!', 'unpin-batch!',
     'authorizations', 'authorize!', 'deauthorize!',
   ],
   admin: [
-    'call!', 'config', 'bridge!', 'update-config!', '*secret*', 'delete-bridge!',
+    'truncate!', 'prune!', 'prune-batch!', 'config', 'bridge!', 'update-config!', '*secret*', 'delete-bridge!',
     '*admins-get*', '*admins-set*', '*window-set*',
   ],
   root: ['*eval*', '*call*', '*step*', '*set-secret*', '*set-step*', '*set-query*'],
@@ -47,7 +48,7 @@ it('uses flat canonical committed and federated paths', () => {
     expect(`${name}: ${entry.example}`).not.toMatch(/\(-?\d+\s+\(\*state\*/);
     expect(`${name}: ${entry.template}`).not.toMatch(/\(-?\d+\s+\(\*state\*/);
   }
-  expect(catalog.resolve.example).toContain('(path (-1 *state* alice key))');
+  expect(catalog.retrieve.example).toContain('(path (-1 *state* alice key))');
   expect(catalog['pin!'].example).toContain('(path (-1 *state* alice important-data))');
 });
 
@@ -63,17 +64,17 @@ it('makes every user/admin example exercise its labeled minimum role', () => {
   expect(catalog['*secret*'].description).toMatch(/journal-wide Interface authentication secret/);
   expect(catalog['*secret*'].description).toMatch(/Interface public signing key/);
   const ownerPaths: Record<string, string> = {
-    resolve: '(path (-1 *state* alice key))',
-    get: '(path (*state* alice documents note))',
-    'set!': '(path (*state* alice documents note))',
+    retrieve: '(path (-1 *state* alice key))',
+    'put!': '(path (*state* alice counter))',
+    'use!': '(path (*state* alice counter))',
+    'copy!': '(source (*state* alice documents source)) (path (*state* alice documents copy))',
     'pin!': '(path (-1 *state* alice important-data))',
     'unpin!': '(path (-1 *state* alice old-data))',
-    'resolve-batch': '(paths ((-1 *state* alice key)',
-    'get-batch': '(paths ((*state* alice one) (*state* alice missing)))',
-    'trace-batch': '(index 0) (paths ((*state* alice one) (*state* alice two)))',
+    'retrieve-batch': '(paths ((-1 *state* alice key)',
     'pin-batch!': '(paths ((-1 *state* alice important-data)',
     'unpin-batch!': '(paths ((-1 *state* alice old-data)',
-    'set-batch!': '(paths ((*state* alice one) (*state* alice two)))',
+    'put-batch!': '(paths ((*state* alice a) (*state* alice b)))',
+    'use-batch!': '(paths ((*state* alice counter) (*state* alice counter)))',
   };
   Object.entries(ownerPaths).forEach(([name, path]) => {
     expect(catalog[name].example).toContain(path);
@@ -84,7 +85,22 @@ it('documents exact authorization add/delete symmetry and distinct windows', () 
   const authorize = catalog['authorize!'].example;
   const deauthorize = catalog['deauthorize!'].example;
   expect(authorize).toContain('(key-index (-32 -1))');
-  expect(authorize).toContain('(resolve (0 -1))');
+  expect(authorize).toContain('(retrieve (0 -1))');
   expect(deauthorize).toBe(authorize.replace('(function authorize!)', '(function deauthorize!)'));
   expect(catalog['authorize!'].description).toMatch(/local\/public rules omit key-index/i);
+});
+
+
+it('presents exact copy and local administrative retention examples', () => {
+  expect(catalog['copy!'].example).toContain('(function copy!)');
+  expect(catalog['copy!'].example).toContain('(expected #f) (expression? #t)');
+  expect(catalog['truncate!'].description).toMatch(/destructive and irreversible/i);
+  expect(catalog['truncate!'].description).toMatch(/Self-local/i);
+  expect(catalog['truncate!'].permission).toBe('admin');
+  expect(catalog['truncate!'].example).toContain('(identity (*state* admin))');
+  expect(catalog['prune!'].description).toMatch(/temporary and permanent Ledger retention/i);
+  expect(catalog['prune!'].description).toMatch(/preserving Stage/i);
+  expect(catalog['prune-batch!'].description).toMatch(/atomically removes the union/i);
+  expect(catalog['prune!'].permission).toBe('admin');
+  expect(catalog['prune-batch!'].permission).toBe('admin');
 });

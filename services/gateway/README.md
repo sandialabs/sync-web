@@ -74,7 +74,7 @@ npm run start
 
 - Versioned base: `/api/v1`
 - Function-final aliases:
-  - `POST /api/v1/general/set` -> journal `set!`
+  - `POST /api/v1/general/put` -> journal `put!`
   - `POST /api/v1/general/pin` -> journal `pin!`
   - etc.
 - Public `GET` endpoints:
@@ -102,7 +102,7 @@ Gateway supports both JSON and Scheme request bodies for `POST` operation endpoi
 { ... }
 ```
 
-- Use keyword-style argument object fields directly (for example `{ "path": ... }` for staged reads or `{ "path": ..., "pinned?": true, "proof?": true }` for committed/indexed `resolve` calls). `set` and `set-batch` accept optional `expected` values: every expected staged value must match or the operation returns `false` without writing; conditional writes require both read and write authorization.
+- Use keyword-style argument object fields directly (for example `{ "path": ... }` for staged reads or `{ "path": ..., "pinned?": true, "proof?": true }` for committed/indexed `retrieve` calls). `set`, `set-batch`, `copy`, and `copy-batch` accept optional target `expected` values: every expected staged value must match or the operation returns `false` without writing. Copy operations use `source`/`sources` plus target `path`/`paths`, preserve raw file or directory content, and require source read plus target write authorization; conditional operations additionally require target read authorization.
 
 - General routes are forwarded to the raw journal interface transport endpoint: `/interface` with `Content-Type: application/json`
 
@@ -120,6 +120,7 @@ Example body:
 Gateway composes the full Scheme call expression and forwards to the raw journal transport endpoint:
 
 - `/interface` with `Content-Type: application/scheme`
+- `application/scheme` requests to only `put`, `use`, and `retrieve` may carry `X-Sync-Web-Federation-Route`. Its value is exactly one nonempty JSON array of alias strings and maps to the existing `$federation.route` invocation semantics. Alias strings are exact Scheme symbols; cooperating applications percent-encode unsafe user-facing names before placing them here. The same s7 reader projection requires one exact collection of unique operation fields before these values are wrapped. Empty arrays, malformed or repeated headers, wrong content types, other operations, and ambiguous argument pairs are rejected. The header carries no credentials or history indexes.
 
 ### Root Route Forwarding
 
@@ -170,22 +171,33 @@ Included metrics:
 - `GET /api/v1/tokens` — list tokens for the current user (id + description + created_at)
 - `DELETE /api/v1/tokens/:id` — revoke a token by id
 
+### Standalone Raw
+
+- `GET /api/v1/raw?selection=TOKEN` — session-authenticated exact-byte projection for an Explorer-generated canonical Stage or concrete Ledger selection.
+
+Raw URLs contain only a bounded typed content identifier. The 4,096-character token cap leaves the complete request line below the Router's HTTP and TLS single-buffer boundary; Explorer suppresses links that exceed the same token, payload, route, path, or segment limits. They carry no credential or capability, recheck existing Journal authorization on every request, and never create a Stage snapshot or implicit pin. Valid UTF-8 is served as inert plain text, allowlisted raster images may display inline, and unproven media or unknown binary downloads with strict `nosniff`, sandbox CSP, no-referrer, and no-store headers.
+
 ### General
 
 - `GET /api/v1/general/size` (public)
 - `GET /api/v1/general/info` (public)
-- `POST /api/v1/general/get`
-- `POST /api/v1/general/get-batch`
-- `POST /api/v1/general/set`
+- `POST /api/v1/general/use`
+- `POST /api/v1/general/use-batch!`
+- `POST /api/v1/general/put`
+- `POST /api/v1/general/copy`
+- `POST /api/v1/general/copy-batch`
+- `POST /api/v1/general/truncate`
 - `POST /api/v1/general/pin`
 - `POST /api/v1/general/pin-batch`
 - `POST /api/v1/general/unpin`
 - `POST /api/v1/general/unpin-batch`
-- `POST /api/v1/general/call`
-- `POST /api/v1/general/set-batch`
+- `POST /api/v1/general/prune`
+- `POST /api/v1/general/prune-batch`
+- `POST /api/v1/general/run`
+- `POST /api/v1/general/put-batch`
 - `POST /api/v1/general/synchronize!` (public reciprocal exchange)
-- `POST /api/v1/general/resolve`
-- `POST /api/v1/general/resolve-batch`
+- `POST /api/v1/general/retrieve`
+- `POST /api/v1/general/retrieve-batch`
 - `POST /api/v1/general/trace` (public)
 - `POST /api/v1/general/trace-batch` (public)
 - `POST /api/v1/general/route` (public)
@@ -202,19 +214,23 @@ Included metrics:
 
 Admin-oriented general endpoints:
 
-- `admins` calls `*admins-get*` and returns local administrator principal paths.
-- `set-admins` calls `*admins-set*` and replaces that list wholesale; entries must be `[*state*, <name>]` principals.
+- `admins` calls `*admins-get*` and returns `null` when empty or a username-keyed object such as `{"alice":["*state*","alice"]}`.
+- `set-admins` calls `*admins-set*` and atomically replaces the list from that username-keyed object; every exact key must match its local `[*state*, <name>]` principal value.
 - `set-window` calls `*window-set*` and updates the public ledger retention window.
+- `truncate` irreversibly releases locally available committed history through an inclusive index. It is limited to Root/configured local Interface administrators, preserves logical chain identity and future appends, and cannot recall peer/client/backup copies.
+- `prune` and `prune-batch` remove selected canonical committed leaves/directories from both temporary and permanent retention as Root/configured local Interface administrators. A batch installs both complete retained-field candidates or neither; Stage and history identity remain unchanged. These operations make no secure-erasure claim.
 - `bridge` creates a reciprocal relationship from `name`, `interface`, and `remote-name`.
 - `update-config` manages explicit ledger configuration such as `(public bridge-accept)` and `(private bridge-preapproval <name>)`.
-- Authorization routes are Self-local. `user` is the owner's local `[*state*, USER]` namespace and `rule.path` is owner-relative. A remote exact bridge principal requires a terminal authentication `key-index` such as `[-32, -1]`; exact local/public principals omit it. Resolve is independent and uses `true`, `false`, or a document-history range such as `[0, -1]`. The complete stored rule must be sent unchanged to `deauthorize`.
-- `call` asks Interface to load the current staged Scheme procedure from `path`, evaluate it outside `sync-let` in an Interface-owned masked environment, and apply it to an inherited authenticated journal capability followed by the explicit `arguments` list. Invocation is limited to configured Interface administrators/root; namespace ownership and Authorization rules cannot grant it, and federated invocation is rejected.
-- Staged JSON `get`, `set`, `get-batch`, and `set-batch` calls accept `$federation: { route: [<aliases>] }`; one dedicated batch uses one exact working route and signs its complete ordered arguments. Committed `resolve`, `pin`, and `unpin`, including their batch forms, use canonical full paths containing the origin index and each alias/index hop; one resolution batch may span multiple route/history groups. Interface preserves result order, verifies one compact terminal proof per compatible group, and never returns those internal proofs from `resolve-batch`. Optional `pinned?` status is checked independently for each origin-relative path. Pin/unpin and all administration remain local mutations at the origin journal; `pin-batch!` fetches every remote proof before its one atomic retention mutation. Batch calls accept at most 1,024 paths; existing transport body, response, and timeout bounds still apply.
+- Authorization routes are Self-local. `user` is the owner's local `[*state*, USER]` namespace and `rule.path` is owner-relative. A remote exact bridge principal requires a terminal authentication `key-index` such as `[-32, -1]`; exact local/public principals omit it. Retrieve is independent and uses `true`, `false`, or a document-history range such as `[0, -1]`. The complete stored rule must be sent unchanged to `deauthorize`.
+- `call` asks Interface to load the current staged Scheme procedure from `path`, evaluate it outside `sync-let` in an Interface-owned masked environment, and apply it to an inherited authenticated journal capability followed by the explicit `arguments` list. Root/configured local administrators retain default access; authenticated local and federated principals require an independent path-scoped `run!` rule. Namespace ownership and blank read-only `use!` do not imply execution.
+- Staged JSON blank read-only `use!`, `set`, `use-batch!`, `set-batch`, and `call` calls accept `$federation: { route: [<aliases>] }`; one dedicated batch uses one exact working route and signs its complete ordered arguments. `retrieve` and `retrieve-batch` also accept that same route to select one terminal responder. Their committed paths are interpreted locally at the responder and succeed only from its permanent retention; a trailing bridge alias returns its structural Chain inventory, an exact following integer selects a payload, and continued traversal implies `-1`. No provider search or outward history field exists. Canonical committed paths without `$federation` retain ordinary grouped resolution. Interface preserves result order and verified proofs. Optional `pinned?` remains an origin-local status report and is forced false on the signed wire. Pin/unpin and all administration remain local mutations at the origin journal; `pin-batch!` fetches every remote proof before its one atomic retention mutation. Batch calls accept at most 1,024 paths; existing transport body, response, and timeout bounds still apply.
 
-Dedicated batch routes preserve duplicates and request order. Missing content is returned as the Journal `(nothing)` sentinel. `set` and `set-batch` distinguish an omitted `expected` field from explicit `false`/`#f`; batch expectations compare against one snapshot, cardinalities must match, and a conflict returns `false` without a transition. Conditional writes require both read and write authority. Empty data/retention batches are identity operations, while `trace-batch` needs at least one same-anchor path. There is no arbitrary `/general/batch` or `/general/copy` route.
+Dedicated batch routes preserve duplicates and request order. Missing content is returned as the Journal `(nothing)` sentinel. `set` and `set-batch` distinguish an omitted `expected` field from explicit `false`/`#f`; batch expectations compare against one snapshot, cardinalities must match, and a conflict returns `false` without a transition. Conditional writes require both read and write authority. Empty data/retention batches are identity operations, including `prune-batch`; duplicate and overlapping prune paths equal their union, while `trace-batch` needs at least one same-anchor path. There is no arbitrary mixed `/general/batch` route.
+
+`retrieve` and `retrieve-batch` accept optional boolean `index?`. With `true`, every successful result includes an `indexes` array containing the absolute origin and per-hop indexes selected for the request's integer selectors. Scalar raw content is wrapped under `content`; each batch result carries its own indexes while retaining the original path, order, and duplicates. Absent or false preserves the previous response shape exactly. This reports committed read selection only: it does not add a committed index to staged writes, wait for commits, or change proof bytes.
 
 ```json
-POST /api/v1/general/set-batch
+POST /api/v1/general/put-batch
 {
   "paths": [["*state*", "alice", "one"], ["*state*", "alice", "two"]],
   "values": ["new-one", "new-two"],
@@ -265,9 +281,10 @@ Authorization add/delete JSON rule (use the identical rule for both operations):
     "principal": ["peer-a", "*state*", "bob"],
     "key-index": [-32, -1],
     "path": ["docs"],
-    "get": true,
-    "set!": false,
-    "resolve": [0, -1]
+    "put!": false,
+    "use!": {"read-only?": true},
+    "run!": false,
+    "retrieve": [0, -1]
   }
 }
 ```
@@ -275,35 +292,34 @@ Authorization add/delete JSON rule (use the identical rule for both operations):
 Restricted JSON call:
 
 ```bash
-curl -X POST http://127.0.0.1:8180/api/v1/general/get \
+curl -X POST http://127.0.0.1:8180/api/v1/general/use \
   -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: application/json" \
-  -d '{"path":["*state*","docs","article","hash"]}'
+  -d '{"path":["*state*","docs","article","hash"],"read-only?":true}'
 ```
 
-Federated committed read (Alice → Carol → Bob):
+Retained committed read from one explicitly selected responder:
 
 ```bash
-curl -X POST http://127.0.0.1:8180/api/v1/general/resolve \
+curl -X POST http://127.0.0.1:8180/api/v1/general/retrieve \
   -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: application/json" \
   -d '{
-    "path": [7,"*state*","bob","shared","message"],
+    "path": [12,"archive",7,"*state*","bob","shared","message"],
     "pinned?": true,
     "proof?": true,
     "$federation": {
-      "route": ["carol","bob"],
-      "history": [-1,4,7]
+      "route": ["retention-provider"]
     }
   }'
 ```
 
-The returned proof is verified by the origin. To retain remote content, send that proof to the local `pin` endpoint with the full origin-relative historical path and no `$federation` context.
+The origin verifies the returned proof against `retention-provider`; that responder must already hold the exact `archive` path in `perm` and never contacts the attributed source. `pinned?` reports only whether the requester also retained the returned path locally. To retain a new remote proof at the requester, send it to the local `pin` endpoint with no `$federation` context.
 
 Restricted Scheme call:
 
 ```bash
-curl -X POST http://127.0.0.1:8180/api/v1/general/get \
+curl -X POST http://127.0.0.1:8180/api/v1/general/use \
   -H "Authorization: Bearer sync-<uuid>-<key-id>-0-<secret>" \
   -H "Content-Type: text/plain" \
   -d '((path (*state* docs article hash)))'

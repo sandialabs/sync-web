@@ -53,7 +53,7 @@ export const WorkbenchHelpModal: React.FC<WorkbenchHelpModalProps> = ({ onClose 
               <li><strong>API:</strong> Browse the verified current journal operations with templates and examples</li>
               <li><strong>Anon:</strong> Calls that need no caller identity</li>
               <li><strong>User:</strong> Authenticated operations available under ownership or explicit authorization</li>
-              <li><strong>Admin:</strong> Local configured Interface-administrator operations, including <code>call!</code></li>
+              <li><strong>Admin:</strong> Local configured Interface-administrator operations, including <code>run!</code></li>
               <li><strong>Root:</strong> Separate root-plane capability operations</li>
               <li>User/Admin examples include explicit local identity; omitted identity denotes the root journal caller.</li>
               <li><strong>Functions:</strong> Browse and search available Scheme functions</li>

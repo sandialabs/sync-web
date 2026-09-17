@@ -6,7 +6,8 @@ import {
   AdminBridge,
   AdminConfig,
   JournalResponse, 
-  JournalPath, 
+  JournalPath,
+  JournalPathSegment,
   PeerInfo,
   SchemeString,
   DirectoryResult,
@@ -15,12 +16,31 @@ import {
   AuthorizationRule,
   FederationContext,
 } from '../types';
+import { pathSegmentIdentity } from '../utils/pathUtils';
+import { decodeSafeName, encodeSafeName } from '../utils/nameCodec';
+import { rawSelectionTokenWithinLimit } from '../utils/rawUrl';
 
 export interface GatewayChangeEvent {
   id?: number;
   operation: string;
   path?: JournalPath;
   time?: string;
+}
+
+export type PutStorageMode = 'string' | 'bytes' | 'expression' | 'object';
+
+export interface ResourcePutInput {
+  mode: PutStorageMode;
+  textValue?: string;
+  schemeValue?: string;
+}
+
+export interface ObjectInvocationResult {
+  operation: 'use!' | 'retrieve';
+  context: FederationContext;
+  path: JournalPath;
+  readOnly: boolean;
+  result: unknown;
 }
 
 interface GatewayErrorPayload {
@@ -138,8 +158,46 @@ export class JournalService {
     return typeof extracted === 'string' ? extracted : JSON.stringify(extracted, null, 2);
   }
 
+  private static asciiJson(value: unknown): string {
+    const json = JSON.stringify(value);
+    let encoded = '';
+    for (let index = 0; index < json.length; index += 1) {
+      const code = json.charCodeAt(index);
+      encoded += code > 0x7e
+        ? `\\u${code.toString(16).padStart(4, '0')}`
+        : json[index];
+    }
+    return encoded;
+  }
+
+  private static escapeSchemeString(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  static pathToScheme(path: JournalPath): string {
+    const segments = path.map((segment) => {
+      if (typeof segment === 'number') return String(segment);
+      if (typeof segment === 'string') {
+        if (!JournalService.isR7RSIdentifier(segment)) {
+          throw new Error(`Path segment is not a Scheme identifier: ${segment}`);
+        }
+        return segment;
+      }
+      return `"${JournalService.escapeSchemeString(segment['*type/string*'])}"`;
+    });
+    return `(${segments.join(' ')})`;
+  }
+
   static isReservedStateSegment(value: string): boolean {
     return value.startsWith('*') && value.endsWith('*');
+  }
+
+  private static isReservedStatePathSegment(value: JournalPathSegment | undefined): boolean {
+    return typeof value === 'string' && JournalService.isReservedStateSegment(value);
+  }
+
+  static pathSegmentIdentity(value: JournalPathSegment): string {
+    return pathSegmentIdentity(value);
   }
 
   static isIndexError(error: unknown): boolean {
@@ -148,21 +206,11 @@ export class JournalService {
   }
 
   static isSnapshotUnavailable(error: unknown): boolean {
-    if (JournalService.isIndexError(error)) {
-      return true;
-    }
-    if (typeof error !== 'object' || error === null) {
+    if (typeof error !== 'object' || error === null || !('code' in error)) {
       return false;
     }
-    const value = error as { code?: unknown; message?: unknown };
-    if (value.code !== 'bridge-error' || typeof value.message !== 'string') {
-      return false;
-    }
-    const prefix = `${value.code}: `;
-    const message = value.message.startsWith(prefix)
-      ? value.message.slice(prefix.length)
-      : value.message;
-    return message.startsWith('Bridge is not committed at the selected local index:');
+    const code = (error as { code?: unknown }).code;
+    return code === 'index-error' || code === 'bridge-index-error';
   }
 
   static isR7RSIdentifier(value: string): boolean {
@@ -181,35 +229,11 @@ export class JournalService {
   }
 
   static encodePathSegment(value: string): string {
-    if (!value) {
-      return value;
-    }
-    if (JournalService.isR7RSIdentifier(value)) {
-      return value.replace(/%/g, '%25');
-    }
-    let out = '';
-    const initial = /^[A-Za-z!$&*/:<=>?^_~]$/;
-    const subsequent = /^[A-Za-z!$&*/:<=>?^_~0-9+\-.@]$/;
-    Array.from(value).forEach((char, index) => {
-      if ((index === 0 ? initial : subsequent).test(char)) {
-        out += char;
-      } else if (char.charCodeAt(0) < 128) {
-        out += `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
-      } else {
-        out += encodeURIComponent(char).replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
-      }
-    });
-    return out;
+    return encodeSafeName(value);
   }
 
   static decodePathSegment(value: string): string {
-    return value.replace(/(?:%[0-9a-fA-F]{2})+/g, (escape) => {
-      try {
-        return decodeURIComponent(escape);
-      } catch {
-        return escape;
-      }
-    });
+    return decodeSafeName(value);
   }
 
   /**
@@ -263,63 +287,96 @@ export class JournalService {
     }
 
     const normalizeType = (value: unknown): DirectoryEntryType => {
-      if (value === 'directory' || value === 'value' || value === 'unknown') {
+      if (value === 'directory' || value === 'object' || value === 'value' || value === 'unknown') {
         return value;
       }
       return 'unknown';
     };
 
-    const normalizeSegment = (value: unknown): { name: string; pathSegment: string } | null => {
-      const { value: extracted } = JournalService.extractSchemeValue(value);
-      if (typeof extracted !== 'string') {
-        return null;
+    const normalizeSegment = (value: unknown): {
+      name: string;
+      pathSegment: JournalPathSegment;
+      keyType: NonNullable<DirectoryEntry['keyType']>;
+    } | null => {
+      if (typeof value === 'number' && Number.isInteger(value)) {
+        return { name: String(value), pathSegment: value, keyType: 'integer' };
       }
-      return {
-        name: JournalService.decodePathSegment(extracted),
-        pathSegment: extracted,
-      };
+      if (typeof value === 'string') {
+        return {
+          name: JournalService.decodePathSegment(value),
+          pathSegment: value,
+          keyType: 'symbol',
+        };
+      }
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const wrapped = (value as Record<string, unknown>)['*type/string*'];
+        if (typeof wrapped === 'string') {
+          return { name: wrapped, pathSegment: { '*type/string*': wrapped }, keyType: 'string' };
+        }
+      }
+      return null;
     };
 
     const normalizeArrayEntry = (item: unknown): DirectoryEntry | null => {
       if (Array.isArray(item) && item.length >= 2) {
         const segment = normalizeSegment(item[0]);
-        return segment ? {
-          name: segment.name,
-          pathSegment: segment.pathSegment,
-          type: normalizeType(item[1]),
-        } : null;
+        return segment ? { ...segment, type: normalizeType(item[1]) } : null;
       }
       const segment = normalizeSegment(item);
-      return segment ? {
-        name: segment.name,
-        pathSegment: segment.pathSegment,
-        type: 'unknown' as const,
-      } : null;
+      return segment ? { ...segment, type: 'unknown' as const } : null;
     };
 
+    let entries: DirectoryEntry[] | null = null;
     if (content[0] === 'directory') {
       if (content[1] && typeof content[1] === 'object' && !Array.isArray(content[1])) {
-        return Object.entries(content[1]).map(([name, type]) => ({
+        entries = Object.entries(content[1]).map(([name, type]) => ({
           name: JournalService.decodePathSegment(name),
           pathSegment: name,
+          keyType: 'symbol',
           type: normalizeType(type),
         }));
+      } else if (Array.isArray(content[1])) {
+        entries = content[1]
+          .map(normalizeArrayEntry)
+          .filter((entry): entry is DirectoryEntry => entry !== null);
       }
-      if (Array.isArray(content[1])) {
-        return content[1].map(normalizeArrayEntry).filter((entry): entry is DirectoryEntry => entry !== null);
-      }
+    } else if (Array.isArray(content[0])) {
+      entries = content[0]
+        .map(normalizeArrayEntry)
+        .filter((entry): entry is DirectoryEntry => entry !== null);
+    }
+    if (!entries) {
       return null;
     }
 
-    if (Array.isArray(content[0])) {
-      return content[0].map(normalizeArrayEntry).filter((entry): entry is DirectoryEntry => entry !== null);
-    }
-
-    return null;
+    entries = entries.filter((entry) => !JournalService.isReservedStatePathSegment(entry.pathSegment));
+    const nameCounts = new Map<string, number>();
+    entries.forEach((entry) => nameCounts.set(entry.name, (nameCounts.get(entry.name) ?? 0) + 1));
+    return entries.map((entry) => {
+      if (nameCounts.get(entry.name)! <= 1) {
+        return entry;
+      }
+      const name = entry.keyType === 'integer'
+        ? `${entry.name} [integer]`
+        : entry.keyType === 'string'
+          ? JSON.stringify(entry.name)
+          : entry.name;
+      return { ...entry, name };
+    });
   }
 
   private static isIndexedPath(path: JournalPath): boolean {
     return typeof path[0] === 'number';
+  }
+
+  private isRetainedProviderRead(path: JournalPath): boolean {
+    if (this.federation.route.length === 0 || !JournalService.isIndexedPath(path)) {
+      return false;
+    }
+    const firstResource = path[1];
+    return firstResource === '*bridge*'
+      || (typeof firstResource === 'string'
+        && !JournalService.isReservedStatePathSegment(firstResource));
   }
 
   private static getBridgeBlock(config: unknown): Record<string, unknown> | null {
@@ -367,7 +424,7 @@ export class JournalService {
         name,
         endpoint: JournalService.extractBridgeEndpoint(value),
         remoteName: JournalService.extractRemoteName(value),
-        initiation: initiation === 'remote' ? 'remote' : 'local',
+        ...(initiation === 'local' || initiation === 'remote' ? { initiation } : {}),
         ...(typeof bridge?.['last-index'] === 'number'
           ? { lastIndex: bridge['last-index'] as number } : {}),
         ...(typeof bridge?.['remote-index'] === 'number'
@@ -403,6 +460,12 @@ export class JournalService {
     return `${this.endpointBase}${suffix}`;
   }
 
+  rawUrl(selection: string): string | null {
+    return rawSelectionTokenWithinLimit(selection)
+      ? `${this.buildGatewayUrl('/raw')}?selection=${selection}`
+      : null;
+  }
+
   private parseGatewayError(status: number, payload: unknown): GatewayRequestError {
     const objectPayload =
       payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -427,21 +490,32 @@ export class JournalService {
     method: 'GET' | 'POST';
     path: string;
     args?: Record<string, any>;
+    schemeArgs?: string;
     federation?: 'working';
+    expectedErrorStatuses?: number[];
   }): Promise<T> {
-    const { method, path, args, federation } = input;
+    const { method, path, args, schemeArgs, federation, expectedErrorStatuses = [] } = input;
     const url = this.buildGatewayUrl(path);
     const headers: Record<string, string> = {};
     let body: string | undefined;
 
     if (method === 'POST') {
-      headers['Content-Type'] = 'application/json';
-      body = JSON.stringify({
-        ...(args ?? {}),
-        ...(federation && this.federation.route.length > 0
-          ? { $federation: { route: this.federation.route } }
-          : {}),
-      });
+      if (schemeArgs !== undefined) {
+        if (args !== undefined) throw new Error('A request cannot mix JSON and Scheme arguments');
+        headers['Content-Type'] = 'application/scheme';
+        if (federation && this.federation.route.length > 0) {
+          headers['X-Sync-Web-Federation-Route'] = JournalService.asciiJson(this.federation.route);
+        }
+        body = schemeArgs;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify({
+          ...(args ?? {}),
+          ...(federation && this.federation.route.length > 0
+            ? { $federation: { route: this.federation.route } }
+            : {}),
+        });
+      }
     }
 
     const controller = new AbortController();
@@ -468,11 +542,13 @@ export class JournalService {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error('Gateway request failed:', {
-          status: response.status,
-          statusText: response.statusText,
-          payload: parsed,
-        });
+        if (!expectedErrorStatuses.includes(response.status)) {
+          console.error('Gateway request failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            payload: parsed,
+          });
+        }
         throw this.parseGatewayError(response.status, parsed);
       }
       return parsed as T;
@@ -545,7 +621,13 @@ export class JournalService {
     const routed = await this.request<Record<string, unknown>>({
       method: 'POST',
       path: '/general/route',
-      args: { 'route-target': this.federation.route, index: -1 },
+      args: {
+        'route-target': this.federation.route,
+        ...(this.federation.historyIndexes
+          ? { 'history-indexes': this.federation.historyIndexes }
+          : {}),
+        index: -1,
+      },
     });
     const terminalIndex = routed?.['terminal-index'];
     if (typeof terminalIndex !== 'number') {
@@ -567,9 +649,9 @@ export class JournalService {
       method: 'POST',
       path: '/general/bridge',
       args: {
-        name: input.name,
+        name: encodeSafeName(input.name),
         interface: endpointStr,
-        'remote-name': input.remoteName || input.name,
+        'remote-name': encodeSafeName(input.remoteName || input.name),
       },
     });
   }
@@ -600,7 +682,7 @@ export class JournalService {
   async set(path: JournalPath, value: any): Promise<boolean> {
     return this.request<boolean>({
       method: 'POST',
-      path: '/general/set',
+      path: '/general/put',
       args: { path, value },
       federation: 'working',
     });
@@ -610,26 +692,123 @@ export class JournalService {
     return this.set(path, JournalService.textToByteVector(value));
   }
 
+  async putResource(path: JournalPath, input: ResourcePutInput): Promise<boolean> {
+    if (input.mode === 'string') {
+      return this.request<boolean>({
+        method: 'POST',
+        path: '/general/put',
+        args: {
+          path,
+          value: JournalService.textToByteVector(input.textValue ?? ''),
+          'expression?': false,
+          'object?': false,
+          expected: ['nothing'],
+        },
+        federation: 'working',
+      });
+    }
+
+    if (!input.schemeValue?.trim()) throw new Error('Scheme body is required');
+    const expression = input.mode !== 'bytes';
+    const object = input.mode === 'object';
+    const schemeArgs = `((path ${JournalService.pathToScheme(path)}) `
+      + `(value ${input.schemeValue}) (expression? ${expression ? '#t' : '#f'}) `
+      + `(object? ${object ? '#t' : '#f'}) (expected (nothing)))`;
+    const result = await this.request<unknown>({
+      method: 'POST',
+      path: '/general/put',
+      schemeArgs,
+      federation: 'working',
+    });
+    if (result === true || result === '#t') return true;
+    if (result === false || result === '#f') return false;
+    throw new Error('Gateway returned an invalid create result');
+  }
+
+  async probeObjectApi(input: {
+    path: JournalPath;
+    historical: boolean;
+  }): Promise<void> {
+    await this.request<unknown>({
+      method: 'POST',
+      path: input.historical ? '/general/retrieve' : '/general/use',
+      args: {
+        path: input.path,
+        method: '*api*',
+        arguments: [],
+        ...(input.historical
+          ? { 'pinned?': true, 'proof?': false }
+          : { 'read-only?': true }),
+        'expression?': true,
+      },
+      federation: 'working',
+      expectedErrorStatuses: [400],
+    });
+  }
+
+  async invokeObject(input: {
+    path: JournalPath;
+    method: string;
+    argumentsExpression: string;
+    readOnly: boolean;
+    historical: boolean;
+  }): Promise<ObjectInvocationResult> {
+    const blankCall = input.method === '';
+    if (!blankCall && !JournalService.isR7RSIdentifier(input.method)) {
+      throw new Error('Method must be one exact Scheme symbol');
+    }
+    if (!input.argumentsExpression.trim()) {
+      throw new Error('Arguments must be one complete Scheme list');
+    }
+    const operation = input.historical ? 'retrieve' : 'use!';
+    const schemeArgs = `((path ${JournalService.pathToScheme(input.path)}) `
+      + `${blankCall ? '' : `(method ${input.method}) (arguments ${input.argumentsExpression}) `}`
+      + `${input.historical ? '(pinned? #t) (proof? #f) ' : `(read-only? ${input.readOnly ? '#t' : '#f'}) `}`
+      + '(expression? #t))';
+    const result = await this.request<unknown>({
+      method: 'POST',
+      path: input.historical ? '/general/retrieve' : '/general/use',
+      schemeArgs,
+      federation: 'working',
+    });
+    return {
+      operation,
+      context: this.getFederationContext(),
+      path: [...input.path],
+      readOnly: input.historical || input.readOnly,
+      result,
+    };
+  }
+
   /**
    * Get a Tree-native value and optional Ledger proof/retention details.
    */
   async get(
     path: JournalPath,
-    options: { pinned?: boolean; proof?: boolean } = {},
+    options: { pinned?: boolean; proof?: boolean; selectedIndexes?: boolean } = {},
   ): Promise<JournalResponse> {
-    const { pinned = true, proof = true } = options;
+    const { pinned = true, proof = true, selectedIndexes = false } = options;
     const indexedPath = JournalService.isIndexedPath(path);
     if (indexedPath) {
-      return this.retryIndexRead(() => this.request<JournalResponse>({
+      const read = () => this.request<JournalResponse>({
         method: 'POST',
-        path: '/general/resolve',
-        args: { path, 'pinned?': pinned, 'proof?': proof },
-      }));
+        path: '/general/retrieve',
+        args: {
+          path,
+          'pinned?': pinned,
+          'proof?': proof,
+          ...(selectedIndexes ? { 'index?': true } : {}),
+        },
+        federation: 'working',
+      });
+      return selectedIndexes || this.isRetainedProviderRead(path)
+        ? read()
+        : this.retryIndexRead(read);
     }
     const raw = await this.request<unknown>({
       method: 'POST',
-      path: '/general/get',
-      args: { path },
+      path: '/general/use',
+      args: { path, 'read-only?': true },
       federation: 'working',
     });
     return { content: raw } as JournalResponse;
@@ -697,7 +876,44 @@ export class JournalService {
       ? response.content
       : response;
     return (JournalService.parseDirectoryEntries(content) ?? [])
-      .filter((entry) => !JournalService.isReservedStateSegment(entry.name));
+      .filter((entry) => !JournalService.isReservedStatePathSegment(entry.pathSegment));
+  }
+
+  async getChainInventory(path: JournalPath): Promise<{ indexes: number[]; complete: boolean }> {
+    const response = await this.get(path, { pinned: false, proof: false });
+    const content = response && typeof response === 'object' && !Array.isArray(response) && 'content' in response
+      ? response.content
+      : response;
+    if (!Array.isArray(content) || content.length !== 3 || content[0] !== 'chain'
+        || !Array.isArray(content[1]) || !content[1].every(Number.isInteger)
+        || typeof content[2] !== 'boolean') {
+      throw new Error('Journal did not return a structural Chain inventory');
+    }
+    return { indexes: content[1] as number[], complete: content[2] };
+  }
+
+  async verifyPinnedInventories(path: JournalPath): Promise<void> {
+    const stateIndex = path.indexOf('*state*');
+    if (stateIndex < 3 || typeof path[0] !== 'number') {
+      throw new Error('Pinned route path does not contain a bridge lineage');
+    }
+    let inventoryPath: JournalPath = [path[0], '*bridge*'];
+    let index = 1;
+    while (index < stateIndex) {
+      if (path[index] === '*bridge*') index += 1;
+      const alias = path[index];
+      const selectedIndex = path[index + 1];
+      if (typeof alias !== 'string' || typeof selectedIndex !== 'number') {
+        throw new Error('Pinned route path has an invalid bridge lineage');
+      }
+      inventoryPath = [...inventoryPath, alias];
+      const inventory = await this.getChainInventory(inventoryPath);
+      if (!inventory.indexes.includes(selectedIndex)) {
+        throw new Error(`Pinned bridge inventory does not contain index ${selectedIndex}`);
+      }
+      inventoryPath = [...inventoryPath, selectedIndex, '*bridge*'];
+      index += 2;
+    }
   }
 
   async createFile(parentPath: JournalPath, fileName: string): Promise<boolean> {
@@ -733,7 +949,7 @@ export class JournalService {
     const response = await this.get(path);
     const directoryEntries = JournalService.parseDirectoryEntries(response.content);
     if (directoryEntries) {
-      for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStateSegment(item.name))) {
+      for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStatePathSegment(item.pathSegment))) {
         await this.deleteStagePath(this.buildStateChildPathFromEntry(path, entry));
       }
       await this.delete(this.buildDirectoryMarkerPath(path));
@@ -779,7 +995,7 @@ export class JournalService {
 
     if (directoryEntries) {
       await this.set(this.buildDirectoryMarkerPath(targetPath), JournalService.textToByteVector(''));
-      for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStateSegment(item.name))) {
+      for (const entry of directoryEntries.filter((item) => !JournalService.isReservedStatePathSegment(item.pathSegment))) {
         await this.copyStagePath(
           this.buildStateChildPathFromEntry(sourcePath, entry),
           this.buildStateChildPathFromEntry(targetPath, entry),
@@ -797,8 +1013,8 @@ export class JournalService {
   async getBridges(federation?: 'working'): Promise<PeerInfo[]> {
     const directory = await this.request<unknown>({
       method: 'POST',
-      path: '/general/get',
-      args: { path: ['*bridge*'] },
+      path: '/general/use',
+      args: { path: ['*bridge*'], 'read-only?': true },
       federation,
     });
     return (JournalService.parseDirectoryEntries(directory) ?? []).map((entry) => ({
@@ -819,20 +1035,40 @@ export class JournalService {
     const admins = await this.request<unknown>({
       method: 'POST',
       path: '/general/admins',
+      expectedErrorStatuses: [400],
     });
-    if (!Array.isArray(admins)) {
+    if (admins === null) {
       return [];
     }
-    return admins
-      .map((admin) => (Array.isArray(admin) && admin[0] === '*state*' ? String(admin[1]) : String(admin)))
-      .sort((left, right) => left.localeCompare(right));
+    if (typeof admins !== 'object' || Array.isArray(admins)) {
+      throw new Error('Malformed Interface admin principals');
+    }
+    const principals = Object.entries(admins);
+    if (principals.length === 0
+        || !principals.every(([username, principal]) => (
+          Array.isArray(principal)
+          && principal.length === 2
+          && principal[0] === '*state*'
+          && typeof principal[1] === 'string'
+          && principal[1] === username
+        ))) {
+      throw new Error('Malformed Interface admin principals');
+    }
+    return principals.map(([username]) => username);
   }
 
   async setAdmins(admins: string[]): Promise<boolean> {
+    if (new Set(admins).size !== admins.length) {
+      throw new Error('Interface admin usernames must be unique');
+    }
     return this.request<boolean>({
       method: 'POST',
       path: '/general/set-admins',
-      args: { admins: admins.map((admin) => ['*state*', admin]) },
+      args: {
+        admins: Object.fromEntries(
+          admins.map((admin) => [admin, ['*state*', admin]]),
+        ),
+      },
     });
   }
 
@@ -858,7 +1094,9 @@ export class JournalService {
   private static parseAuthorizationRule(rule: unknown): AuthorizationRule | null {
     const principal = JournalService.ruleField(rule, 'principal');
     const path = JournalService.ruleField(rule, 'path');
-    const resolve = JournalService.ruleField(rule, 'resolve');
+    const retrieve = JournalService.ruleField(rule, 'retrieve');
+    const use = JournalService.ruleField(rule, 'use!');
+    const readOnly = JournalService.ruleField(use, 'read-only?');
     const keyIndex = JournalService.ruleField(rule, 'key-index');
     const exactRange = (value: unknown): [number, number] | null => (
       Array.isArray(value)
@@ -867,18 +1105,21 @@ export class JournalService {
         ? [value[0] as number, value[1] as number]
         : null
     );
-    if (!Array.isArray(principal) || !Array.isArray(path)) return null;
-    const resolveRange = exactRange(resolve);
+    const normalizedPath = path === null ? [] : path;
+    if (!Array.isArray(principal) || !Array.isArray(normalizedPath)) return null;
+    const retrieveRange = exactRange(retrieve);
     const authenticationRange = exactRange(keyIndex);
-    if (Array.isArray(resolve) && !resolveRange) return null;
+    if (Array.isArray(retrieve) && !retrieveRange) return null;
+    if (!(use === false || typeof readOnly === 'boolean')) return null;
     if (keyIndex !== undefined && !authenticationRange) return null;
     return {
       principal: principal as JournalPath,
       ...(authenticationRange ? { 'key-index': authenticationRange } : {}),
-      path: path as JournalPath,
-      get: JournalService.ruleField(rule, 'get') === true,
-      'set!': JournalService.ruleField(rule, 'set!') === true,
-      resolve: resolveRange ?? resolve === true,
+      path: normalizedPath as JournalPath,
+      'put!': JournalService.ruleField(rule, 'put!') === true,
+      'use!': use === false ? false : { 'read-only?': readOnly as boolean },
+      'run!': JournalService.ruleField(rule, 'run!') === true,
+      retrieve: retrieveRange ?? retrieve === true,
     };
   }
 
@@ -913,25 +1154,34 @@ export class JournalService {
   }
 
   async getAdminConfig(): Promise<AdminConfig> {
-    const [admins, config] = await Promise.all([
+    const [admins, ledgerConfig, bridgeConfig, bridgePreapprovals] = await Promise.all([
       this.getAdmins(),
       this.request<unknown>({
         method: 'POST',
         path: '/general/config',
       }),
+      this.request<unknown>({
+        method: 'POST',
+        path: '/general/config',
+        args: { path: ['private', 'bridge'] },
+      }),
+      this.request<unknown>({
+        method: 'POST',
+        path: '/general/config',
+        args: { path: ['private', 'bridge-preapproval'] },
+      }),
     ]);
 
-    const publicConfig = JournalService.getPublicBlock(config);
-    const privateConfig = JournalService.asRecord(JournalService.asRecord(config)?.private);
+    const publicConfig = JournalService.getPublicBlock(ledgerConfig);
     const bridgeAccept = JournalService.extractSchemeValue(publicConfig?.['bridge-accept']).value;
     return {
       admins,
-      bridges: JournalService.extractAdminBridges(config),
-      localName: JournalService.extractLocalName(config),
-      localEndpoint: JournalService.extractLocalEndpoint(config),
-      windowSize: JournalService.extractWindowSize(config),
+      bridges: JournalService.extractAdminBridges(bridgeConfig),
+      localName: JournalService.extractLocalName(ledgerConfig),
+      localEndpoint: JournalService.extractLocalEndpoint(ledgerConfig),
+      windowSize: JournalService.extractWindowSize(ledgerConfig),
       bridgeAccept: bridgeAccept === 'preapproved' ? 'preapproved' : 'auto',
-      bridgePreapprovals: JournalService.asRecord(privateConfig?.['bridge-preapproval']) ?? {},
+      bridgePreapprovals: JournalService.asRecord(bridgePreapprovals) ?? {},
     };
   }
 }

@@ -18,6 +18,12 @@ export interface ResolvedIdentity {
 const toUuidFormat = (hex: string): string =>
   `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 
+const hasCookie = (header: string, expectedName: string): boolean =>
+  header.split(";").some((part) => {
+    const separator = part.indexOf("=");
+    return separator >= 0 && part.slice(0, separator).trim() === expectedName;
+  });
+
 export const resolveSessionIdentity = async (
   request: FastifyRequest,
   journalSecret: string,
@@ -33,7 +39,7 @@ export const resolveSessionIdentity = async (
     }
   }
   const cookie = request.headers.cookie ?? "";
-  if (!cookie.includes("ory_kratos_session")) throw new UnauthorizedError();
+  if (!hasCookie(cookie, "ory_kratos_session")) throw new UnauthorizedError();
   try {
     const session = await kratos.whoami(cookie);
     return { journalSecret, identityId: session.identity.traits.username, kratosId: session.identity.id };
@@ -70,7 +76,7 @@ export const resolveIdentity = async (
   }
 
   const cookie = request.headers.cookie ?? "";
-  if (!cookie.includes("ory_kratos_session")) throw new UnauthorizedError();
+  if (!hasCookie(cookie, "ory_kratos_session")) throw new UnauthorizedError();
   try {
     const session = await kratos.whoami(cookie);
     return {

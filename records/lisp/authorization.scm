@@ -80,27 +80,32 @@
              "Malformed deauthorization envelope or selector: ~S"
              rule-or-selector))))
 
-  (define-method (authorized? self principal key-index path operation)
+  (define-method (authorized? self principal key-index path operation (arguments '()))
     ;; Classify a canonical request as direct, ancestor-admitted, or denied.
     (set! principal ((self '~normalize-principal) principal))
     (if (not (and (list? key-index) (assoc 'latest-index key-index)))
         (error 'authorization-error
                "Authorization context lacks latest-index: ~S" key-index))
     (let* ((request-operation operation)
-           (operation (if (eq? operation 'trace) 'resolve operation))
+           (operation (if (eq? operation 'trace) 'retrieve operation))
            (latest-index (cadr (assoc 'latest-index key-index)))
-           (args `((path ,path)))
+           (read-only?
+            (and (eq? operation 'use!)
+                 (assoc 'read-only? arguments)
+                 (not (not (cadr (assoc 'read-only? arguments))))))
+           (args `((path ,path) ,@arguments))
            (info ((self '~request-target) operation args latest-index))
            (owner (cadr (assoc 'owner info))))
       (cond
-       (((self '~bridge-path-request?) request-operation args)
-        'direct)
+       (((self '~bridge-path-request?) request-operation args) 'direct)
        ((and owner
-             (or (equal? principal owner)
+             (or (and (not (eq? operation 'run!))
+                      (equal? principal owner))
                  ((self '~rule-authorized?)
-                  owner principal info latest-index key-index)))
+                  owner principal info latest-index key-index read-only?)))
         'direct)
-       ((and (memq operation '(get resolve))
+       ((and (or (and (eq? operation 'use!) read-only?)
+                 (eq? operation 'retrieve))
              (or
               (and owner
                    (let loop ((rules ((self '~user-rules) owner)))
@@ -122,36 +127,42 @@
                                       ((self '~key-index-authorized?)
                                        rule key-index))
                                   (case operation
-                                    ((get) (cadr (assoc 'get rule)))
-                                    ((resolve)
-                                     ((self '~resolve-authorized?)
-                                      (cadr (assoc 'resolve rule))
+                                    ((use!)
+                                     ((self '~use-authorized?)
+                                      (cadr (assoc 'use! rule)) read-only?))
+                                    ((retrieve)
+                                     ((self '~retrieve-authorized?)
+                                      (cadr (assoc 'retrieve rule))
                                       index latest-index))
                                     (else #f))))
                            (loop (cdr rules))))))
               (and ((self '~state-root-request?) args)
                    ((self '~state-root-authorized?)
-                    principal operation args latest-index key-index))))
+                    principal operation args latest-index key-index
+                    read-only?))))
         'ancestor)
        (else #f))))
 
   (define-method (~state-root-request? self args)
-    ;; Return #t when a request addresses the user-namespace directory itself.
+    ;; Return #t when a request addresses a current or retained user-namespace directory.
     (let ((path-entry (assoc 'path args)))
       (and path-entry
-           (let ((path (cadr path-entry)))
-             (and (list? path)
-                  (equal? (if (and (pair? path) (integer? (car path))) (cdr path) path)
+           (let* ((path (cadr path-entry))
+                  (state-path (and (list? path)
+                                   (or ((self '~retention-state-path) path #t) path))))
+             (and state-path
+                  (equal? (if (and (pair? state-path) (integer? (car state-path)))
+                              (cdr state-path) state-path)
                           '(*state*)))))))
 
-  (define-method (~state-root-authorized? self principal operation args latest-index authentication-context)
-    ;; Admit namespace-root traversal when this principal owns or has a
-    ;; descendant grant beneath at least one user namespace. The returned
-    ;; directory remains unfiltered apart from reserved names; opening each
-    ;; user folder is authorized independently.
+  (define-method (~state-root-authorized? self principal operation args latest-index
+                                          authentication-context read-only?)
+    ;; Admit current or retained namespace-root traversal under ordinary grants.
     (let* ((path (cadr (assoc 'path args)))
-           (explicit-index (and (pair? path) (integer? (car path)) (car path)))
-           (index (and explicit-index ((self '~resolve-index) explicit-index latest-index))))
+           (state-path (or ((self '~retention-state-path) path #t) path))
+           (explicit-index
+            (and (pair? state-path) (integer? (car state-path)) (car state-path)))
+           (index (and explicit-index ((self '~retrieve-index) explicit-index latest-index))))
       (or ((self '~local-user-principal?) principal)
           (let loop-users ((policies ((self '~policies))))
             (and (pair? policies)
@@ -167,10 +178,12 @@
                                            ((self '~key-index-authorized?)
                                             rule authentication-context))
                                        (case operation
-                                         ((get) (cadr (assoc 'get rule)))
-                                         ((resolve)
-                                          ((self '~resolve-authorized?)
-                                           (cadr (assoc 'resolve rule)) index latest-index))
+                                         ((use!)
+                                          ((self '~use-authorized?)
+                                           (cadr (assoc 'use! rule)) read-only?))
+                                         ((retrieve)
+                                          ((self '~retrieve-authorized?)
+                                           (cadr (assoc 'retrieve rule)) index latest-index))
                                          (else #f))))
                                 (loop-rules (cdr rules)))))
                      (loop-users (cdr policies))))))))
@@ -184,9 +197,12 @@
     (set! (self '(1)) (expression->byte-vector policies)))
 
   (define-method (~user-rules self user)
-    ;; Return rules for a local user principal.
+    ;; Return canonical rules for a local user principal.
     (let ((entry (assoc user ((self '~policies)))))
-      (if entry (cadr entry) '())))
+      (if entry
+          (map (lambda (rule) ((self '~normalize-rule) rule #f))
+               (cadr entry))
+          '())))
 
   (define-method (~set-user-rules! self user rules)
     ;; Replace rules for a local user principal.
@@ -203,7 +219,7 @@
     ;; Validate and normalize a rule into canonical field order.
     (if (not (list? rule))
         (error 'authorization-error "Authorization rule must be an alist: ~S" rule))
-    (let ((allowed '(principal key-index path get set! resolve)))
+    (let ((allowed '(principal key-index path put! use! run! retrieve)))
       (let loop ((entries rule) (seen '()))
         (if (pair? entries)
             (let ((entry (car entries)))
@@ -221,12 +237,15 @@
     (let* ((principal ((self '~normalize-principal)
                        (cadr (assoc 'principal rule))))
            (path (cadr (assoc 'path rule)))
-           (get (if (assoc 'get rule) (cadr (assoc 'get rule)) #f))
-           (set! (if (assoc 'set! rule) (cadr (assoc 'set! rule)) #f))
-           (resolve (if (assoc 'resolve rule) (cadr (assoc 'resolve rule)) #f))
+           (put! (if (assoc 'put! rule) (cadr (assoc 'put! rule)) #f))
+           (use! (if (assoc 'use! rule) (cadr (assoc 'use! rule)) #f))
+           (run! (if (assoc 'run! rule) (cadr (assoc 'run! rule)) #f))
+           (retrieve (if (assoc 'retrieve rule) (cadr (assoc 'retrieve rule)) #f))
            (key-index (and (assoc 'key-index rule) (cadr (assoc 'key-index rule)))))
       (if (not ((self '~principal?) principal))
           (error 'authorization-error "Invalid authorization principal: ~S" principal))
+      (if (and (equal? principal '(*public*)) run!)
+          (error 'authorization-error "Public principals cannot receive run! authority"))
       (if (and (not (equal? principal '(*public*)))
                (not ((self '~local-user-principal?) principal))
                (not key-index))
@@ -237,20 +256,27 @@
       (for-each (lambda (entry)
                   (if (not (boolean? (cadr entry)))
                       (error 'authorization-error "Authorization flag must be boolean: ~S" entry)))
-                `((get ,get) (set! ,set!)))
-      (if (not ((self '~resolve-range?) resolve latest-index))
-          (error 'authorization-error "Invalid resolve authorization: ~S" resolve))
-      (if (and key-index (not ((self '~resolve-range?) key-index #f)))
+                `((put! ,put!) (run! ,run!)))
+      (if (not (or (not use!)
+                   (and (list? use!) (= (length use!) 1)
+                        (equal? (caar use!) 'read-only?)
+                        (boolean? (cadar use!)))))
+          (error 'authorization-error "Invalid qualified use! authorization: ~S" use!))
+      (if (not ((self '~retrieve-range?) retrieve latest-index))
+          (error 'authorization-error "Invalid retrieve authorization: ~S" retrieve))
+      (if (and key-index (not ((self '~retrieve-range?) key-index #f)))
           (error 'authorization-error "Invalid terminal authentication index authorization: ~S" key-index))
       `((principal ,principal)
         ,@(if key-index `((key-index ,key-index)) '())
         (path ,path)
-        (get ,get)
-        (set! ,set!)
-        (resolve ,resolve))))
+        (put! ,put!)
+        (use! ,use!)
+        (run! ,run!)
+        (retrieve ,retrieve))))
 
-  (define-method (~rule-authorized? self owner principal info latest-index authentication-context)
-    ;; Return #t if any stored rule authorizes the request target and signing-key window.
+  (define-method (~rule-authorized? self owner principal info latest-index
+                                    authentication-context read-only?)
+    ;; Return #t if a stored rule authorizes the qualified request.
     (let ((relative-path (cadr (assoc 'relative-path info)))
           (permission (cadr (assoc 'permission info)))
           (index (cadr (assoc 'index info))))
@@ -266,11 +292,24 @@
                         (or (equal? rule-principal '(*public*))
                             ((self '~key-index-authorized?) rule authentication-context))
                         (case permission
-                          ((get) (cadr (assoc 'get rule)))
-                          ((set!) (cadr (assoc 'set! rule)))
-                          ((resolve) ((self '~resolve-authorized?) (cadr (assoc 'resolve rule)) index latest-index))
+                          ((put!) (cadr (assoc 'put! rule)))
+                          ((use!)
+                           ((self '~use-authorized?)
+                            (cadr (assoc 'use! rule)) read-only?))
+                          ((run!)
+                           (and (not (equal? rule-principal '(*public*)))
+                                (cadr (assoc 'run! rule))))
+                          ((retrieve)
+                           ((self '~retrieve-authorized?)
+                            (cadr (assoc 'retrieve rule)) index latest-index))
                           (else #f))))
                  (loop (cdr rules)))))))
+
+  (define-method (~use-authorized? self permission read-only?)
+    ;; A full use grant implies read-only use; read-only does not imply mutation.
+    (and permission
+         (or read-only?
+             (not (cadr (assoc 'read-only? permission))))))
 
   (define-method (~key-index-authorized? self rule authentication-context)
     ;; Check which local committed head authenticated a remote principal.
@@ -280,8 +319,8 @@
               (latest-index (cadr (assoc 'latest-index authentication-context)))
               (authentication-index (cadr (assoc 'authentication-index authentication-context))))
           (and permission
-               (let ((start ((self '~resolve-index) (car permission) latest-index))
-                     (end ((self '~resolve-index) (cadr permission) latest-index)))
+               (let ((start ((self '~retrieve-index) (car permission) latest-index))
+                     (end ((self '~retrieve-index) (cadr permission) latest-index)))
                  (and (<= start authentication-index) (<= authentication-index end)))))))
 
   (define-method (~request-target self operation args latest-index)
@@ -289,16 +328,18 @@
     (let* ((path-entry (assoc 'path args))
            (raw-path (and path-entry (cadr path-entry))))
       (case operation
-        ((get set!)
+        ((put! use! run!)
          ((self '~path-target) raw-path operation #f latest-index))
         ((pin! unpin!)
          ((self '~path-target)
           ((self '~retention-state-path) raw-path) operation #f latest-index))
-        ((resolve)
-         ((self '~path-target) raw-path 'resolve #t latest-index))
+        ((retrieve)
+         ((self '~path-target)
+          (or ((self '~retention-state-path) raw-path #t) raw-path)
+          'retrieve #t latest-index))
         ((trace)
          (let ((index (and (assoc 'index args) (cadr (assoc 'index args)))))
-           ((self '~path-target) raw-path 'resolve index latest-index)))
+           ((self '~path-target) raw-path 'retrieve index latest-index)))
         (else '((owner #f))))))
 
   (define-method (~explicit-bridge-path self path)
@@ -320,7 +361,10 @@
 
   (define-method (~bridge-path-request? self operation args)
     ;; Expose only bridge directories, exact object boundaries, and crypto tails.
-    (and (memq operation '(get resolve trace))
+    (and (or (memq operation '(retrieve trace))
+             (and (eq? operation 'use!)
+                  (assoc 'read-only? args)
+                  (cadr (assoc 'read-only? args))))
          (let* ((raw (and (assoc 'path args) (cadr (assoc 'path args))))
                 (path (and (list? raw) ((self '~explicit-bridge-path) raw)))
                 (root (if (and (pair? path) (integer? (car path)))
@@ -333,29 +377,31 @@
   (define-method (~public-bridge-path? self path operation)
     (let loop ((path ((self '~explicit-bridge-path)
                       (if (and (pair? path) (integer? (car path))) (cdr path) path))))
-      (cond ((equal? path '(*bridge*)) (not (not (memq operation '(get resolve)))))
+      (cond ((equal? path '(*bridge*)) (not (not (memq operation '(use! retrieve)))))
             ((not (and (pair? path) (eq? (car path) '*bridge*)
                        (pair? (cdr path)) (symbol? (cadr path)))) #f)
             (else
              (let ((rest (cddr path)))
                (if (and (pair? rest) (integer? (car rest))) (set! rest (cdr rest)))
-               (cond ((null? rest) (eq? operation 'trace))
+               (cond ((null? rest) (not (not (memq operation '(retrieve trace)))))
                      ((eq? (car rest) '*bridge*) (loop rest))
                      ((eq? (car rest) '*crypto*)
-                      (not (not (memq operation '(get resolve trace)))))
+                      (not (not (memq operation '(use! retrieve trace)))))
                      (else #f)))))))
 
-  (define-method (~retention-state-path self path)
+  (define-method (~retention-state-path self path (indexed? #f))
     ;; Return the terminal state path from a local retained-history path.
     ;; A retained federated proof is addressed relative to Self through one or
     ;; more indexed bridge objects, but ownership belongs to its terminal
     ;; `*state*` path. Malformed or non-state retention paths remain ownerless.
-    (let loop ((rest ((self '~explicit-bridge-path) path)))
-      (cond ((and (pair? rest) (integer? (car rest))) (loop (cdr rest)))
+    (let loop ((rest ((self '~explicit-bridge-path) path)) (index #f))
+      (cond ((and (pair? rest) (integer? (car rest)))
+             (loop (cdr rest) (car rest)))
             ((and (pair? rest) (eq? (car rest) '*bridge*)
                   (pair? (cdr rest)) (symbol? (cadr rest)))
-             (loop (cddr rest)))
-            ((and (pair? rest) (eq? (car rest) '*state*)) rest)
+             (loop (cddr rest) index))
+            ((and (pair? rest) (eq? (car rest) '*state*))
+             (if (and indexed? index) (cons index rest) rest))
             (else #f))))
 
   (define-method (~path-target self raw-path permission index latest-index)
@@ -372,19 +418,19 @@
               `((owner (*state* ,(cadr path)))
                 (relative-path ,(cddr path))
                 (permission ,permission)
-                (index ,(and request-index ((self '~resolve-index) request-index latest-index))))))))
+                (index ,(and request-index ((self '~retrieve-index) request-index latest-index))))))))
 
-  (define-method (~resolve-authorized? self permission index latest-index)
-    ;; Return #t if resolve permission allows a normalized request index.
+  (define-method (~retrieve-authorized? self permission index latest-index)
+    ;; Return #t if retrieve permission allows a normalized request index.
     (cond ((not index) #f)
           ((eq? permission #t) #t)
           ((not permission) #f)
-          (else (let ((start ((self '~resolve-index) (car permission) latest-index))
-                      (end ((self '~resolve-index) (cadr permission) latest-index)))
+          (else (let ((start ((self '~retrieve-index) (car permission) latest-index))
+                      (end ((self '~retrieve-index) (cadr permission) latest-index)))
                   (and (<= start index) (<= index end))))))
 
-  (define-method (~resolve-range? self permission latest-index)
-    ;; Validate a resolve permission value.
+  (define-method (~retrieve-range? self permission latest-index)
+    ;; Validate a retrieve permission value.
     (cond ((boolean? permission) #t)
           ((not (and (list? permission)
                      (= (length permission) 2)
@@ -394,11 +440,11 @@
           ((not latest-index)
            (or (and (>= (car permission) 0) (< (cadr permission) 0))
                (<= (car permission) (cadr permission))))
-          (else (<= ((self '~resolve-index) (car permission) latest-index)
-                    ((self '~resolve-index) (cadr permission) latest-index)))))
+          (else (<= ((self '~retrieve-index) (car permission) latest-index)
+                    ((self '~retrieve-index) (cadr permission) latest-index)))))
 
-  (define-method (~resolve-index self index latest-index)
-    ;; Resolve an absolute or relative index against the current head index.
+  (define-method (~retrieve-index self index latest-index)
+    ;; Retrieve an absolute or relative index against the current head index.
     (if (< index 0) (+ latest-index 1 index) index))
 
   (define-method (~normalize-principal self principal)

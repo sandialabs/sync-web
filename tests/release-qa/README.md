@@ -4,21 +4,21 @@ This directory contains opt-in, process-isolated acceptance checks. These checks
 
 ## Current release holds
 
-The 1.5 candidate remains fresh-install-only. Existing or older state must fail before interpretation or rewrite; no migration, conversion, or production update is implied.
+The 1.6 candidate supports fresh installation plus the exact, explicit `1.5.0` to `1.6.0` update. The deployment wrapper requires the `1.5.0` marker and `JOURNAL_UPDATE=1`, advances the marker only after the atomic Interface transition succeeds, and fails closed for every other nonfresh state.
 
-Sync Web 1.5 intentionally defines no stored-execution meter, limit, budget, configuration, timeout, or meter-specific error/SSE contract because one cannot yet be enforced reliably across s7 and nested host work. The compensating public boundary is root/configured-local-admin-only `call!`; namespace ownership, Authorization rules, and remote principals cannot grant it.
+Sync Web 1.6 makes no deterministic stored-execution meter, limit, budget, configuration, timeout, or meter-specific error/SSE claim. `run!` has an independent path-scoped boolean Authorization permission for local non-admin and authenticated remote route principals; namespace ownership and blank read-only `use!` do not imply it. Root and configured local Interface administrators retain default access.
 
 Release acceptance also requires the process-isolated federation readiness oracle below. A route that has become ready must remain usable across ordinary committed steps and an unchanged process restart. Transport timeouts remain operational failures; deterministic loss of committed route material is a correctness failure.
 
 ## Sticky federation readiness
 
-`sticky_readiness.py` runs signed staged `get` and proof-bearing `resolve` requests across every direct and two-hop route in a generated four-node network. Qualification requires, simultaneously:
+`sticky_readiness.py` runs signed staged blank read-only `use!` and proof-bearing `retrieve` requests across every direct and two-hop route in a generated four-node network. Qualification requires, simultaneously:
 
 - 30 continuous seconds with no route or background-worker failure;
 - ten new activity cycles on every node;
 - three successful sweeps of every route;
 - unchanged Gateway and social-agent failure counters;
-- typed byte-vector `get` and resolve content, `pinned? == false`, root `n-1`, and a closed proof-reference graph (with implicit null `n-0`);
+- typed byte-vector blank read-only `use!` and retrieve content, `pinned? == false`, root `n-1`, and a closed proof-reference graph (with implicit null `n-0`);
 - at least 8 GiB available memory, no new OOM kill, and memory full PSI `avg10` no greater than 1.
 
 Pre-ready failures may retry. The first complete successful all-route sweep establishes readiness; any later route, proof-structure, worker-counter, or Gateway-counter failure is terminal and cannot be reset into a later pass. The proof check is structural transport validation, not a standalone cryptographic verifier.
@@ -51,7 +51,7 @@ Use a unique `COMPOSE_PROJECT_NAME` and port range when another QA stack exists.
 
 ## Fresh single-node journey
 
-The existing primary compose smoke can additionally exercise real registration, session-to-API-token exchange, administrator policy visibility, two nonadmin users, cross-user read/write/call/grant denials, staged program storage, owner denial, removed-call-grant rejection, configured-admin execution/readback, malformed/federated denial, Workbench help, OpenAPI, and the existing WebDAV workflow:
+The existing primary compose smoke can additionally exercise real registration, session-to-API-token exchange, administrator policy visibility, two nonadmin users, cross-user read/write/call/grant denials, staged program storage, owner default denial, explicit local `run!` grant/use/readback/revoke, configured-admin execution, malformed arguments, invalid federation-context rejection, Workbench help, OpenAPI, and the existing WebDAV workflow. Authenticated remote-route `run!` grant/revoke is covered separately by the Records network and Gateway suites; this single-node journey does not establish a remote bridge:
 
 ```bash
 LOCAL_COMPOSE_RELEASE_QA=1 \
@@ -70,22 +70,24 @@ python3 -m py_compile \
   tests/release-qa/sticky_readiness.py \
   tests/release-qa/single_node_journey.py \
   tests/release-qa/image_manifest.py
-sh -n tests/release-qa/run_sticky_readiness.sh tests/api/local-compose.sh
+sh -n tests/release-qa/run_sticky_readiness.sh tests/api/local-compose.sh \
+  tests/api/test-local-compose-services.sh
+tests/api/test-local-compose-services.sh
 ```
 
 ## Remaining acceptance matrix
 
 | Surface | First tranche | Remaining work |
 | --- | --- | --- |
-| Fresh install and seeded admin | Single-node compose journey | Explicit nonfresh-state rejection in the final image |
-| Identity and user authorization | Two registrations/tokens, cross-user read/write/call/grant denial, removed-call-grant rejection, configured-admin execution | Public/ancestor listing, expanded admin matrix, localized denial UI |
-| Stored `call!` | Owner/policy/remote denial, configured-admin execution/readback, malformed/local-only errors | Interrupted-request recovery and failed-partial-effect SSE observation |
-| Federation | All direct/two-hop staged reads and proof resolves | Negative principal/path matrix and bridge delete/re-establish workflow |
+| Fresh install, exact 1.5 update, and seeded admin | Single-node compose journey plus marker-gated migration/reopen probes | Unsupported-marker and failed-transition process evidence in the final image |
+| Identity and user authorization | Two registrations/tokens, cross-user default denial, independent run grant/revoke, configured-admin execution | Public/ancestor listing, expanded admin matrix, localized denial UI |
+| Stored `run!` | Single-node owner default denial, local grant/use/readback/revoke, configured-admin execution, and malformed/context errors; Records/Gateway remote grant/revoke and nested-caller checks | Interrupted-request recovery and failed-partial-effect SSE observation |
+| Federation | All direct/two-hop staged reads and proof retrieves | Negative principal/path matrix and bridge delete/re-establish workflow |
 | Restart | All four Journals with persisted RocksDB state | Gateway/identity restart and interrupted-request recovery |
-| Proof and history | Latest indexed proof resolve on every route | Explicit older indexes, pin/unpin persistence, retained-window edges |
+| Proof and history | Latest indexed proof retrieve on every route | Explicit older indexes, pin/unpin persistence, retained-window edges |
 | WebDAV | OPTIONS, auth denial, PUT/GET/list/MOVE/DELETE | Committed index files, COPY, directory errors, multi-user authorization |
 | Explorer | Route health and existing component/build suites | Browser visual matrix, remote breadcrumb denial localization, restart refresh |
-| Workbench | Route health and live `call!` help entry | Authenticated browser execution/error presentation |
+| Workbench | Route health and live `run!` help entry | Authenticated browser execution/error presentation |
 | TLS and soak | Not in this tranche | Only if the release owner reinstates the previously waived checks |
 
 Do not interpret a passing first tranche as production approval. Preserve exact commit, image, topology, and output hashes with the final release run.
