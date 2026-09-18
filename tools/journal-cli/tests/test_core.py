@@ -92,6 +92,36 @@ class CoreTests(unittest.TestCase):
         self.assertIn('(authentication ((credentials "private")))', expression)
         self.assertNotIn("(identity", expression)
 
+    def test_routed_path_strings_encode_as_symbols_without_changing_string_values(self):
+        expression = request_expression(
+            "put!",
+            {"path": ["*state*", "alice", "notes"], "value": "hello", "expression?": True},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(path (*state* alice notes))", expression)
+        self.assertIn('(value "hello")', expression)
+        self.assertNotIn('(path ("*state*"', expression)
+
+    def test_routed_batch_paths_encode_as_symbols(self):
+        expression = request_expression(
+            "retrieve-batch",
+            {"paths": [[-1, "*state*", "alice", "one"], [0, "*state*", "alice", "two"]]},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(paths ((-1 *state* alice one) (0 *state* alice two)))", expression)
+
+    def test_nested_resource_paths_encode_as_symbols(self):
+        expression = request_expression(
+            "put-batch!",
+            {"resources": [{"path": ["*state*", "alice", "one"], "value": "text"}]},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(path (*state* alice one))", expression)
+        self.assertIn('(value "text")', expression)
+
     def test_json_scheme_error_is_explicit_rejection_and_secret_is_redacted(self):
         client = JournalClient(self.config)
         with mock.patch.object(client, "_post", return_value=json.dumps([

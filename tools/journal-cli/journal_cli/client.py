@@ -90,6 +90,24 @@ def scheme_value(value: Any) -> str:
     raise InvalidRequest(f"unsupported Scheme value: {type(value).__name__}")
 
 
+def scheme_argument_value(value: Any, field: str | None = None) -> str:
+    if field == "path" and isinstance(value, list):
+        return "(" + " ".join(
+            scheme_symbol(item) if isinstance(item, str) else scheme_value(item)
+            for item in value
+        ) + ")"
+    if field == "paths" and isinstance(value, list):
+        return "(" + " ".join(scheme_argument_value(item, "path") for item in value) + ")"
+    if isinstance(value, dict):
+        return "(" + " ".join(
+            f"({scheme_symbol(key)} {scheme_argument_value(item, key)})"
+            for key, item in value.items()
+        ) + ")"
+    if isinstance(value, list):
+        return "(" + " ".join(scheme_argument_value(item) for item in value) + ")"
+    return scheme_value(value)
+
+
 def request_expression(function: str, arguments: dict[str, Any] | None, config: Config,
                        *, identity: str | None = None, route: list[str] | None = None) -> str:
     if function in LEGACY_OPERATIONS:
@@ -98,7 +116,7 @@ def request_expression(function: str, arguments: dict[str, Any] | None, config: 
         raise InvalidRequest(f"unsupported Sync Web 1.6 operation: {function}")
     fields = [f"(function {scheme_symbol(WIRE_OPERATIONS.get(function, function))})"]
     if arguments is not None:
-        fields.append(f"(arguments {scheme_value(arguments)})")
+        fields.append(f"(arguments {scheme_argument_value(arguments)})")
     credential = scheme_string(config.credential())
     if route:
         target = "(" + " ".join(scheme_symbol(item) for item in route) + ")"
