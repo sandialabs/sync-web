@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 
 use crate::{
@@ -43,7 +43,7 @@ impl AgentAdapter for OpenCodeAdapter {
         hint: ReadHint,
         emit: &mut dyn FnMut(GraphRecord) -> Result<()>,
     ) -> Result<()> {
-        for path in input_paths(roots, hint) {
+        for path in opencode_input_paths(roots, hint) {
             if path.is_dir()
                 && path.join("message.json").exists()
                 && path.join("part.json").exists()
@@ -51,19 +51,24 @@ impl AgentAdapter for OpenCodeAdapter {
                 for record in parse_export_dir(self.name(), &path)? {
                     emit(record)?;
                 }
-            } else if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("db")
-            {
+            } else if is_sqlite_database(&path) {
                 for record in parse_db(self.name(), &path)? {
                     emit(record)?;
                 }
             } else {
                 for file in collect_files(&[path])? {
-                    let records = if file.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                    let records = if is_sqlite_database(&file) {
+                        parse_db(self.name(), &file)?
+                    } else if sqlite_database_for_sidecar(&file).is_some() {
+                        continue;
+                    } else if file.extension().and_then(|ext| ext.to_str()) == Some("json") {
                         parse_combined_export_file(self.name(), &file)?.unwrap_or_else(|| {
                             parse_jsonl_file(self.name(), &file).unwrap_or_default()
                         })
-                    } else {
+                    } else if file.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
                         parse_jsonl_file(self.name(), &file)?
+                    } else {
+                        continue;
                     };
                     for record in records {
                         emit(record)?;
@@ -73,6 +78,29 @@ impl AgentAdapter for OpenCodeAdapter {
         }
         Ok(())
     }
+}
+
+fn opencode_input_paths(roots: &[PathBuf], hint: ReadHint) -> Vec<PathBuf> {
+    input_paths(roots, hint)
+        .into_iter()
+        .map(|path| sqlite_database_for_sidecar(&path).unwrap_or(path))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn is_sqlite_database(path: &Path) -> bool {
+    path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("db")
+}
+
+fn sqlite_database_for_sidecar(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let database_name = ["-wal", "-shm", "-journal"]
+        .iter()
+        .find_map(|suffix| name.strip_suffix(suffix))?;
+    let database = path.with_file_name(database_name);
+    (database.extension().and_then(|ext| ext.to_str()) == Some("db") && database.is_file())
+        .then_some(database)
 }
 
 fn parse_export_dir(adapter: &str, dir: &Path) -> Result<Vec<GraphRecord>> {
@@ -188,7 +216,11 @@ fn table_values<'a>(value: &'a Value, names: &[&str]) -> Option<&'a Vec<Value>> 
 }
 
 fn parse_db(adapter: &str, path: &Path) -> Result<Vec<GraphRecord>> {
-    let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("opening {} read-only", path.display()))?;
     let mut messages_stmt = conn.prepare(
         "select id, session_id, time_created, data from message order by session_id, time_created, id",
     )?;
@@ -486,5 +518,78 @@ fn tool_call_from_value(value: &Value) -> ToolCall {
             .cloned()
             .or_else(|| state.get("input").cloned()),
         metadata: json!({ "state": state }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::GraphNode;
+
+    use super::*;
+
+    #[test]
+    fn directory_and_wal_hints_read_committed_opencode_rows() -> Result<()> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "agent-recorder-opencode-wal-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("unrelated-cache.bin"), [0xff, 0xfe])?;
+        let database = dir.join("opencode.db");
+        let writer = Connection::open(&database)?;
+        writer.execute_batch(
+            r#"PRAGMA journal_mode=WAL;
+             PRAGMA wal_autocheckpoint=0;
+             CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT);
+             CREATE TABLE message (
+                 id TEXT PRIMARY KEY,
+                 session_id TEXT,
+                 time_created INTEGER,
+                 data TEXT
+             );
+             CREATE TABLE part (
+                 id TEXT PRIMARY KEY,
+                 message_id TEXT,
+                 time_created INTEGER,
+                 data TEXT
+             );
+             INSERT INTO session VALUES ('session-1', '/workspace/project');
+             INSERT INTO message VALUES (
+                 'message-1', 'session-1', 1000, '{"role":"user"}'
+             );
+             INSERT INTO part VALUES (
+                 'part-1', 'message-1', 1001, '{"type":"text","text":"from wal"}'
+             );"#,
+        )?;
+        let wal = dir.join("opencode.db-wal");
+        assert!(wal.exists());
+
+        let adapter = OpenCodeAdapter;
+        let mut from_directory = Vec::new();
+        adapter.read(&[dir.clone()], ReadHint::Full, &mut |record| {
+            from_directory.push(record);
+            Ok(())
+        })?;
+        assert!(contains_message(&from_directory, "from wal"));
+
+        let mut from_wal_hint = Vec::new();
+        adapter.read(&[dir.clone()], ReadHint::Paths(vec![wal]), &mut |record| {
+            from_wal_hint.push(record);
+            Ok(())
+        })?;
+        assert!(contains_message(&from_wal_hint, "from wal"));
+
+        drop(writer);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    fn contains_message(records: &[GraphRecord], content: &str) -> bool {
+        records.iter().any(|record| {
+            matches!(&record.node, GraphNode::Message(message) if message.content == content)
+        })
     }
 }

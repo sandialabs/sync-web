@@ -42,6 +42,18 @@ agent-recorder run \
 
 When `--recorder` is omitted, `import` and `run` print one normalized JSON record per line. `run` first baselines the current agent data and writes only records that appear after startup. Use `import` when you want a one-shot backfill of existing artifacts.
 
+For live OpenCode recording, target the complete OpenCode data directory rather than only `opencode.db`:
+
+```sh
+agent-recorder run \
+  --agent opencode \
+  --agent-data ~/.local/share/opencode \
+  --recorder file \
+  --recorder-data records.jsonl
+```
+
+The adapter discovers `.db` files in the directory, opens them read-only through SQLite, and therefore reads committed rows from sibling WAL files. SQLite `-wal`, `-shm`, and `-journal` files are treated as database sidecars rather than standalone transcripts.
+
 Read indexed records:
 
 ```sh
@@ -273,9 +285,11 @@ A real signed JSON-LD example is checked in at `examples/integrity-agent-record.
 
 The `Agent Recorder Binaries` GitHub Actions workflow builds downloadable `agent-recorder-*` binaries for Linux, Linux musl/Alpine, macOS, and Windows targets. Branch workflow artifacts can be downloaded for testing before a tagged release.
 
-Tagged releases use `agent-recorder-v*` tags, for example `agent-recorder-v0.1.1`. Ledger binary releases use separate `ledger-v*` tags so agent-recorder artifacts do not mix with ledger/journal release assets.
+Tagged releases use `agent-recorder-v*` tags, for example `agent-recorder-v0.1.2`. Ledger binary releases use separate `ledger-v*` tags so agent-recorder artifacts do not mix with ledger/journal release assets.
 
 ## Sync Web Backend
+
+The backend targets the Sync Web 1.6 clean-break resource API exclusively: Gateway calls use `/api/v1/general/put` and `/api/v1/general/use`, while direct Journal calls use `put!` and blank read-only `use!`. It does not fall back to the older `set` or `get` operations.
 
 Sync Web writes store readable JSON bytes at deterministic entry names such as `entry-000000000000`.
 

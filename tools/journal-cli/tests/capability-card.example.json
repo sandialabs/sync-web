@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "publisher": {
+    "identity": "rocky",
+    "journal": "rocky",
+    "owner": "rocky"
+  },
+  "mailbox": {
+    "protocolVersion": 1,
+    "maxMessageBytes": 65536
+  },
+  "platform": {
+    "syncPackage": "pi-agent-sync-1.5.0.2-1.fc44.x86_64",
+    "inboxPackage": "pi-agent-sync-inbox-0.3.0-1.fc44.x86_64"
+  },
+  "features": {
+    "hotConfigReload": true,
+    "structuredDoctor": true,
+    "federatedResolve": true,
+    "receiptStates": []
+  },
+  "updatedAt": "2026-08-11T08:29:00.000Z"
+}

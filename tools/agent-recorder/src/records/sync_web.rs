@@ -276,8 +276,8 @@ pub fn secret_from_literal_or_env(
 }
 
 fn gateway_operation_url(endpoint: &str, operation: &str) -> Result<String> {
-    let mut url = Url::parse(endpoint)
-        .with_context(|| format!("parsing Sync Web endpoint {endpoint}"))?;
+    let mut url =
+        Url::parse(endpoint).with_context(|| format!("parsing Sync Web endpoint {endpoint}"))?;
     let mut segments = url
         .path_segments()
         .ok_or_else(|| anyhow!("Sync Web endpoint must use a hierarchical URL"))?
@@ -288,7 +288,10 @@ fn gateway_operation_url(endpoint: &str, operation: &str) -> Result<String> {
         && segments[segments.len() - 4..segments.len() - 1] == ["api", "v1", "general"];
     if general {
         segments.push(operation);
-    } else if !operation_url {
+    } else if operation_url {
+        segments.pop();
+        segments.push(operation);
+    } else {
         segments.extend(["api", "v1", "general", operation]);
     }
     url.set_path(&format!("/{}", segments.join("/")));
@@ -355,12 +358,26 @@ mod tests {
             "http://localhost:8192/api/v1/general/use"
         );
         assert_eq!(
-            gateway_operation_url("http://localhost:8192/api/v1/general/put?next=/api/v1/general/use", "use")?,
-            "http://localhost:8192/api/v1/general/put?next=/api/v1/general/use"
+            gateway_operation_url(
+                "http://localhost:8192/api/v1/general/put?next=/api/v1/general/use",
+                "use"
+            )?,
+            "http://localhost:8192/api/v1/general/use?next=/api/v1/general/use"
         );
         assert_eq!(
-            gateway_operation_url("http://localhost:8192/prefix-api/v1/general/use#api/v1/general/put", "put")?,
+            gateway_operation_url(
+                "http://localhost:8192/prefix-api/v1/general/use#api/v1/general/put",
+                "put"
+            )?,
             "http://localhost:8192/prefix-api/v1/general/use/api/v1/general/put#api/v1/general/put"
+        );
+        assert_eq!(
+            gateway_operation_url("http://localhost:8192/api/v1/general/get", "use")?,
+            "http://localhost:8192/api/v1/general/use"
+        );
+        assert_eq!(
+            gateway_operation_url("http://localhost:8192/api/v1/general/set", "put")?,
+            "http://localhost:8192/api/v1/general/put"
         );
         Ok(())
     }

@@ -1,0 +1,53 @@
+name: Messenger Tool
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "tools/messenger/**"
+      - ".github/workflows/tools-messenger.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "tools/messenger/**"
+      - ".github/workflows/tools-messenger.yml"
+
+concurrency:
+  group: "messenger-tool-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run Messenger checks
+        working-directory: tools/messenger
+        run: npm run check
+      - name: Build Messenger image
+        run: docker build -t sync-web-messenger:ci tools/messenger
+      - name: Smoke Messenger image
+        run: |
+          set -euo pipefail
+          name=sync-web-messenger-ci
+          port=18280
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$name" --network host \
+            -e SYNC_GATEWAY_ORIGIN=http://127.0.0.1:18192 \
+            -e SYNC_GATEWAY_BROWSER_ORIGIN=http://localhost:18192 \
+            -e MESSENGER_PORT="$port" \
+            sync-web-messenger:ci
+          for attempt in $(seq 1 20); do
+            if curl -fsS -H "Host: localhost" "http://127.0.0.1:$port/healthz" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$name"
+          exit 1

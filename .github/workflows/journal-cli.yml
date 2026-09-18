@@ -1,0 +1,43 @@
+name: Journal CLI
+
+on:
+  push:
+    paths:
+      - 'tools/journal-cli/**'
+      - '.github/workflows/journal-cli.yml'
+  pull_request:
+    paths:
+      - 'tools/journal-cli/**'
+      - '.github/workflows/journal-cli.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        working-directory: tools/journal-cli
+        run: PYTHONDONTWRITEBYTECODE=1 python -m compileall -q journal_cli
+      - name: Test
+        working-directory: tools/journal-cli
+        run: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m unittest discover -s tests -v
+      - name: Install and smoke
+        run: |
+          python -m pip install ./tools/journal-cli
+          journal-cli --version
+          journal-cli --help
+      - name: Reject legacy live requests
+        run: |
+          if grep -RInE '_post\("(get|set!|get-batch|set-batch!|resolve|resolve-batch|call!)"|function (get|set!|get-batch|set-batch!|resolve|resolve-batch|call!)' tools/journal-cli/journal_cli; then
+            echo 'legacy operation found in live request construction' >&2
+            exit 1
+          fi
