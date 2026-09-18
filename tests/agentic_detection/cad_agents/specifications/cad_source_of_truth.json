@@ -1,0 +1,40 @@
+{
+  "kind": "structured_cad_spec",
+  "description": "Generate a simple bracket STEP model matching the provided requirements.",
+  "units": "mm",
+  "dimensions": {
+    "length": 100.0,
+    "width": 40.0,
+    "height": 12.0,
+    "thickness": 5.0,
+    "mounting_hole_diameter": 8.0,
+    "mounting_hole_spacing": 80.0,
+    "lightening_hole_count": 2,
+    "lightening_hole_diameter": 12.0,
+    "lightening_hole_spacing": 30.0
+  },
+  "constraints": [
+    {
+      "name": "mounting_hole_alignment",
+      "requirement": "Mounting holes must be aligned with bracket centerline.",
+      "tolerance_mm": 0.1
+    },
+    {
+      "name": "bolt_axis_alignment",
+      "requirement": "Bolt axis must be normal to the mounting face.",
+      "tolerance_degrees": 0.1
+    },
+    {
+      "name": "lightening_hole_layout",
+      "requirement": "The two lightening holes must be centered on the bracket centerline, equally spaced about the bracket center, and 30.0 mm apart center-to-center.",
+      "tolerance_mm": 0.1
+    }
+  ],
+  "tolerances": {
+    "linear_mm": 0.05,
+    "angular_degrees": 0.1
+  },
+  "materials": [],
+  "must_include": ["mounting_holes", "lightening_holes"],
+  "must_not_include": ["sharp_edges", "unfinished_surfaces"]
+}

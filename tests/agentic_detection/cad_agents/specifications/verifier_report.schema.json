@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verifier_report.schema.json",
+  "title": "CAD Agent Verification Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "generated_at",
+    "verifier",
+    "summary",
+    "artifact_inventory",
+    "verdicts"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "input_directory"],
+      "properties": {
+        "name": { "const": "verifier_agent" },
+        "input_directory": { "type": "string", "minLength": 1 }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall_status",
+        "agents_evaluated",
+        "compliant_agents",
+        "noncompliant_agents",
+        "inconclusive_agents",
+        "bad_faith_agents",
+        "finding_count"
+      ],
+      "properties": {
+        "overall_status": { "enum": ["PASS", "FAIL", "INCONCLUSIVE"] },
+        "agents_evaluated": { "type": "integer", "minimum": 0 },
+        "compliant_agents": { "type": "integer", "minimum": 0 },
+        "noncompliant_agents": { "type": "integer", "minimum": 0 },
+        "inconclusive_agents": { "type": "integer", "minimum": 0 },
+        "bad_faith_agents": { "type": "integer", "minimum": 0 },
+        "finding_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "artifact_inventory": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/agent_inventory" }
+    },
+    "verdicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/verdict" }
+    }
+  },
+  "$defs": {
+    "agent_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_name", "artifacts"],
+      "properties": {
+        "agent_name": { "type": "string", "minLength": 1 },
+        "artifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "type", "size_bytes", "sha256", "modified_at"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["STEP", "SESSION_LOG", "OTHER"] },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "modified_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "category", "message", "evidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^F-[0-9]{3}$" },
+        "severity": { "enum": ["INFO", "WARNING", "ERROR", "CRITICAL"] },
+        "category": {
+          "enum": [
+            "GEOMETRY",
+            "BAD_FAITH",
+            "LOG_INTEGRITY",
+            "INSTRUCTION_COMPLIANCE",
+            "VALIDATION",
+            "PROVENANCE",
+            "TEMPORAL_CORRELATION",
+            "MISSING_ARTIFACT",
+            "UNEXPECTED_ARTIFACT"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "location", "observation"],
+      "properties": {
+        "artifact_path": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "observation": { "type": "string", "minLength": 1 }
+      }
+    },
+    "bad_faith_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale"],
+      "properties": {
+        "status": { "enum": ["NOT_DETECTED", "SUSPECTED", "DETECTED", "INCONCLUSIVE"] },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    "webdav_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_directory", "retrieved_at", "complete"],
+      "properties": {
+        "source_directory": { "type": "string", "minLength": 1 },
+        "retrieved_at": { "type": ["string", "null"], "format": "date-time" },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "temporal_correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "pairs", "unpaired_artifacts"],
+      "properties": {
+        "status": { "enum": ["MATCHED", "PARTIAL", "UNAVAILABLE"] },
+        "pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step_path", "log_path", "timestamp"],
+            "properties": {
+              "step_path": { "type": "string", "minLength": 1 },
+              "log_path": { "type": "string", "minLength": 1 },
+              "timestamp": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "unpaired_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_name",
+        "status",
+        "confidence",
+        "bad_faith_assessment",
+        "findings",
+        "webdav_provenance",
+        "temporal_correlation"
+      ],
+      "properties": {
+        "agent_name": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["COMPLIANT", "NON_COMPLIANT", "INCONCLUSIVE"] },
+        "confidence": { "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "bad_faith_assessment": { "$ref": "#/$defs/bad_faith_assessment" },
+        "findings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/finding" }
+        },
+        "webdav_provenance": { "$ref": "#/$defs/webdav_provenance" },
+        "temporal_correlation": { "$ref": "#/$defs/temporal_correlation" }
+      }
+    }
+  }
+}
