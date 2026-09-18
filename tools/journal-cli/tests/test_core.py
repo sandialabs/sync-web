@@ -61,6 +61,108 @@ class CoreTests(unittest.TestCase):
         self.assertIn('credentials "private"', expression)
         self.assertNotIn("private", self.config.endpoint)
 
+    def test_local_admin_operations_use_interface_admin_and_wire_names(self):
+        admins = request_expression("admins", {}, self.config)
+        self.assertIn("(function *admins-get*)", admins)
+        self.assertIn('(authentication ((credentials "private")))', admins)
+        self.assertNotIn("(identity", admins)
+
+        bridge = request_expression("bridge!", {"name": "bob"}, self.config)
+        self.assertIn("(function bridge!)", bridge)
+        self.assertNotIn("(identity", bridge)
+
+        owner = request_expression("authorize!", {"user": ["*state*", "alice"]}, self.config)
+        self.assertIn("(identity (*state* alice))", owner)
+
+    def test_json_local_admin_uses_wire_name_without_owner_identity(self):
+        client = JournalClient(self.config)
+        with mock.patch.object(client, "_post", return_value=b"{}") as post:
+            client.call_json("admins", {})
+        request = json.loads(post.call_args.args[0])
+        self.assertEqual(request["function"], "*admins-get*")
+        self.assertNotIn("identity", request["authentication"])
+        self.assertEqual(request["authentication"]["credentials"], {"*type/string*": "private"})
+
+    def test_peer_bridge_uses_interface_admin_without_owner_identity(self):
+        from journal_cli.peer import operations
+        client = JournalClient(self.config)
+        with mock.patch.object(client, "post_scheme", return_value="#t") as post:
+            self.assertEqual(operations.bridge(client, "bob", "https://bob.test/interface", "alice"), 0)
+        expression = post.call_args.args[0]
+        self.assertIn('(authentication ((credentials "private")))', expression)
+        self.assertNotIn("(identity", expression)
+
+    def test_routed_path_strings_encode_as_symbols_without_changing_string_values(self):
+        expression = request_expression(
+            "put!",
+            {"path": ["*state*", "alice", "notes"], "value": "hello", "expression?": True},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(path (*state* alice notes))", expression)
+        self.assertIn('(value "hello")', expression)
+        self.assertNotIn('(path ("*state*"', expression)
+
+    def test_routed_batch_paths_encode_as_symbols(self):
+        expression = request_expression(
+            "retrieve-batch",
+            {"paths": [[-1, "*state*", "alice", "one"], [0, "*state*", "alice", "two"]]},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(paths ((-1 *state* alice one) (0 *state* alice two)))", expression)
+
+    def test_all_routed_resource_path_fields_encode_as_symbols(self):
+        cases = {
+            "put!": {"path": ["*state*", "alice", "one"]},
+            "use!": {"path": ["*state*", "alice", "one"]},
+            "copy!": {"source": [-1, "*state*", "alice", "one"], "path": ["*state*", "alice", "two"]},
+            "run!": {"path": ["*state*", "alice", "program"]},
+            "retrieve": {"path": [-1, "*state*", "alice", "one"]},
+            "put-batch!": {"paths": [["*state*", "alice", "one"]]},
+            "use-batch!": {"paths": [["*state*", "alice", "one"]]},
+            "copy-batch!": {"sources": [[-1, "*state*", "alice", "one"]], "paths": [["*state*", "alice", "two"]]},
+            "retrieve-batch": {"paths": [[-1, "*state*", "alice", "one"]]},
+        }
+        for function, arguments in cases.items():
+            with self.subTest(function=function):
+                expression = request_expression(function, arguments, self.config, route=["peer"])
+                self.assertIn("*state* alice", expression)
+                self.assertNotIn('"*state*"', expression)
+
+    def test_copy_resource_paths_encode_as_symbols(self):
+        expression = request_expression(
+            "copy!",
+            {"source": [-1, "*state*", "alice", "one"], "path": ["*state*", "alice", "two"]},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(source (-1 *state* alice one))", expression)
+        self.assertIn("(path (*state* alice two))", expression)
+
+    def test_nested_payload_path_keys_remain_string_data(self):
+        expression = request_expression(
+            "put!",
+            {
+                "path": ["*state*", "alice", "data"],
+                "value": {"path": ["ordinary string"], "nested": [{"paths": ["also data"]}]},
+                "expression?": True,
+            },
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn('(value ((path ("ordinary string")) (nested (((paths ("also data")))))))', expression)
+
+    def test_run_arguments_path_keys_remain_string_data(self):
+        expression = request_expression(
+            "run!",
+            {"path": ["*state*", "alice", "program"], "arguments": [{"path": ["input value"]}]},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(path (*state* alice program))", expression)
+        self.assertIn('(arguments (((path ("input value")))))', expression)
+
     def test_json_scheme_error_is_explicit_rejection_and_secret_is_redacted(self):
         client = JournalClient(self.config)
         with mock.patch.object(client, "_post", return_value=json.dumps([

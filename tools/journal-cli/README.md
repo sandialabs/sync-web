@@ -117,6 +117,8 @@ journal-cli profile wait-commit ...
 
 Enrollment retains plan-before-apply behavior. It may manage the separately installed resident inbox service when explicitly invoked with `enroll`; that service is not part of this package.
 
+Local bridge, configuration, and administrator operations use the Interface credential's local-admin form without claiming an owner identity. Application operations and owner-scoped authorization management retain the configured owner principal. The CLI does not expose the Root secret.
+
 ## Source Publication
 
 Source Publication and producer/reviewer workflows are bundled as internal modules; no second adapter executable is required. Source v2 is a clean Sync Web 1.6 contract: the canonical Interface endpoint is the global publisher locator, while route names and fixed hop history indexes preserve observer-relative continuity. It does not parse Source v1 Journal-identity references. See [`docs/source-v2.md`](docs/source-v2.md).
