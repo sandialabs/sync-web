@@ -28,6 +28,10 @@ CONTROL_OPERATIONS = {
     "synchronize!", "config", "update-config!", "admins", "administrators!",
 }
 ALLOWED_OPERATIONS = APPLICATION_OPERATIONS | CONTROL_OPERATIONS
+WIRE_OPERATIONS = {"admins": "*admins-get*", "administrators!": "*admins-set*"}
+LOCAL_ADMIN_OPERATIONS = {
+    "bridge!", "delete-bridge!", "config", "update-config!", "admins", "administrators!",
+}
 
 
 def operation_may_mutate(function: str, arguments: dict[str, Any] | None = None) -> bool:
@@ -92,7 +96,7 @@ def request_expression(function: str, arguments: dict[str, Any] | None, config: 
         raise InvalidRequest(f"legacy Sync Web operation is not supported: {function}")
     if function not in ALLOWED_OPERATIONS:
         raise InvalidRequest(f"unsupported Sync Web 1.6 operation: {function}")
-    fields = [f"(function {scheme_symbol(function)})"]
+    fields = [f"(function {scheme_symbol(WIRE_OPERATIONS.get(function, function))})"]
     if arguments is not None:
         fields.append(f"(arguments {scheme_value(arguments)})")
     credential = scheme_string(config.credential())
@@ -101,8 +105,11 @@ def request_expression(function: str, arguments: dict[str, Any] | None, config: 
         origin = scheme_symbol(identity or config.owner)
         fields.append(f"(invocation ((identity {origin}) (route-source ()) (route-target {target}) (credentials {credential})))")
     elif function not in {"info", "size", "route"}:
-        principal = identity or config.owner
-        fields.append(f"(authentication ((identity (*state* {scheme_symbol(principal)})) (credentials {credential})))")
+        if function in LOCAL_ADMIN_OPERATIONS:
+            fields.append(f"(authentication ((credentials {credential})))")
+        else:
+            principal = identity or config.owner
+            fields.append(f"(authentication ((identity (*state* {scheme_symbol(principal)})) (credentials {credential})))")
     return "(" + " ".join(fields) + ")"
 
 
@@ -177,14 +184,15 @@ class JournalClient:
             raise InvalidRequest(f"legacy Sync Web operation is not supported: {function}")
         if function not in ALLOWED_OPERATIONS:
             raise InvalidRequest(f"unsupported Sync Web 1.6 operation: {function}")
-        request: dict[str, Any] = {"function": function}
+        request: dict[str, Any] = {"function": WIRE_OPERATIONS.get(function, function)}
         if arguments is not None:
             request["arguments"] = arguments
         if function not in {"info", "size", "route"}:
             request["authentication"] = {
-                "identity": ["*state*", identity or self.config.owner],
                 "credentials": {"*type/string*": self.config.credential()},
             }
+            if function not in LOCAL_ADMIN_OPERATIONS:
+                request["authentication"]["identity"] = ["*state*", identity or self.config.owner]
         return self.post_json(request, mutation=operation_may_mutate(function, arguments))
 
     def call(self, function: str, arguments: dict[str, Any] | None = None, *,

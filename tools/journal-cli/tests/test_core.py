@@ -61,6 +61,37 @@ class CoreTests(unittest.TestCase):
         self.assertIn('credentials "private"', expression)
         self.assertNotIn("private", self.config.endpoint)
 
+    def test_local_admin_operations_use_interface_admin_and_wire_names(self):
+        admins = request_expression("admins", {}, self.config)
+        self.assertIn("(function *admins-get*)", admins)
+        self.assertIn('(authentication ((credentials "private")))', admins)
+        self.assertNotIn("(identity", admins)
+
+        bridge = request_expression("bridge!", {"name": "bob"}, self.config)
+        self.assertIn("(function bridge!)", bridge)
+        self.assertNotIn("(identity", bridge)
+
+        owner = request_expression("authorize!", {"user": ["*state*", "alice"]}, self.config)
+        self.assertIn("(identity (*state* alice))", owner)
+
+    def test_json_local_admin_uses_wire_name_without_owner_identity(self):
+        client = JournalClient(self.config)
+        with mock.patch.object(client, "_post", return_value=b"{}") as post:
+            client.call_json("admins", {})
+        request = json.loads(post.call_args.args[0])
+        self.assertEqual(request["function"], "*admins-get*")
+        self.assertNotIn("identity", request["authentication"])
+        self.assertEqual(request["authentication"]["credentials"], {"*type/string*": "private"})
+
+    def test_peer_bridge_uses_interface_admin_without_owner_identity(self):
+        from journal_cli.peer import operations
+        client = JournalClient(self.config)
+        with mock.patch.object(client, "post_scheme", return_value="#t") as post:
+            self.assertEqual(operations.bridge(client, "bob", "https://bob.test/interface", "alice"), 0)
+        expression = post.call_args.args[0]
+        self.assertIn('(authentication ((credentials "private")))', expression)
+        self.assertNotIn("(identity", expression)
+
     def test_json_scheme_error_is_explicit_rejection_and_secret_is_redacted(self):
         client = JournalClient(self.config)
         with mock.patch.object(client, "_post", return_value=json.dumps([
