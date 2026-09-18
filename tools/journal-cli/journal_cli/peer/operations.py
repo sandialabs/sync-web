@@ -20,6 +20,10 @@ def _auth(client: JournalClient) -> str:
     return f"(authentication ((identity (*state* {scheme_symbol(client.config.owner)})) (credentials {scheme_string(client.config.credential())})))"
 
 
+def _admin_auth(client: JournalClient) -> str:
+    return f"(authentication ((credentials {scheme_string(client.config.credential())})))"
+
+
 def _route(value: str) -> list[str]:
     parts = value.split("/")
     if not parts or any(not item for item in parts):
@@ -78,7 +82,7 @@ def preapprove(client: JournalClient, peer: str, digest_text: str) -> int:
     if len(digest) != 32:
         raise InvalidRequest("signing-key SHA-256 must be 32 bytes")
     vector = "#u(" + " ".join(str(item) for item in digest) + ")"
-    auth = _auth(client)
+    auth = _admin_auth(client)
     first = _post(client, f"((function update-config!) (arguments ((path (public bridge-accept)) (value preapproved))) {auth})", mutation=True)
     try:
         second = _post(client, f"((function update-config!) (arguments ((path (private bridge-preapproval {scheme_symbol(peer)})) (value {vector}))) {auth})", mutation=True)
@@ -92,7 +96,7 @@ def preapprove(client: JournalClient, peer: str, digest_text: str) -> int:
 def bridge(client: JournalClient, target: str, interface: str, remote_name: str) -> int:
     expression = (
         f"((function bridge!) (arguments ((name {scheme_symbol(target)})"
-        f" (interface {scheme_string(interface)}) (remote-name {scheme_symbol(remote_name)}))) {_auth(client)})"
+        f" (interface {scheme_string(interface)}) (remote-name {scheme_symbol(remote_name)}))) {_admin_auth(client)})"
     )
     result = _post(client, expression, mutation=True)
     _emit("peer.bridge", "accepted", result)
@@ -103,7 +107,7 @@ def delete_bridge(client: JournalClient, target: str, expected_public_key_sha256
     alias = scheme_symbol(target)
     if not re.fullmatch(r"[0-9a-f]{64}", expected_public_key_sha256):
         raise InvalidRequest("expected public-key SHA-256 must be lowercase hexadecimal")
-    query = f"((function config) (arguments ((path (private bridge {alias} public-key)))) {_auth(client)})"
+    query = f"((function config) (arguments ((path (private bridge {alias} public-key)))) {_admin_auth(client)})"
     before = client.post_scheme(query)
     match = re.fullmatch(r"\s*#u\(([^)]*)\)\s*", before)
     if not match:
@@ -118,7 +122,7 @@ def delete_bridge(client: JournalClient, target: str, expected_public_key_sha256
     removed = False
     result = None
     if apply:
-        expression = f"((function delete-bridge!) (arguments ((name {alias}))) {_auth(client)})"
+        expression = f"((function delete-bridge!) (arguments ((name {alias}))) {_admin_auth(client)})"
         result = client.post_scheme(expression, mutation=True).strip()
         if result != "#t":
             raise InvalidRequest("delete-bridge! did not return #t")

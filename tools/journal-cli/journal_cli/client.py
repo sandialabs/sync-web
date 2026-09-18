@@ -28,6 +28,10 @@ CONTROL_OPERATIONS = {
     "synchronize!", "config", "update-config!", "admins", "administrators!",
 }
 ALLOWED_OPERATIONS = APPLICATION_OPERATIONS | CONTROL_OPERATIONS
+WIRE_OPERATIONS = {"admins": "*admins-get*", "administrators!": "*admins-set*"}
+LOCAL_ADMIN_OPERATIONS = {
+    "bridge!", "delete-bridge!", "config", "update-config!", "admins", "administrators!",
+}
 
 
 def operation_may_mutate(function: str, arguments: dict[str, Any] | None = None) -> bool:
@@ -86,23 +90,63 @@ def scheme_value(value: Any) -> str:
     raise InvalidRequest(f"unsupported Scheme value: {type(value).__name__}")
 
 
+RESOURCE_PATH_FIELDS = {
+    "put!": {"path"},
+    "use!": {"path"},
+    "copy!": {"source", "path"},
+    "run!": {"path"},
+    "retrieve": {"path"},
+    "put-batch!": {"paths"},
+    "use-batch!": {"paths"},
+    "copy-batch!": {"sources", "paths"},
+    "retrieve-batch": {"paths"},
+}
+RESOURCE_PATH_LIST_FIELDS = {"sources", "paths"}
+
+
+def scheme_resource_path(value: Any) -> str:
+    if not isinstance(value, list):
+        return scheme_value(value)
+    return "(" + " ".join(
+        scheme_symbol(item) if isinstance(item, str) else scheme_value(item)
+        for item in value
+    ) + ")"
+
+
+def scheme_arguments(function: str, arguments: dict[str, Any]) -> str:
+    path_fields = RESOURCE_PATH_FIELDS.get(function, set())
+    fields = []
+    for key, value in arguments.items():
+        if key not in path_fields:
+            encoded = scheme_value(value)
+        elif key in RESOURCE_PATH_LIST_FIELDS and isinstance(value, list):
+            encoded = "(" + " ".join(scheme_resource_path(item) for item in value) + ")"
+        else:
+            encoded = scheme_resource_path(value)
+        fields.append(f"({scheme_symbol(key)} {encoded})")
+    return "(" + " ".join(fields) + ")"
+
+
 def request_expression(function: str, arguments: dict[str, Any] | None, config: Config,
                        *, identity: str | None = None, route: list[str] | None = None) -> str:
     if function in LEGACY_OPERATIONS:
         raise InvalidRequest(f"legacy Sync Web operation is not supported: {function}")
     if function not in ALLOWED_OPERATIONS:
         raise InvalidRequest(f"unsupported Sync Web 1.6 operation: {function}")
-    fields = [f"(function {scheme_symbol(function)})"]
+    fields = [f"(function {scheme_symbol(WIRE_OPERATIONS.get(function, function))})"]
     if arguments is not None:
-        fields.append(f"(arguments {scheme_value(arguments)})")
+        fields.append(f"(arguments {scheme_arguments(function, arguments)})")
     credential = scheme_string(config.credential())
     if route:
         target = "(" + " ".join(scheme_symbol(item) for item in route) + ")"
         origin = scheme_symbol(identity or config.owner)
         fields.append(f"(invocation ((identity {origin}) (route-source ()) (route-target {target}) (credentials {credential})))")
     elif function not in {"info", "size", "route"}:
-        principal = identity or config.owner
-        fields.append(f"(authentication ((identity (*state* {scheme_symbol(principal)})) (credentials {credential})))")
+        if function in LOCAL_ADMIN_OPERATIONS:
+            fields.append(f"(authentication ((credentials {credential})))")
+        else:
+            principal = identity or config.owner
+            fields.append(f"(authentication ((identity (*state* {scheme_symbol(principal)})) (credentials {credential})))")
     return "(" + " ".join(fields) + ")"
 
 
@@ -177,14 +221,15 @@ class JournalClient:
             raise InvalidRequest(f"legacy Sync Web operation is not supported: {function}")
         if function not in ALLOWED_OPERATIONS:
             raise InvalidRequest(f"unsupported Sync Web 1.6 operation: {function}")
-        request: dict[str, Any] = {"function": function}
+        request: dict[str, Any] = {"function": WIRE_OPERATIONS.get(function, function)}
         if arguments is not None:
             request["arguments"] = arguments
         if function not in {"info", "size", "route"}:
             request["authentication"] = {
-                "identity": ["*state*", identity or self.config.owner],
                 "credentials": {"*type/string*": self.config.credential()},
             }
+            if function not in LOCAL_ADMIN_OPERATIONS:
+                request["authentication"]["identity"] = ["*state*", identity or self.config.owner]
         return self.post_json(request, mutation=operation_may_mutate(function, arguments))
 
     def call(self, function: str, arguments: dict[str, Any] | None = None, *,
