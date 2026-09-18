@@ -112,15 +112,56 @@ class CoreTests(unittest.TestCase):
         )
         self.assertIn("(paths ((-1 *state* alice one) (0 *state* alice two)))", expression)
 
-    def test_nested_resource_paths_encode_as_symbols(self):
+    def test_all_routed_resource_path_fields_encode_as_symbols(self):
+        cases = {
+            "put!": {"path": ["*state*", "alice", "one"]},
+            "use!": {"path": ["*state*", "alice", "one"]},
+            "copy!": {"source": [-1, "*state*", "alice", "one"], "path": ["*state*", "alice", "two"]},
+            "run!": {"path": ["*state*", "alice", "program"]},
+            "retrieve": {"path": [-1, "*state*", "alice", "one"]},
+            "put-batch!": {"paths": [["*state*", "alice", "one"]]},
+            "use-batch!": {"paths": [["*state*", "alice", "one"]]},
+            "copy-batch!": {"sources": [[-1, "*state*", "alice", "one"]], "paths": [["*state*", "alice", "two"]]},
+            "retrieve-batch": {"paths": [[-1, "*state*", "alice", "one"]]},
+        }
+        for function, arguments in cases.items():
+            with self.subTest(function=function):
+                expression = request_expression(function, arguments, self.config, route=["peer"])
+                self.assertIn("*state* alice", expression)
+                self.assertNotIn('"*state*"', expression)
+
+    def test_copy_resource_paths_encode_as_symbols(self):
         expression = request_expression(
-            "put-batch!",
-            {"resources": [{"path": ["*state*", "alice", "one"], "value": "text"}]},
+            "copy!",
+            {"source": [-1, "*state*", "alice", "one"], "path": ["*state*", "alice", "two"]},
             self.config,
             route=["peer"],
         )
-        self.assertIn("(path (*state* alice one))", expression)
-        self.assertIn('(value "text")', expression)
+        self.assertIn("(source (-1 *state* alice one))", expression)
+        self.assertIn("(path (*state* alice two))", expression)
+
+    def test_nested_payload_path_keys_remain_string_data(self):
+        expression = request_expression(
+            "put!",
+            {
+                "path": ["*state*", "alice", "data"],
+                "value": {"path": ["ordinary string"], "nested": [{"paths": ["also data"]}]},
+                "expression?": True,
+            },
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn('(value ((path ("ordinary string")) (nested (((paths ("also data")))))))', expression)
+
+    def test_run_arguments_path_keys_remain_string_data(self):
+        expression = request_expression(
+            "run!",
+            {"path": ["*state*", "alice", "program"], "arguments": [{"path": ["input value"]}]},
+            self.config,
+            route=["peer"],
+        )
+        self.assertIn("(path (*state* alice program))", expression)
+        self.assertIn('(arguments (((path ("input value")))))', expression)
 
     def test_json_scheme_error_is_explicit_rejection_and_secret_is_redacted(self):
         client = JournalClient(self.config)

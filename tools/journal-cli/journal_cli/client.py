@@ -90,22 +90,41 @@ def scheme_value(value: Any) -> str:
     raise InvalidRequest(f"unsupported Scheme value: {type(value).__name__}")
 
 
-def scheme_argument_value(value: Any, field: str | None = None) -> str:
-    if field == "path" and isinstance(value, list):
-        return "(" + " ".join(
-            scheme_symbol(item) if isinstance(item, str) else scheme_value(item)
-            for item in value
-        ) + ")"
-    if field == "paths" and isinstance(value, list):
-        return "(" + " ".join(scheme_argument_value(item, "path") for item in value) + ")"
-    if isinstance(value, dict):
-        return "(" + " ".join(
-            f"({scheme_symbol(key)} {scheme_argument_value(item, key)})"
-            for key, item in value.items()
-        ) + ")"
-    if isinstance(value, list):
-        return "(" + " ".join(scheme_argument_value(item) for item in value) + ")"
-    return scheme_value(value)
+RESOURCE_PATH_FIELDS = {
+    "put!": {"path"},
+    "use!": {"path"},
+    "copy!": {"source", "path"},
+    "run!": {"path"},
+    "retrieve": {"path"},
+    "put-batch!": {"paths"},
+    "use-batch!": {"paths"},
+    "copy-batch!": {"sources", "paths"},
+    "retrieve-batch": {"paths"},
+}
+RESOURCE_PATH_LIST_FIELDS = {"sources", "paths"}
+
+
+def scheme_resource_path(value: Any) -> str:
+    if not isinstance(value, list):
+        return scheme_value(value)
+    return "(" + " ".join(
+        scheme_symbol(item) if isinstance(item, str) else scheme_value(item)
+        for item in value
+    ) + ")"
+
+
+def scheme_arguments(function: str, arguments: dict[str, Any]) -> str:
+    path_fields = RESOURCE_PATH_FIELDS.get(function, set())
+    fields = []
+    for key, value in arguments.items():
+        if key not in path_fields:
+            encoded = scheme_value(value)
+        elif key in RESOURCE_PATH_LIST_FIELDS and isinstance(value, list):
+            encoded = "(" + " ".join(scheme_resource_path(item) for item in value) + ")"
+        else:
+            encoded = scheme_resource_path(value)
+        fields.append(f"({scheme_symbol(key)} {encoded})")
+    return "(" + " ".join(fields) + ")"
 
 
 def request_expression(function: str, arguments: dict[str, Any] | None, config: Config,
@@ -116,7 +135,7 @@ def request_expression(function: str, arguments: dict[str, Any] | None, config: 
         raise InvalidRequest(f"unsupported Sync Web 1.6 operation: {function}")
     fields = [f"(function {scheme_symbol(WIRE_OPERATIONS.get(function, function))})"]
     if arguments is not None:
-        fields.append(f"(arguments {scheme_argument_value(arguments)})")
+        fields.append(f"(arguments {scheme_arguments(function, arguments)})")
     credential = scheme_string(config.credential())
     if route:
         target = "(" + " ".join(scheme_symbol(item) for item in route) + ")"
