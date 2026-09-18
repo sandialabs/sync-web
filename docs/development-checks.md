@@ -38,6 +38,19 @@ This repo has several independent validation layers. Run the checks relevant to 
   - Requires: Go
   - Command: `go test ./...`
 
+## Tools
+
+- Journal CLI checks
+  - Path: `tools/journal-cli/`
+  - Requires: Python 3.11+
+  - Command: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m unittest discover -s tests -v`
+  - Install smoke: `python3 -m pip install . && journal-cli --version && journal-cli --help`
+- Messenger checks
+  - Path: `tools/messenger/`
+  - Requires: Node.js/npm; Docker or Podman for the image smoke test
+  - Command: `npm run check`
+  - Container command: `docker build -t sync-web-messenger:local .`
+
 ## CI release posture
 
 - Pull request and branch validation builds produce `sha-<commit>` container images for changed services.

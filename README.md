@@ -23,6 +23,7 @@ Sync Web 1.6 uses reciprocal bridges for identity, proof reachability, and signe
 | `tests/` | API smoke tests, load tests, multi-node network tests |
 | `docs/` | Documentation site (Astro/Starlight) |
 | `scripts/` | Compact check orchestration and read-only network diagnostics |
+| `tools/` | Optional standalone tools, including `journal-cli`, Messenger, and the agent recorder |
 
 ## Quickstart
 

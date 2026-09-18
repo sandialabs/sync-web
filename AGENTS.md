@@ -8,12 +8,13 @@
 
 ## Versioning
 
-- The platform version in `/VERSION` and the journal-sdk crate version is in `journal/Cargo.toml`.
-  - Platform version should be updated for all pull requests
-  - Crate version should only be updated for pull requests that affect the journal-sdk
-- For both notions of version:
-  - Bump the relevant version for every pull request. Confirm the type first: patch, minor, or (rarely) major.
-  - When bumping version, update all deployment configurations to reference the latest version.
+- The platform version is in `/VERSION`, and the journal-sdk crate version is in `journal/Cargo.toml`.
+  - Update the platform version only for pull requests that affect platform source code.
+  - Do not bump the platform version for pull requests limited to documentation, tests, CI/CD, development tooling, or standalone tools.
+  - Update the crate version only for pull requests that affect the journal-sdk.
+- When a version bump is required:
+  - Confirm the type first: patch, minor, or (rarely) major.
+  - Update all deployment configurations to reference the latest version.
   - When bumping minor or major versions, update the changelog if one already exists.
 
 ## Documentation

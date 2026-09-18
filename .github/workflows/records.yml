@@ -73,4 +73,4 @@ jobs:
       - name: Run records tests
         run: |
           source journal/target/records-kernel/env.sh
-          journal/target/release/records-test --suite records/tests/suite.toml --jobs 2
+          journal/target/release/records-test --suite records/tests/suite.toml --jobs 1

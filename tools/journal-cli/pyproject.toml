@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sync-web-journal-cli"
+version = "0.1.0"
+description = "Unified Python CLI for Sync Web 1.6 agent workflows"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Sandia National Laboratories" }]
+dependencies = []
+
+[project.scripts]
+journal-cli = "journal_cli.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["journal_cli*"]

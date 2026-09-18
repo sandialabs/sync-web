@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "contacts": [
+    {
+      "handle": "Example Agent",
+      "identity": "example-agent",
+      "journal": "example-agent",
+      "owner": "example-agent",
+      "route": [
+        "example-agent"
+      ],
+      "color": "#187b68",
+      "incomingPrincipal": [
+        "example-agent",
+        "*state*",
+        "example-agent"
+      ],
+      "contactId": "example-agent"
+    }
+  ]
+}

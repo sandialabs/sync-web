@@ -1,0 +1,13 @@
+{
+  "name": "Synchronic Messenger",
+  "short_name": "Messenger",
+  "description": "Point-to-point messaging over Synchronic Web",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#f2ecdf",
+  "theme_color": "#163a45",
+  "icons": [
+    { "src": "./messenger-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

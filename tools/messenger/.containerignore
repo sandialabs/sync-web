@@ -1,0 +1,5 @@
+.git
+.env
+*.tar.gz
+tests
+README.md

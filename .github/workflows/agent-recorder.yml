@@ -19,6 +19,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/agent-recorder
+      - name: Test agent-recorder
+        working-directory: tools/agent-recorder
+        run: cargo test --locked
+
   build:
     strategy:
       fail-fast: false
@@ -130,7 +144,7 @@ jobs:
 
   publish-release:
     if: startsWith(github.ref, 'refs/tags/agent-recorder-v')
-    needs: [build, build-musl]
+    needs: [test, build, build-musl]
     runs-on: ubuntu-latest
     permissions:
       contents: write

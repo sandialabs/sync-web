@@ -1,0 +1,9 @@
+window.MESSENGER_CONFIG = Object.freeze({
+  gatewayBase: "/api/v1",
+  authBase: "/auth",
+  loginUrl: "${SYNC_GATEWAY_BROWSER_ORIGIN}/auth/login",
+  logoutUrl: "${SYNC_GATEWAY_BROWSER_ORIGIN}/auth/.ory/self-service/logout/browser",
+  pollActiveMs: Number("${MESSENGER_POLL_ACTIVE_MS}"),
+  pollIdleMs: Number("${MESSENGER_POLL_IDLE_MS}"),
+  maxMessageBytes: 65536
+});

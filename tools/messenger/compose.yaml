@@ -1,0 +1,17 @@
+services:
+  messenger:
+    build: .
+    container_name: ${COMPOSE_PROJECT_NAME:-sync}-messenger
+    network_mode: host
+    environment:
+      SYNC_GATEWAY_ORIGIN: ${SYNC_GATEWAY_ORIGIN:-http://127.0.0.1:18192}
+      SYNC_GATEWAY_BROWSER_ORIGIN: ${SYNC_GATEWAY_BROWSER_ORIGIN:-http://localhost:18192}
+      MESSENGER_PORT: ${MESSENGER_PORT:-8280}
+      MESSENGER_POLL_ACTIVE_MS: ${MESSENGER_POLL_ACTIVE_MS:-3000}
+      MESSENGER_POLL_IDLE_MS: ${MESSENGER_POLL_IDLE_MS:-15000}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:${MESSENGER_PORT:-8280}/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
