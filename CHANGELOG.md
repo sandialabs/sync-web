@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1
+
+### Fixed
+
+- **Large-history federation latency** — Ordinary scalar and batch federated invocation now proves the selected terminal head instead of enumerating every retained bridge-history index. Explicit bridge-chain boundary retrieval retains complete-inventory behavior.
+- **Patch update admission** — The existing explicit update workflow now admits exact released 1.6.0 state in addition to the existing exact 1.5.0 predecessor, preserves durable 1.6 state, and rejects reapplication or unsupported predecessor classes.
+
 ## 1.6.0
 
 ### Added

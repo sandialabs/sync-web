@@ -2,6 +2,9 @@
   (define empty-state-digest
     #u(0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
        0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0))
+  (define released-1.6-classes-digest
+    #u(91 119 66 201 209 168 212 3 60 87 37 164 22 240 61 159
+       47 246 11 249 24 136 65 37 160 35 72 105 214 166 106 219))
   (define fresh? (equal? (sync-digest *sync-state*) empty-state-digest))
   (set! chain (eval chain))
   (set! tree (eval tree))
@@ -114,22 +117,45 @@
                                    (cadr (assoc 'id identity))))
                  (identity-nonce (and (list? identity) (assoc 'nonce identity)
                                       (cadr (assoc 'nonce identity))))
+                 (key-derivation-salt
+                  (and (assoc 'key-derivation-salt public)
+                       (cadr (assoc 'key-derivation-salt public))))
+                 (key-seed (or identity-id key-derivation-salt))
                  (journal-key (cadr (assoc 'public-key public)))
                  (interface-config (cadr (assoc 'interface public)))
                  (interface-key (cadr (assoc 'public-key interface-config)))
                  (derived-journal
                   (car (crypto-generate
                         (expression->byte-vector
-                         (list 'sync-web/journal-signing-key/v1 identity-id
+                         (list 'sync-web/journal-signing-key/v1 key-seed
                                (sync-hash
                                 (expression->byte-vector ,(cfg 'root-secret))))))))
                  (derived-interface
                   (car (crypto-generate
                         (expression->byte-vector
-                         (list 'sync-web/interface-signing-key/v1 identity-id
+                         (list 'sync-web/interface-signing-key/v1 key-seed
                                (sync-hash
                                 (expression->byte-vector ,(cfg 'interface-secret))))))))
-                 (federation-config ((old-federation 'config))))
+                 (federation-config ((old-federation 'config)))
+                 (released-1.6?
+                  (and (not identity)
+                       (byte-vector? key-derivation-salt)
+                       (= (length key-derivation-salt) 32)
+                       (equal? journal-key derived-journal)
+                       (equal? interface-key derived-interface)
+                       (equal? interface-key
+                               (cadr (assoc 'public-key federation-config)))
+                       (equal?
+                        (sync-hash
+                         (expression->byte-vector
+                          (list ((root 'get) '(root class standard-module))
+                                ((root 'get) '(root class standard))
+                                ((root 'get) '(root class chain))
+                                ((root 'get) '(root class tree))
+                                ((root 'get) '(root class ledger))
+                                ((root 'get) '(root class federation))
+                                ((root 'get) '(root class authorization)))))
+                        ',released-1.6-classes-digest))))
             (define (drop entries key)
               (let loop ((entries entries) (out '()))
                 (cond ((null? entries) (reverse out))
@@ -143,43 +169,48 @@
             (define (strip-peer entry)
               (list (car entry)
                     (drop (drop (cadr entry) 'identity) 'identity-id)))
-            (if (not (and (list? ledger-config) (list? public) (list? private)
-                          (not (assoc 'key-derivation-salt public))
-                          (byte-vector? identity-id) (= (length identity-id) 32)
-                          (byte-vector? identity-nonce) (= (length identity-nonce) 32)
-                          (equal? identity-id
-                                  (sync-hash
-                                   (expression->byte-vector
-                                    (list 'sync-web/journal-id/v1 identity-nonce))))
-                          (equal? journal-key derived-journal)
-                          (equal? interface-key derived-interface)
-                          (equal? interface-key (cadr (assoc 'public-key federation-config)))))
-                (error 'upgrade-error "State is not the exact identity-bound Interface version"))
-            (set! public
-                  (put (drop public 'identity)
-                       'key-derivation-salt identity-id))
-            (set! private (put private 'bridge-preapproval '()))
-            (set! private (drop private 'bridge-identity))
-            (if (assoc 'bridge private)
-                (set! private
-                      (put private 'bridge
-                           (map strip-peer (cadr (assoc 'bridge private))))))
-            (if (assoc 'bridge-retired private)
-                (set! private
-                      (put private 'bridge-retired
-                           (map strip-peer
-                                (cadr (assoc 'bridge-retired private))))))
-            (set! federation-config
-                  (put federation-config 'peers
-                       (map strip-peer (get federation-config 'peers))))
-            (set! federation-config
-                  (put federation-config 'retired
-                       (map strip-peer (get federation-config 'retired))))
-            ((old-ledger '~field!) 'config
-             (expression->byte-vector
-              `((public ,public) (private ,private))))
-            ((old-federation '~field!) 'config
-             (expression->byte-vector federation-config))
+            (cond
+             ((and (list? ledger-config) (list? public) (list? private)
+                   (not (assoc 'key-derivation-salt public))
+                   (byte-vector? identity-id) (= (length identity-id) 32)
+                   (byte-vector? identity-nonce) (= (length identity-nonce) 32)
+                   (equal? identity-id
+                           (sync-hash
+                            (expression->byte-vector
+                             (list 'sync-web/journal-id/v1 identity-nonce))))
+                   (equal? journal-key derived-journal)
+                   (equal? interface-key derived-interface)
+                   (equal? interface-key
+                           (cadr (assoc 'public-key federation-config))))
+              (set! public
+                    (put (drop public 'identity)
+                         'key-derivation-salt identity-id))
+              (set! private (put private 'bridge-preapproval '()))
+              (set! private (drop private 'bridge-identity))
+              (if (assoc 'bridge private)
+                  (set! private
+                        (put private 'bridge
+                             (map strip-peer (cadr (assoc 'bridge private))))))
+              (if (assoc 'bridge-retired private)
+                  (set! private
+                        (put private 'bridge-retired
+                             (map strip-peer
+                                  (cadr (assoc 'bridge-retired private))))))
+              (set! federation-config
+                    (put federation-config 'peers
+                         (map strip-peer (get federation-config 'peers))))
+              (set! federation-config
+                    (put federation-config 'retired
+                         (map strip-peer (get federation-config 'retired))))
+              ((old-ledger '~field!) 'config
+               (expression->byte-vector
+                `((public ,public) (private ,private))))
+              ((old-federation '~field!) 'config
+               (expression->byte-vector federation-config)))
+             (released-1.6? #t)
+             (else
+              (error 'upgrade-error
+                     "State is not an exact supported Interface version")))
             ((old-ledger '~field!) 'standard standard-node)
             ((old-federation '~field!) 'standard standard-node)
             ((root 'set!) '(root object standard) standard-node)

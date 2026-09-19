@@ -372,11 +372,11 @@ mod tests {
             "http://localhost:8192/prefix-api/v1/general/use/api/v1/general/put#api/v1/general/put"
         );
         assert_eq!(
-            gateway_operation_url("http://localhost:8192/api/v1/general/get", "use")?,
+            gateway_operation_url("http://localhost:8192/api/v1/general/obsolete-read", "use")?,
             "http://localhost:8192/api/v1/general/use"
         );
         assert_eq!(
-            gateway_operation_url("http://localhost:8192/api/v1/general/set", "put")?,
+            gateway_operation_url("http://localhost:8192/api/v1/general/obsolete-write", "put")?,
             "http://localhost:8192/api/v1/general/put"
         );
         Ok(())

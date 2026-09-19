@@ -4,7 +4,7 @@ This directory contains opt-in, process-isolated acceptance checks. These checks
 
 ## Current release holds
 
-The 1.6 candidate supports fresh installation plus the exact, explicit `1.5.0` to `1.6.0` update. The deployment wrapper requires the `1.5.0` marker and `JOURNAL_UPDATE=1`, advances the marker only after the atomic Interface transition succeeds, and fails closed for every other nonfresh state.
+The 1.6.1 candidate supports fresh installation plus exact, explicit `1.5.0` to `1.6.1` and released `1.6.0` to `1.6.1` updates. The deployment wrapper requires one of those predecessor markers and `JOURNAL_UPDATE=1`, advances the marker only after the atomic Interface transition succeeds, and fails closed for every other nonfresh state.
 
 Sync Web 1.6 makes no deterministic stored-execution meter, limit, budget, configuration, timeout, or meter-specific error/SSE claim. `run!` has an independent path-scoped boolean Authorization permission for local non-admin and authenticated remote route principals; namespace ownership and blank read-only `use!` do not imply it. Root and configured local Interface administrators retain default access.
 

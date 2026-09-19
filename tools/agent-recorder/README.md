@@ -289,7 +289,7 @@ Tagged releases use `agent-recorder-v*` tags, for example `agent-recorder-v0.1.2
 
 ## Sync Web Backend
 
-The backend targets the Sync Web 1.6 clean-break resource API exclusively: Gateway calls use `/api/v1/general/put` and `/api/v1/general/use`, while direct Journal calls use `put!` and blank read-only `use!`. It does not fall back to the older `set` or `get` operations.
+The backend targets the Sync Web 1.6 clean-break resource API exclusively: Gateway calls use `/api/v1/general/put` and `/api/v1/general/use`, while direct Journal calls use `put!` and blank read-only `use!`. It does not fall back to pre-resource operations.
 
 Sync Web writes store readable JSON bytes at deterministic entry names such as `entry-000000000000`.
 

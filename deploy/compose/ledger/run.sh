@@ -104,7 +104,9 @@ if [ -d database ] && [ -n "$(find database -mindepth 1 -print -quit 2>/dev/null
     fi
     installed_version=$(cat "$VERSION_MARKER")
     if [ "$installed_version" != "$PLATFORM_VERSION" ]; then
-        if [ "$installed_version" != "1.5.0" ] || [ "$PLATFORM_VERSION" != "1.6.0" ] || [ "$JOURNAL_UPDATE" != "1" ]; then
+        if [ "$PLATFORM_VERSION" != "1.6.1" ] || \
+           { [ "$installed_version" != "1.5.0" ] && [ "$installed_version" != "1.6.0" ]; } || \
+           [ "$JOURNAL_UPDATE" != "1" ]; then
             echo "Database version $installed_version cannot be opened by $PLATFORM_VERSION" >&2
             exit 1
         fi
