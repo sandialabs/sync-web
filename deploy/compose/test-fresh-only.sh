@@ -115,11 +115,21 @@ MOCK
         exit 1
     fi
 
-    # The one supported 1.5.0 -> 1.6.0 transition requires the explicit update
-    # switch and advances the marker only after exact installer success.
+    # Supported 1.5.0/1.6.0 -> 1.6.1 transitions require the explicit update
+    # switch and advance the marker only after exact installer success.
     printf '1.5.0\n' > "$work/database/.sync-web-version"
     if run 0 > /dev/null 2>&1; then
         echo "FAIL: 1.5.0 database opened without update for $runner" >&2
+        exit 1
+    fi
+    before_servers=$(grep -c '^server$' "$work/calls.log" || true)
+    run 1
+    test "$(cat "$work/database/.sync-web-version")" = "$platform_version"
+    test "$(grep -c '^server$' "$work/calls.log")" = $((before_servers + 1))
+
+    printf '1.6.0\n' > "$work/database/.sync-web-version"
+    if run 0 > /dev/null 2>&1; then
+        echo "FAIL: 1.6.0 database opened without update for $runner" >&2
         exit 1
     fi
     before_servers=$(grep -c '^server$' "$work/calls.log" || true)
@@ -154,4 +164,4 @@ MOCK
 check_runner deploy/compose/general/run.sh
 check_runner deploy/compose/ledger/run.sh
 
-echo "PASS: compose runners install, migrate 1.5.0 once, and reopen fail closed"
+echo "PASS: compose runners install, update supported predecessors, and reopen fail closed"

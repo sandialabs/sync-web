@@ -30,12 +30,12 @@ Use `deploy/compose/general/run.sh`, `deploy/compose/ledger/run.sh`, or the
 bundled `deploy/bin/ledger` executable. These entry points pass all active class
 forms to `interface.scm` in the required order.
 
-Sync Web 1.6 supports fresh installation and one explicit update from exact
-version `1.5.0`. The Compose runners require `JOURNAL_UPDATE=1`, invoke the
-atomic Interface transition, and advance the database marker to `1.6.0` only
-after success. Missing switches, unsupported markers, malformed state, and
-Scheme or process failures leave the `1.5.0` marker unchanged and do not start
-the server.
+Sync Web 1.6.1 supports fresh installation and explicit updates from exact
+version `1.5.0` or released `1.6.0`. The Compose runners require
+`JOURNAL_UPDATE=1`, invoke the atomic Interface transition, and advance the
+database marker to `1.6.1` only after success. Missing switches, unsupported
+markers or predecessor classes, malformed state, and Scheme or process failures
+leave the predecessor marker unchanged and do not start the server.
 
 ## Object and execution boundaries
 

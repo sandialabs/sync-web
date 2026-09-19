@@ -497,8 +497,10 @@
             (and (assoc 'proof? arguments)
                  (cadr (assoc 'proof? arguments))))
            (target-path ((self '~bridge-route-path) route '()))
+           (target-proof-path
+            ((self '~target-proof-path) route terminal-index))
            (target-object
-            ((self '~trace-object) ledger origin-index target-path))
+            ((self '~trace-object) ledger origin-index target-proof-path))
            (terminal-object ((self '~get) standard target-object target-path))
            (combined
             (if (and (sync-node? terminal-object)
@@ -687,7 +689,9 @@
            (serialization (cadr (assoc 'object route-response)))
            (source-object ((standard 'deserialize) serialization))
            (target-path ((self '~bridge-route-path) route '()))
-           (target-object ((self '~trace-object) ledger origin-index target-path))
+           (target-proof-path
+            ((self '~target-proof-path) route terminal-index))
+           (target-object ((self '~trace-object) ledger origin-index target-proof-path))
            (terminal-object ((self '~get) standard target-object target-path))
            (combined
             (if (and (sync-node? terminal-object)
@@ -1345,6 +1349,10 @@
                         (list (car indexes)) '()))
                 ((self '~bridge-route-path) (cdr names) tail
                  (if (pair? indexes) (cdr indexes) '())))))
+
+  (define-method (~target-proof-path self route terminal-index)
+    ((self '~bridge-route-path) route (list terminal-index)
+     (map (lambda (name) -1) (cdr route))))
 
   (define-method (~get self standard object path)
     ((standard 'deep-get) object ((self '~ledger-path) path)))

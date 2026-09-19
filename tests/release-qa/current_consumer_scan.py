@@ -17,6 +17,7 @@ HISTORICAL_FILES = {
     "docs/ideas/dev-1.5-plan.md",
     "docs/ideas/federation.md",
     "docs/migrations/1.6-resource-api.md",
+    "tools/journal-cli/tests/head-helper-qualification-v0.1.4/helper/head_expected_old_cas.py",
 }
 HISTORICAL_PREFIXES = {
     "records/tests/fixtures/",

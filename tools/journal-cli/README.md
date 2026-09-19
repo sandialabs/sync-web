@@ -15,7 +15,7 @@ journal-cli config ...
 journal-cli doctor
 ```
 
-The tool is Sync Web 1.6-only. It emits no compatibility requests using `get`, `set!`, `get-batch`, `set-batch!`, `call!`, or `resolve`.
+The tool is Sync Web 1.6-only. It emits no compatibility requests using pre-resource operations.
 
 ## Install
 

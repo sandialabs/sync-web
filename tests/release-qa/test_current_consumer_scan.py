@@ -81,6 +81,10 @@ class CurrentConsumerScanTests(unittest.TestCase):
 
     def test_exclusions_are_limited_to_declared_noncurrent_protocol_surfaces(self) -> None:
         self.assertIn("docs/migrations/1.6-resource-api.md", scan.HISTORICAL_FILES)
+        self.assertIn(
+            "tools/journal-cli/tests/head-helper-qualification-v0.1.4/helper/head_expected_old_cas.py",
+            scan.HISTORICAL_FILES,
+        )
         self.assertEqual(scan.HISTORICAL_PREFIXES, {"records/tests/fixtures/"})
         self.assertIn("records/lisp/standard.scm", scan.STRUCTURAL_PROTOCOL_FILES)
         self.assertIn("records/lisp/tree.scm", scan.STRUCTURAL_PROTOCOL_FILES)

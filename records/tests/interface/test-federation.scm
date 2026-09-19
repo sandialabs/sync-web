@@ -271,6 +271,25 @@
   ;; later signed envelope, so settle automatic installation first.
   (test-report)
 
+  ;; Internal invocation proofs select one terminal head instead of the public
+  ;; bridge-chain boundary, whose explicit retrieval remains full inventory.
+  (test-submit
+   (exact journal-8
+          '(*call* "pass-8"
+            (lambda (root)
+              (((sync-eval ((root 'get) '(root object federation)))
+                '~target-proof-path)
+               '(galactica) 477955))))
+   :expect '(*bridge* galactica 477955))
+  (test-submit
+   (exact journal-8
+          '(*call* "pass-8"
+            (lambda (root)
+              (((sync-eval ((root 'get) '(root object federation)))
+                '~target-proof-path)
+               '(galactica nibbler) 42))))
+   :expect '(*bridge* galactica -1 *bridge* nibbler 42))
+
   ;; Naming slots reject symbols that cannot survive the exact expression codec,
   ;; while their official percent-encoded equivalents remain ordinary symbols.
   (test-submit
