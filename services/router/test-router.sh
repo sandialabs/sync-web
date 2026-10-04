@@ -20,7 +20,24 @@ ui_occupier="sync-router-ui-occupier-$$"
 router="sync-router-http-$$"
 tls_router="sync-router-tls-$$"
 tmp=$(mktemp -d)
+phase=setup
+fail() {
+    echo "$*" >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+        printf '::error title=Router smoke (%s)::%s\n' "$phase" "$*"
+    fi
+    exit 1
+}
 cleanup() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Router smoke failed during $phase (exit $status)" >&2
+        if [ "${GITHUB_ACTIONS:-}" = true ]; then
+            printf '::error title=Router smoke::Phase %s failed with exit %s\n' "$phase" "$status"
+        fi
+        "$RUNTIME" logs "$router" >&2 || true
+        "$RUNTIME" logs "$tls_router" >&2 || true
+    fi
     "$RUNTIME" rm -f "$router" "$tls_router" "$gateway_mock" "$service_mock" "$ui_mock" "$occupier" "$ui_occupier" >/dev/null 2>&1 || true
     "$RUNTIME" network rm "$network" >/dev/null 2>&1 || true
     "$RUNTIME" image rm "$tag" >/dev/null 2>&1 || true
@@ -34,8 +51,7 @@ assert_status() {
     shift 2
     actual=$(curl -ksS -o /dev/null -w '%{http_code}' "$@" "$url")
     [ "$actual" = "$expected" ] || {
-        echo "Expected HTTP $expected from $url, got $actual" >&2
-        exit 1
+        fail "Expected HTTP $expected from $url, got $actual"
     }
 }
 
@@ -45,8 +61,7 @@ assert_body() {
     shift 2
     actual=$(curl -ksS "$@" "$url")
     [ "$actual" = "$expected" ] || {
-        echo "Expected body '$expected' from $url, got '$actual'" >&2
-        exit 1
+        fail "Expected body '$expected' from $url, got '$actual'"
     }
 }
 
@@ -71,7 +86,7 @@ assert_unavailable() {
     actual=$(curl -ksS -o /dev/null -w '%{http_code}' "$@" "$url")
     case "$actual" in
         502|504) ;;
-        *) echo "Expected HTTP 502/504 from $url, got $actual" >&2; exit 1 ;;
+        *) fail "Expected HTTP 502/504 from $url, got $actual" ;;
     esac
 }
 
@@ -97,7 +112,7 @@ wait_aliases_withdrawn() {
     "$RUNTIME" exec "$router" cat /etc/resolv.conf >&2 || true
     for alias in "$@"; do "$RUNTIME" exec "$router" getent hosts "$alias" >&2 || true; done
     "$RUNTIME" logs "$router" >&2 || true
-    exit 1
+    fail "Retired aliases still resolved after 15 seconds (old address $old_ip)"
 }
 
 wait_replacement_ready() {
@@ -128,7 +143,7 @@ wait_replacement_ready() {
     for alias in "$@"; do "$RUNTIME" exec "$router" getent hosts "$alias" >&2 || true; done
     "$RUNTIME" logs "$container" >&2 || true
     "$RUNTIME" logs "$router" >&2 || true
-    exit 1
+    fail "Replacement $container did not become directly ready with current DNS within 15 seconds"
 }
 
 wait_body() {
@@ -147,10 +162,12 @@ wait_body() {
     echo "Router did not resolve the replacement $backend within 15 seconds" >&2
     "$RUNTIME" exec "$router" cat /etc/resolv.conf >&2 || true
     "$RUNTIME" logs "$router" >&2 || true
-    exit 1
+    fail "Router did not resolve the replacement $backend within 15 seconds"
 }
 
+phase=image-build
 "$RUNTIME" build -q -t "$tag" "$root/services/router" >/dev/null
+phase=mock-backend-startup
 "$RUNTIME" network create "$network" >/dev/null
 "$RUNTIME" run -d --name "$service_mock" --network "$network" \
     --network-alias journal --network-alias file-system \
@@ -164,6 +181,7 @@ wait_body() {
     --network-alias gateway --entrypoint sh nginx:stable-alpine -c \
     "printf 'server { listen 80; location / { return 200 \"old-gateway:\$request_uri:\$request_method:\$http_cookie\\n\"; } }' > /etc/nginx/conf.d/default.conf; exec nginx -g 'daemon off;'" >/dev/null
 
+phase=initial-http
 "$RUNTIME" run -d --name "$router" --network "$network" -p 127.0.0.1::80 "$tag" >/dev/null
 http_port=$("$RUNTIME" port "$router" 80/tcp | tail -1 | sed 's/.*://')
 assert_status 404 "http://127.0.0.1:$http_port/metrics"
@@ -207,6 +225,7 @@ assert_body 'old-gateway:/readyz?full=true:GET:' \
 
 # Recreate the gateway at a different address while the router and every other
 # backend remain running. The failed pin is not retried against the replacement.
+phase=gateway-withdrawal
 old_ip=$("$RUNTIME" inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$gateway_mock")
 "$RUNTIME" rm -f "$gateway_mock" >/dev/null
 assert_unavailable "http://127.0.0.1:$http_port/healthz"
@@ -225,6 +244,7 @@ new_ip=$("$RUNTIME" inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}
     echo "Gateway recreation did not change its test address: $old_ip" >&2
     exit 1
 }
+phase=gateway-recovery
 wait_replacement_ready "$gateway_mock" "$new_ip" /healthz \
     'new-gateway:/healthz:GET:' gateway
 wait_body 'new-gateway:/healthz:GET:' "http://127.0.0.1:$http_port/healthz" gateway
@@ -234,11 +254,11 @@ assert_body 'new-gateway:/api/v1/general/pin:POST:session=after' \
     "http://127.0.0.1:$http_port/api/v1/general/pin" -X POST -H 'Cookie: session=after'
 pin_requests=$("$RUNTIME" logs "$gateway_mock" 2>&1 | grep -c 'POST /api/v1/general/pin ' || true)
 [ "$pin_requests" = 1 ] || {
-    echo "Expected one replacement-gateway pin request, got $pin_requests" >&2
-    exit 1
+    fail "Expected one replacement-gateway pin request, got $pin_requests"
 }
 
 # Recreate both UI services at a different address without restarting Router.
+phase=ui-withdrawal
 old_ui_ip=$("$RUNTIME" inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$ui_mock")
 "$RUNTIME" rm -f "$ui_mock" >/dev/null
 assert_unavailable "http://127.0.0.1:$http_port/explorer/deep"
@@ -255,6 +275,7 @@ new_ui_ip=$("$RUNTIME" inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddre
     echo "UI recreation did not change its test address: $old_ui_ip" >&2
     exit 1
 }
+phase=ui-recovery
 wait_replacement_ready "$ui_mock" "$new_ui_ip" /deep \
     'new-ui:/deep:GET' explorer workbench
 wait_body 'new-ui:/deep:GET' "http://127.0.0.1:$http_port/explorer/deep" explorer
@@ -262,6 +283,7 @@ wait_body 'new-ui:/deep:GET' "http://127.0.0.1:$http_port/workbench/deep" workbe
 assert_status 200 "http://127.0.0.1:$http_port/interface"
 assert_status 200 "http://127.0.0.1:$http_port/webdav/"
 
+phase=tls-startup-and-routing
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
     -keyout "$tmp/tls.key" -out "$tmp/tls.crt" >/dev/null 2>&1
 "$RUNTIME" run -d --name "$tls_router" --network "$network" \
@@ -284,6 +306,7 @@ assert_status 200 "https://127.0.0.1:$tls_port/api/v1/raw?selection=$raw_max"
 assert_status 200 "https://127.0.0.1:$tls_port/api/v1/raw?selection=${raw_max}A"
 assert_transport_overlimit_nonreflection "https://127.0.0.1:$tls_port"
 
+phase=static-boundaries
 # The checked-in include is the non-templated variant used by direct nginx builds.
 grep -A1 'location = /metrics' "$root/services/router/nginx.routes.conf" | grep -q 'return 404'
 # TLS plaintext must not redirect the exact metrics path.

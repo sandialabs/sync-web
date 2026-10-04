@@ -42,19 +42,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install topology test dependencies
+        run: python3 -m pip install -r tests/network/compose/requirements.txt
       - name: Check synchronized platform versions
         run: node scripts/sync-platform-package-versions.js
-      - name: Check scripts and generated topology
+      - name: Check deployment script syntax
         run: |
           bash -n deploy/compose/general/run.sh deploy/compose/ledger/run.sh tests/network/compose/local-compose.sh
           python3 -m py_compile tests/network/compose/generate.py tests/release-qa/image_manifest.py tests/release-qa/single_node_journey.py tests/release-qa/sticky_readiness.py
-          python3 tests/network/compose/test_generate.py
-          python3 -m unittest discover -s tests/release-qa -p 'test_*.py' -v
           sh -n tests/release-qa/run_sticky_readiness.sh tests/api/local-compose.sh
-          sh deploy/compose/test-admins.sh
-          sh deploy/compose/test-fresh-only.sh
-          sh services/identity-provider/test-config.sh
-          sh services/router/test-router.sh
+      - name: Test generated topology
+        run: python3 tests/network/compose/test_generate.py
+      - name: Test release QA helpers
+        run: python3 -m unittest discover -s tests/release-qa -p 'test_*.py' -v
+      - name: Test deployment administrator seeding
+        run: sh deploy/compose/test-admins.sh
+      - name: Test deployment update admission
+        run: sh deploy/compose/test-fresh-only.sh
+      - name: Test identity provider configuration
+        run: sh services/identity-provider/test-config.sh
+      - name: Test router HTTP TLS and backend recovery
+        run: sh services/router/test-router.sh
       - name: Validate Compose configuration
         env:
           SECRET: ci-placeholder

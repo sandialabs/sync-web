@@ -5,9 +5,6 @@
   (define released-1.6-classes-digest
     #u(91 119 66 201 209 168 212 3 60 87 37 164 22 240 61 159
        47 246 11 249 24 136 65 37 160 35 72 105 214 166 106 219))
-  (define released-1.6.1-classes-digest
-    #u(242 3 212 64 228 212 115 227 105 248 80 137 213 196 162 95
-       120 22 18 139 193 58 117 156 67 96 240 21 99 5 47 42))
   (define fresh? (equal? (sync-digest *sync-state*) empty-state-digest))
   (set! chain (eval chain))
   (set! tree (eval tree))
@@ -140,7 +137,6 @@
                                (sync-hash
                                 (expression->byte-vector ,(cfg 'interface-secret))))))))
                  (federation-config ((old-federation 'config)))
-                 (installed-version ((root 'get) '(interface records-version)))
                  (released-1.6?
                   (and (not identity)
                        (byte-vector? key-derivation-salt)
@@ -149,8 +145,7 @@
                        (equal? interface-key derived-interface)
                        (equal? interface-key
                                (cadr (assoc 'public-key federation-config)))
-                       (equal? installed-version '(nothing))
-                       (member
+                       (equal?
                         (sync-hash
                          (expression->byte-vector
                           (list ((root 'get) '(root class standard-module))
@@ -160,8 +155,7 @@
                                 ((root 'get) '(root class ledger))
                                 ((root 'get) '(root class federation))
                                 ((root 'get) '(root class authorization)))))
-                        (list ',released-1.6-classes-digest
-                              ',released-1.6.1-classes-digest)))))
+                        ',released-1.6-classes-digest))))
             (define (drop entries key)
               (let loop ((entries entries) (out '()))
                 (cond ((null? entries) (reverse out))
@@ -2012,9 +2006,6 @@
 													   `((path ,(arg 'path)) (value ,(arg 'value))))
 											 (if (equal? (arg 'path) '(public bridge-accept))
 											     ((federation 'update-config!) `((path (bridge-accept))
-															     (value ,(arg 'value)))))
-											 (if (equal? (arg 'path) '(public interface endpoint))
-											     ((federation 'update-config!) `((path (endpoint))
 															     (value ,(arg 'value))))) #t)
 											((*secret*)
                          (let* ((secret (arg 'secret))
@@ -2130,6 +2121,4 @@
           ((root 'set!) '(root class federation) ',federation)
           ((root 'set!) '(root class authorization) ',authorization)
           #t)))
-  (call `(lambda (root)
-           ((root 'set!) '(interface records-version) "1.6.2")))
   "Installed interface")
