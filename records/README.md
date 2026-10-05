@@ -30,10 +30,12 @@ Use `deploy/compose/general/run.sh`, `deploy/compose/ledger/run.sh`, or the
 bundled `deploy/bin/ledger` executable. These entry points pass all active class
 forms to `interface.scm` in the required order.
 
-Sync Web 1.6.1 supports fresh installation and explicit updates from exact
-version `1.5.0` or released `1.6.0`. The Compose runners require
-`JOURNAL_UPDATE=1`, invoke the atomic Interface transition, and advance the
-database marker to `1.6.1` only after success. Missing switches, unsupported
+Sync Web 1.6.2 supports fresh installation and explicit updates from exact
+version `1.5.0` or released `1.6.0`/`1.6.1`. The Compose runners require
+`JOURNAL_UPDATE=1`, invoke the Interface transition, and advance the
+database marker to `1.6.2` only after success. Private Interface installer
+version metadata rejects reapplication of this Interface-only patch; existing
+endpoint mismatches require the separate [repair procedure](../docs/migrations/1.6.2-endpoint-sync.md). Missing switches, unsupported
 markers or predecessor classes, malformed state, and Scheme or process failures
 leave the predecessor marker unchanged and do not start the server.
 

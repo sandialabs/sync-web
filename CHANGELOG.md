@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.2
+
+### Fixed
+
+- **Endpoint configuration synchronization** — Exact `update-config!` changes to `(public interface endpoint)` now update the persisted Federation endpoint in the same Interface call, preventing reciprocal bridge responses from advertising an obsolete URL. Existing mismatches require an explicit post-update endpoint reapplication; installation does not silently repair them.
+- **Maintenance update admission** — Explicit updates admit released 1.6.1 in addition to the existing 1.5.0 and 1.6.0 predecessors. A private Interface installer version marker distinguishes this Interface-only maintenance update from unsupported reapplication while preserving keys, history, relationships and authorization state.
+
 ## 1.6.1
 
 ### Fixed

@@ -317,3 +317,58 @@ arguments = [
   "fixtures/journal-identity-v1/standard.scm",
   "fixtures/journal-identity-v1/authorization.scm",
 ]
+
+[[case]]
+name = "Endpoint Update Interface"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-endpoint-update.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]
+
+[[case]]
+name = "Interface Patch Update"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-interface-patch-update.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "fixtures/interface-v1.6.1/interface.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/standard.scm",
+  "../lisp/authorization.scm",
+]
+
+[[case]]
+name = "Endpoint Configuration Boundaries"
+kind = "interface"
+test = "interface/interface-harness.scm"
+arguments = [
+  "interface/test-endpoint-config.scm",
+  "../lisp/root.scm",
+  "../lisp/standard.scm",
+  "../lisp/log-chain.scm",
+  "../lisp/tree.scm",
+  "../lisp/ledger.scm",
+  "../lisp/federation.scm",
+  "../lisp/authorization.scm",
+  "../lisp/interface.scm",
+]

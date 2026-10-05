@@ -30,13 +30,13 @@ Sync Web 1.6 uses reciprocal bridges for identity, proof reachability, and signe
 The fastest way to run a local stack:
 
 ```sh
-COMPOSE_PROJECT_NAME=sync-local SYNC_WEB_VERSION=1.6.1 \
+COMPOSE_PROJECT_NAME=sync-local SYNC_WEB_VERSION=1.6.2 \
 SECRET=your-root-secret INTERFACE_SECRET=your-interface-secret \
 ADMIN_PASSWORD=your-login-password HTTP_PORT=8192 HTTPS_PORT=8193 \
 docker compose -f deploy/compose/general/compose.yaml up
 ```
 
-Use `podman-compose` or `podman compose` instead of `docker compose` if that is your container runtime. Sync Web 1.6.1 supports fresh installation and exact updates from 1.5.0 or released 1.6.0 through the explicit update procedure; unsupported or unmarked existing databases fail closed. See `deploy/compose/general/README.md` for full configuration options, `tests/release-qa/README.md` for exact-image acceptance checks, and `docs/development-checks.md` for validation commands and tool dependencies.
+Use `podman-compose` or `podman compose` instead of `docker compose` if that is your container runtime. Sync Web 1.6.2 supports fresh installation and exact updates from 1.5.0 or released 1.6.0/1.6.1 through the explicit update procedure; unsupported or unmarked existing databases fail closed. Already-diverged endpoint configuration needs the explicit repair in [`docs/migrations/1.6.2-endpoint-sync.md`](docs/migrations/1.6.2-endpoint-sync.md); code installation alone does not repair it. See `deploy/compose/general/README.md` for full configuration options, `tests/release-qa/README.md` for exact-image acceptance checks, and `docs/development-checks.md` for validation commands and tool dependencies.
 
 ## License
 

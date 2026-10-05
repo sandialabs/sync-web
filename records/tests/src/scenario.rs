@@ -198,15 +198,20 @@ impl ScenarioWorld {
     }
 
     fn record_for(&mut self, url: &str) -> Result<Word, ScenarioError> {
-        if let Some(record) = self.records.get(url) {
+        // A deterministic DNS alias for same-Journal endpoint-change tests.
+        let canonical = match url {
+            "http://journal-1-renamed.test/interface" => "http://journal-1.test/interface",
+            _ => url,
+        };
+        if let Some(record) = self.records.get(canonical) {
             return Ok(*record);
         }
-        let record: Word = Sha256::digest(url.as_bytes()).into();
+        let record: Word = Sha256::digest(canonical.as_bytes()).into();
         self.environment
             .create_record(record)
             .map_err(ScenarioError)?;
-        self.records.insert(url.to_string(), record);
-        self.reverse.insert(record, url.to_string());
+        self.records.insert(canonical.to_string(), record);
+        self.reverse.insert(record, canonical.to_string());
         Ok(record)
     }
 
