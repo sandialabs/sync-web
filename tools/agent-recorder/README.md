@@ -205,6 +205,8 @@ HMAC(K_i,
 
 The HMAC layer is not a blockchain and does not include a previous authenticator. Ordering and history are backend responsibilities.
 
+Sync Web integrity preflight reads the next record slot before appending. Its `["nothing"]` JSON response means that no record exists at that slot, not that an empty record should be inserted. Agent Recorder 0.1.3 recognizes this response; no record or integrity-state migration is required.
+
 Local integrity state stores private future keys and is not written into records. The key schedule is a no-horizon, 1-based `v2(i)` skip schedule. Backend indexes are zero-based, but key scheduling uses one-based event numbers.
 
 At one-based event `i`, compute `h = v2(i)` and generate future edge keys for levels `0..h`, each targeting `i + 2^d`. At event `j`, consume pending incoming keys whose target is `j`; after the backend write succeeds, consumed keys are deleted and the local state advances. A verifier with the root key derives `K_i` in logarithmic time and verifies the selected indexed record independently. Cryptographic review is still recommended before relying on this for high-assurance audit workflows.

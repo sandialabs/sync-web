@@ -323,6 +323,9 @@ fn ensure_not_error(value: &Value) -> Result<()> {
 fn is_nothing(value: &Value) -> bool {
     value.as_str() == Some("nothing")
         || value
+            .as_array()
+            .is_some_and(|items| items.len() == 1 && items[0].as_str() == Some("nothing"))
+        || value
             .as_object()
             .and_then(|object| object.get("*type/quoted*"))
             .and_then(Value::as_str)
@@ -479,6 +482,101 @@ mod tests {
         assert!(requests[0].contains(
             "\"path\":[\"*state*\",\"agent-recorder\",\"direct\",\"entry-000000000000\"]"
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn integrity_preflight_accepts_missing_record_response() -> Result<()> {
+        use crate::integrity::{IntegrityKey, IntegrityRecordAdapter};
+
+        for mode in [SyncWebMode::Gateway, SyncWebMode::DirectJournal] {
+            let listener = TcpListener::bind("127.0.0.1:0")?;
+            let addr = listener.local_addr()?;
+            let server = thread::spawn(move || -> Result<String> {
+                let (mut stream, _) = listener.accept()?;
+                let request = read_http_request(&mut stream)?;
+                let body = r#"["nothing"]"#;
+                write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}", body.len(), body)?;
+                Ok(request)
+            });
+            let config = match mode {
+                SyncWebMode::Gateway => {
+                    SyncWebConfig::gateway(format!("http://{addr}"), "test-token")
+                }
+                SyncWebMode::DirectJournal => {
+                    SyncWebConfig::direct_journal(format!("http://{addr}/interface"), "test-secret")
+                }
+            };
+            let writer = SyncWebRecordAdapter::create(config.clone())?;
+            let reader = SyncWebRecordReader::create(config)?;
+            let state = std::env::temp_dir().join(format!(
+                "recorder-preflight-{}-{mode:?}.json",
+                std::process::id()
+            ));
+            let result = IntegrityRecordAdapter::create_checked(
+                Box::new(writer),
+                &state,
+                Some(IntegrityKey::from_secret("test-integrity-key")),
+                Some(&reader),
+            );
+            std::fs::remove_file(&state)?;
+            let request = server.join().expect("mock server panicked")?;
+            assert!(request.contains("entry-000000000000"));
+            result?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_record_response_requires_exact_sentinel() {
+        for value in [
+            json!("nothing"),
+            json!({"*type/quoted*": "nothing"}),
+            json!(["nothing"]),
+        ] {
+            assert!(is_nothing(&value), "{value}");
+        }
+        for value in [
+            json!(null),
+            json!([]),
+            json!(["nothing", "extra"]),
+            json!(["unknown"]),
+            json!(["error", "denied"]),
+            json!({"*type/byte-vector*": ""}),
+        ] {
+            assert!(!is_nothing(&value), "{value}");
+        }
+    }
+
+    #[test]
+    fn missing_record_reader_emits_no_record() -> Result<()> {
+        for mode in [SyncWebMode::Gateway, SyncWebMode::DirectJournal] {
+            let listener = TcpListener::bind("127.0.0.1:0")?;
+            let addr = listener.local_addr()?;
+            let server = thread::spawn(move || -> Result<()> {
+                let (mut stream, _) = listener.accept()?;
+                read_http_request(&mut stream)?;
+                let body = r#"["nothing"]"#;
+                write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}", body.len(), body)?;
+                Ok(())
+            });
+            let config = match mode {
+                SyncWebMode::Gateway => {
+                    SyncWebConfig::gateway(format!("http://{addr}"), "test-token")
+                }
+                SyncWebMode::DirectJournal => {
+                    SyncWebConfig::direct_journal(format!("http://{addr}/interface"), "test-secret")
+                }
+            };
+            let reader = SyncWebRecordReader::create(config)?;
+            let mut emitted = false;
+            reader.read(RecordSelector::Index(0), &mut |_| {
+                emitted = true;
+                Ok(())
+            })?;
+            server.join().expect("mock server panicked")?;
+            assert!(!emitted);
+        }
         Ok(())
     }
 
