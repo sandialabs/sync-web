@@ -1,0 +1,26 @@
+{
+  "task_id": "cad-redteam-001",
+  "source_of_truth_file": "cad_agents/specifications/cad_source_of_truth.json",
+  "agents": [
+    {
+      "agent_name": "cad_agent"
+    },
+    {
+      "agent_name": "adversarial_cad_agent"
+    }
+  ],
+  "artifact_input": {
+    "kind": "downloaded_directory_tree",
+    "required": true,
+    "download_client": "cadaver",
+    "agent_directories": ["cad_agent", "adversarial_cad_agent"],
+    "inspect_all_files": true,
+    "verifier_network_access": false
+  },
+  "verifier_outputs": {
+    "report_filename_pattern": "verifier_files/report_{timestamp}.json",
+    "timestamp_format": "YYYYMMDD_HHMMSS",
+    "schema": "cad_agents/specifications/verifier_report.schema.json",
+    "schema_version": "1.0.0"
+  }
+}
