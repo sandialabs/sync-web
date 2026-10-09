@@ -1,0 +1,4 @@
+.env
+.demo-state/
+__pycache__/
+agent/__pycache__/

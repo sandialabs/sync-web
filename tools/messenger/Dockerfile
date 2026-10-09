@@ -1,4 +1,4 @@
-FROM nginx:1.27-alpine
+FROM docker.io/library/nginx:1.27-alpine
 
 RUN apk add --no-cache gettext
 COPY deploy/nginx.conf.template /opt/messenger/nginx.conf.template

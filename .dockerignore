@@ -2,3 +2,6 @@
 journal/target
 services/*/node_modules
 **/env
+tests/demos/messaging/.env
+tests/demos/messaging/.demo-state
+tests/demos/messaging/**/__pycache__

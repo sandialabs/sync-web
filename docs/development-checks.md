@@ -106,6 +106,17 @@ See [`tests/release-qa/README.md`](../tests/release-qa/README.md) for exact-imag
   - Requires: FIREWHEEL and Docker-specific model-component support
   - Notes: this harness is intentionally Docker-specific and is not part of the baseline Compose-compatible workflow.
 
+## Messaging demo
+
+`tests/demos/messaging/README.md` documents the eight-service local HTTP/amd64 manual messaging demo, its LiteLLM configuration, and explicit bridge/mailbox warm-up. Cheap checks:
+
+```sh
+python3 -m unittest discover -s tests/demos/messaging -p 'test_*.py'
+node --test tests/demos/messaging/agent/inbox.test.mjs
+```
+
+The Python demo checks use the existing topology-test PyYAML dependency. Container startup and human/agent exchanges are separate manual integration acceptance, not claimed by these unit tests. Do not point a demo at production credentials or Journals.
+
 ## Browser/manual checks
 
 - Playwright is useful for local manual UI sanity checks, but is not part of the Explorer unit-test or CI setup unless explicitly added later.

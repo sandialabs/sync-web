@@ -1,0 +1,158 @@
+name: messaging-demo
+
+x-agent: &agent
+  platform: linux/amd64
+  build:
+    context: ../../..
+    dockerfile: tests/demos/messaging/agent/Dockerfile
+  pull_policy: never
+  stdin_open: true
+  tty: true
+  init: true
+  networks: [demo]
+  environment: &agent-environment
+    LITELLM_URL: ${LITELLM_URL:-http://host.docker.internal:4000/v1}
+    LITELLM_TOKEN: ${LITELLM_TOKEN:-}
+    LITELLM_MODEL: ${LITELLM_MODEL:-demo-model}
+    LITELLM_API: ${LITELLM_API:-openai-completions}
+    POLL_ACTIVE_MS: ${POLL_ACTIVE_MS:-5000}
+    POLL_RECENT_MS: ${POLL_RECENT_MS:-15000}
+    POLL_IDLE_MS: ${POLL_IDLE_MS:-30000}
+    POLL_RECENT_FOR_MS: ${POLL_RECENT_FOR_MS:-300000}
+    POLL_JITTER: ${POLL_JITTER:-0.15}
+    JOURNAL_PERIOD: ${JOURNAL_PERIOD:-8}
+  extra_hosts: ["host.docker.internal:host-gateway"]
+  healthcheck:
+    test: [CMD, python3, /opt/demo/agent.py, health]
+    interval: 5s
+    timeout: 3s
+    retries: 24
+    start_period: 20s
+
+services:
+  journal:
+    platform: linux/amd64
+    image: ghcr.io/sandialabs/sync-web/journal-sdk:1.6.2
+    working_dir: /srv
+    entrypoint: [/bin/sh, /srv/run.sh]
+    environment:
+      SYNC_WEB_VERSION: 1.6.2
+      SECRET: ${HUMAN_ROOT_SECRET:-demo-human-root}
+      INTERFACE_SECRET: ${HUMAN_INTERFACE_SECRET:-demo-human-interface}
+      INTERFACE_ADMINS: admin
+      JOURNAL_NAME: human
+      INTERFACE: http://router/api/v1/journal/interface
+      ORIGIN: http://localhost:${DEMO_PORT:-8192}
+      PERIOD: ${JOURNAL_PERIOD:-8}
+      WINDOW: 1024
+      PORT: 80
+      LISP_DIR: /srv/lisp
+    volumes:
+      - human-journal:/srv/database
+      - ../../../records/lisp:/srv/lisp:ro,Z
+      - ../../../deploy/compose/general/run.sh:/srv/run.sh:ro,Z
+    networks: [demo]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O- http://127.0.0.1/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+
+  gateway:
+    platform: linux/amd64
+    image: ghcr.io/sandialabs/sync-web/gateway:1.6.2
+    environment:
+      HOST: 0.0.0.0
+      PORT: 80
+      JOURNAL_ENDPOINT: http://journal/interface
+      ROOT_ENDPOINT: http://journal/interface
+      JOURNAL_SECRET: ${HUMAN_INTERFACE_SECRET:-demo-human-interface}
+      KRATOS_PUBLIC_URL: http://identity-provider:4433
+      ALLOW_ADMIN_ROUTES: "0"
+    networks: [demo]
+    depends_on:
+      journal: {condition: service_healthy}
+      identity-provider: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  identity-provider:
+    platform: linux/amd64
+    image: ghcr.io/sandialabs/sync-web/identity-provider:1.6.2
+    environment:
+      ORIGIN: http://localhost:${DEMO_PORT:-8192}
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-demo-password}
+      KRATOS_COOKIE_SECRET: ${KRATOS_COOKIE_SECRET:-demo-cookie-secret-at-least-32-characters}
+    volumes: [identity:/var/lib/kratos]
+    networks: [demo]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O- http://127.0.0.1:4433/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+
+  explorer:
+    platform: linux/amd64
+    image: ghcr.io/sandialabs/sync-web/explorer:1.6.2
+    networks: [demo]
+
+  messenger:
+    platform: linux/amd64
+    image: localhost/messaging-demo-messenger:demo
+    pull_policy: never
+    build:
+      context: ../../../tools/messenger
+    environment:
+      MESSENGER_PORT: 8280
+      SYNC_GATEWAY_ORIGIN: http://gateway
+      SYNC_GATEWAY_BROWSER_ORIGIN: http://localhost:${DEMO_PORT:-8192}
+      MESSENGER_POLL_ACTIVE_MS: ${MESSENGER_POLL_ACTIVE_MS:-3000}
+      MESSENGER_POLL_IDLE_MS: ${MESSENGER_POLL_IDLE_MS:-15000}
+    volumes:
+      - ./messenger/nginx.conf.template:/opt/messenger/nginx.conf.template:ro,Z
+      - ./messenger/contacts.json:/usr/share/nginx/html/contacts.json:ro,Z
+    networks: [demo]
+    depends_on:
+      gateway: {condition: service_healthy}
+
+  router:
+    platform: linux/amd64
+    image: docker.io/library/nginx:stable-alpine
+    volumes: ["./router.conf:/etc/nginx/conf.d/default.conf:ro,Z"]
+    ports: ["127.0.0.1:${DEMO_PORT:-8192}:80"]
+    networks: [demo]
+    depends_on:
+      gateway: {condition: service_healthy}
+      explorer: {condition: service_started}
+      messenger: {condition: service_started}
+
+  agent-1:
+    <<: *agent
+    image: localhost/messaging-demo-agent-1:demo
+    environment:
+      <<: *agent-environment
+      AGENT_NAME: agent-1
+    volumes: [agent-1-home:/home/demo]
+
+  agent-2:
+    <<: *agent
+    image: localhost/messaging-demo-agent-2:demo
+    environment:
+      <<: *agent-environment
+      AGENT_NAME: agent-2
+    volumes: [agent-2-home:/home/demo]
+
+networks:
+  demo: {}
+
+volumes:
+  human-journal: {}
+  identity: {}
+  agent-1-home: {}
+  agent-2-home: {}

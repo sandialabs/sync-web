@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "contacts": [
+    {"contactId": "agent-1", "handle": "Agent 1", "identity": "agent-1", "journal": "agent-1", "owner": "agent-1", "route": ["agent-1"], "incomingPrincipal": ["agent-1", "*state*", "agent-1"], "color": "#187b68"},
+    {"contactId": "agent-2", "handle": "Agent 2", "identity": "agent-2", "journal": "agent-2", "owner": "agent-2", "route": ["agent-2"], "incomingPrincipal": ["agent-2", "*state*", "agent-2"], "color": "#ad6535"}
+  ]
+}
