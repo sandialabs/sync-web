@@ -100,6 +100,8 @@ services:
   explorer:
     platform: linux/amd64
     image: ghcr.io/sandialabs/sync-web/explorer:1.6.2
+    environment:
+      SYNC_EXPLORER_ENDPOINT: /api/v1
     networks: [demo]
 
   messenger:
@@ -109,7 +111,7 @@ services:
     build:
       context: ../../../tools/messenger
     environment:
-      MESSENGER_PORT: 8280
+      MESSENGER_PORT: ${MESSENGER_PORT:-8280}
       SYNC_GATEWAY_ORIGIN: http://gateway
       SYNC_GATEWAY_BROWSER_ORIGIN: http://localhost:${DEMO_PORT:-8192}
       MESSENGER_POLL_ACTIVE_MS: ${MESSENGER_POLL_ACTIVE_MS:-3000}
@@ -117,6 +119,7 @@ services:
     volumes:
       - ./messenger/nginx.conf.template:/opt/messenger/nginx.conf.template:ro,Z
       - ./messenger/contacts.json:/usr/share/nginx/html/contacts.json:ro,Z
+    ports: ["127.0.0.1:${MESSENGER_PORT:-8280}:${MESSENGER_PORT:-8280}"]
     networks: [demo]
     depends_on:
       gateway: {condition: service_healthy}
@@ -130,7 +133,6 @@ services:
     depends_on:
       gateway: {condition: service_healthy}
       explorer: {condition: service_started}
-      messenger: {condition: service_started}
 
   agent-1:
     <<: *agent

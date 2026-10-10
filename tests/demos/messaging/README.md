@@ -24,8 +24,9 @@ docker compose up -d
 docker compose ps
 ```
 
-Open **http://localhost:8192/messenger/** and **http://localhost:8192/explorer/**.
-Use the configured `DEMO_PORT` if different. Use `localhost`, not `127.0.0.1`,
+Open **http://localhost:8280/** for Messenger and **http://localhost:8192/explorer/**
+for Explorer. The normal router/Gateway stack uses `DEMO_PORT` (8192); Messenger
+has its own `MESSENGER_PORT` (8280). Use `localhost`, not `127.0.0.1`,
 for browser login: the identity provider's cookies are hostname-scoped.
 Sign in as `admin`; the disposable default password is `demo-password`.
 Locally built agents and Messenger have explicit `localhost/...` image tags and are never pulled from a remote registry; build them before starting. Base images have fully qualified registry names, avoiding Podman short-name selection prompts. There are no TLS certificates, ACME directories, HTTPS ports, or profiles.
@@ -51,7 +52,8 @@ same platform release image. Native ARM and macOS execution are out of scope.
 | `LITELLM_TOKEN` | Provider credential, supplied only at runtime |
 | `LITELLM_MODEL` | Model identifier configured by your proxy |
 | `LITELLM_API` | `openai-completions`; use a Pi-supported API such as `openai-responses` or `anthropic-messages` to match the proxy |
-| `DEMO_PORT` | `8192`, one local browser-facing HTTP port |
+| `DEMO_PORT` | `8192`, normal router/Gateway/Explorer HTTP port |
+| `MESSENGER_PORT` | `8280`, standalone Messenger HTTP port |
 | `JOURNAL_PERIOD` | `8` seconds, for all three Journals |
 | `POLL_ACTIVE_MS` | `5000` |
 | `POLL_RECENT_MS` | `15000` |
