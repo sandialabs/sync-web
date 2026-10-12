@@ -90,6 +90,8 @@ journal-cli message group --to bob --to carol --conversation-id UUID --body 'hel
 journal-cli message read bob@bob MESSAGE_UUID
 ```
 
+Direct and group sends produce canonical UTC millisecond `createdAt` timestamps, compatible with the Messenger and inbox validators. Existing stored envelopes are not rewritten.
+
 Group writes have independent per-recipient outcomes. Failed or ambiguous recipients are not retried.
 
 ## Peer and profile commands

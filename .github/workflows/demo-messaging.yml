@@ -1,0 +1,36 @@
+name: Messaging Demo Checks
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "tests/demos/messaging/**"
+      - "tools/journal-cli/journal_cli/message.py"
+      - "tools/messenger/public/logic.mjs"
+      - ".github/workflows/demo-messaging.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "tests/demos/messaging/**"
+      - "tools/journal-cli/journal_cli/message.py"
+      - "tools/messenger/public/logic.mjs"
+      - ".github/workflows/demo-messaging.yml"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install -r tests/network/compose/requirements.txt
+      - name: Check compose shape and agent configuration
+        run: python3 -m unittest discover -s tests/demos/messaging -p 'test_*.py'
+      - name: Check inbox codecs and polling
+        run: node --test tests/demos/messaging/agent/inbox.test.mjs
+      - name: Validate compose configuration without exposing environment values
+        run: docker compose -f tests/demos/messaging/compose.yaml config --quiet

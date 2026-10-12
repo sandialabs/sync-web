@@ -38,6 +38,10 @@ docker compose -f deploy/compose/general/compose.yaml up
 
 Use `podman-compose` or `podman compose` instead of `docker compose` if that is your container runtime. Sync Web 1.6.2 supports fresh installation and exact updates from 1.5.0 or released 1.6.0/1.6.1 through the explicit update procedure; unsupported or unmarked existing databases fail closed. Already-diverged endpoint configuration needs the explicit repair in [`docs/migrations/1.6.2-endpoint-sync.md`](docs/migrations/1.6.2-endpoint-sync.md); code installation alone does not repair it. See `deploy/compose/general/README.md` for full configuration options, `tests/release-qa/README.md` for exact-image acceptance checks, and `docs/development-checks.md` for validation commands and tool dependencies.
 
+## Messaging Demo
+
+[`tests/demos/messaging`](tests/demos/messaging/README.md) provides a manual, local-HTTP Linux amd64 demo with Messenger, Explorer, and two Pi agents. It uses released Journal artifacts and explicit bridge/mailbox warm-up, with configurable LiteLLM and polling settings.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

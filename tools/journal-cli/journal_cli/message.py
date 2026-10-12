@@ -78,7 +78,7 @@ def send(client: JournalClient, to: str, body: str, in_reply_to: str | None = No
         "version": 1, "id": str(uuid4()),
         "from": f"{config['owner']}@{config['localJournal']}",
         "to": f"{target['identity']}@{target['journal']}",
-        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "createdAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "body": body,
     }
     if in_reply_to is not None:
@@ -107,7 +107,7 @@ def send_group(client: JournalClient, addresses: list[str], body: str, conversat
             raise InvalidRequest("group reply sender is not a participant")
         reply = {"from": reply_from, "id": _uuid(reply_id or "", "reply id")}
     message_id = str(uuid4())
-    created = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    created = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     outcomes = []
     for target in targets:
         to = f"{target['identity']}@{target['journal']}"
