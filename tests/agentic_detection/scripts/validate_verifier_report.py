@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate a verifier report without requiring third-party packages."""
+"""Validate a verifier report"""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -11,10 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 class ValidationError(ValueError):
     pass
-
 
 def resolve_ref(root: dict[str, Any], reference: str) -> dict[str, Any]:
     if not reference.startswith("#/"):
@@ -23,7 +22,6 @@ def resolve_ref(root: dict[str, Any], reference: str) -> dict[str, Any]:
     for part in reference[2:].split("/"):
         value = value[part.replace("~1", "/").replace("~0", "~")]
     return value
-
 
 def matches_type(value: Any, expected: str) -> bool:
     return {
@@ -34,7 +32,6 @@ def matches_type(value: Any, expected: str) -> bool:
         "boolean": isinstance(value, bool),
         "null": value is None,
     }[expected]
-
 
 def validate(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str = "$") -> None:
     if "$ref" in schema:
@@ -88,7 +85,6 @@ def validate(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str
         if "minimum" in schema and value < schema["minimum"]:
             raise ValidationError(f"{path}: value is below {schema['minimum']}")
 
-
 def validate_semantics(report: dict[str, Any], specification: dict[str, Any]) -> None:
     if report["task_id"] != specification["task_id"]:
         raise ValidationError("$.task_id: does not match verifier specification")
@@ -130,7 +126,6 @@ def validate_semantics(report: dict[str, Any], specification: dict[str, Any]) ->
     if finding_ids != expected_ids:
         raise ValidationError(f"$.verdicts: finding IDs must be sequential; expected {expected_ids!r}")
 
-
 def validate_report_path(report_path: Path, specification: dict[str, Any]) -> None:
     outputs = specification["verifier_outputs"]
     pattern = outputs["report_filename_pattern"]
@@ -142,12 +137,61 @@ def validate_report_path(report_path: Path, specification: dict[str, Any]) -> No
             f"report path must follow {pattern!r} with a YYYYMMDD_HHMMSS timestamp"
         )
 
+def validate_manifest_consistency(
+    report: dict[str, Any], manifest: dict[str, Any], manifest_path: Path
+) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    run_directory = manifest_path.resolve().parent
+    try:
+        expected_input_directory = run_directory.relative_to(project_root).as_posix()
+    except ValueError as exc:
+        raise ValidationError("retrieval manifest is outside the project") from exc
+    if report["verifier"]["input_directory"] != expected_input_directory:
+        raise ValidationError("$.verifier.input_directory: does not match retrieval manifest")
+    if report["task_id"] != manifest["task_id"]:
+        raise ValidationError("$.task_id: does not match retrieval manifest")
 
-def main() -> int:
+    inventories = {entry["agent_name"]: entry["artifacts"] for entry in report["artifact_inventory"]}
+    if set(inventories) != set(manifest["agents"]):
+        raise ValidationError("$.artifact_inventory: agents do not match retrieval manifest")
+    for agent_name, records in manifest["agents"].items():
+        expected: dict[str, tuple[str, dict[str, Any]]] = {}
+        for record_key, artifact_type in (("step_file", "STEP"), ("session_log", "SESSION_LOG")):
+            record = records[record_key]
+            relative_path = Path(record["local_path"])
+            local_path = (project_root / relative_path).resolve()
+            if (
+                relative_path.is_absolute()
+                or local_path.parent != run_directory / agent_name
+                or local_path.name != record["filename"]
+            ):
+                raise ValidationError(f"retrieval manifest has an invalid path: {relative_path}")
+            try:
+                content = local_path.read_bytes()
+            except OSError as exc:
+                raise ValidationError(f"retrieved artifact is unreadable: {relative_path}") from exc
+            if len(content) != record["size"] or hashlib.sha256(content).hexdigest() != record["sha256"]:
+                raise ValidationError(f"retrieved artifact differs from manifest: {relative_path}")
+            expected[relative_path.as_posix()] = artifact_type, record
+
+        artifacts = inventories[agent_name]
+        if {artifact["path"] for artifact in artifacts} != set(expected) or len(artifacts) != 2:
+            raise ValidationError(f"$.artifact_inventory: files do not match manifest for {agent_name}")
+        for artifact in artifacts:
+            artifact_type, record = expected[artifact["path"]]
+            if (
+                artifact["type"] != artifact_type
+                or artifact["size_bytes"] != record["size"]
+                or artifact["sha256"] != record["sha256"]
+            ):
+                raise ValidationError(f"$.artifact_inventory: metadata differs from manifest for {artifact['path']}")
+
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=Path)
     parser.add_argument("schema", type=Path)
     parser.add_argument("specification", type=Path)
+    parser.add_argument("retrieval_manifest", type=Path)
     args = parser.parse_args()
 
     try:
@@ -155,8 +199,10 @@ def main() -> int:
         report = json.loads(report_text)
         schema = json.loads(args.schema.read_text(encoding="utf-8"))
         specification = json.loads(args.specification.read_text(encoding="utf-8"))
+        manifest = json.loads(args.retrieval_manifest.read_text(encoding="utf-8"))
         validate(report, schema, schema)
         validate_semantics(report, specification)
+        validate_manifest_consistency(report, manifest, args.retrieval_manifest)
         validate_report_path(args.report, specification)
         canonical_text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
         if report_text != canonical_text:
@@ -167,7 +213,6 @@ def main() -> int:
 
     print(f"Verifier report is valid: {args.report}")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

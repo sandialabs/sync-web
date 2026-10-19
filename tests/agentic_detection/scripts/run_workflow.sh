@@ -8,6 +8,12 @@ cd -- "$project_root"
 # Create runtime directories
 mkdir -p cad_agents/session_logs failed incoming logs pending uploaded verifier_files
 
+# WebDAV Last-Modified timestamps have one-second resolution. Start the agents
+# on the next whole second so a file already present cannot meet this boundary.
+workflow_start_epoch=$(python3 -c 'import time; print(int(time.time()) + 1)')
+python3 -c 'import sys, time; time.sleep(max(0, int(sys.argv[1]) - time.time()))' "$workflow_start_epoch"
+echo "Workflow artifact boundary (UTC epoch): $workflow_start_epoch"
+
 echo "***Launching CAD Agent***"
 "$script_dir/launch_cad.sh" > /dev/null 2>&1 &
 cad_pid=$!
@@ -38,6 +44,6 @@ if (( cad_status != 0 || adversarial_cad_status != 0 )); then
 fi
 
 echo "***Launching Verifier Agent***"
-"$script_dir/launch_verifier.sh"
+"$script_dir/launch_verifier.sh" "$workflow_start_epoch"
 
 echo "Run complete"

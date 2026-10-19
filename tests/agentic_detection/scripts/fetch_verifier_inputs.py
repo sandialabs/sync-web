@@ -7,6 +7,7 @@ import argparse
 import base64
 import hashlib
 import json
+import netrc
 import os
 import re
 import sys
@@ -21,7 +22,6 @@ from pathlib import Path
 from typing import Iterable
 from xml.etree import ElementTree
 
-
 WEBDAV_HOST = os.environ.get("WEBDAV_HOST")
 WEBDAV_PORT = os.environ.get("WEBDAV_PORT", "8192")
 WEBDAV_PATH = os.environ.get("WEBDAV_PATH", "webdav/stage/admin")
@@ -31,17 +31,14 @@ DEFAULT_BASE_URL = f"http://{WEBDAV_HOST}:{WEBDAV_PORT}/{WEBDAV_URL}"
 DEFAULT_AGENTS = ("cad_agent", "adversarial_cad_agent")
 TIMESTAMP_RE = re.compile(r"_(\d{8}T\d{6}Z|\d{8}_\d{6})(?=\.)")
 
-
 class FetchError(RuntimeError):
     pass
-
 
 @dataclass(frozen=True)
 class RemoteFile:
     name: str
     size: int | None
     last_modified: datetime | None
-
 
 def parse_timestamp(filename: str) -> tuple[str, datetime] | None:
     match = TIMESTAMP_RE.search(filename)
@@ -50,9 +47,11 @@ def parse_timestamp(filename: str) -> tuple[str, datetime] | None:
 
     value = match.group(1)
     timestamp_format = "%Y%m%dT%H%M%SZ" if "T" in value else "%Y%m%d_%H%M%S"
-    parsed = datetime.strptime(value, timestamp_format).replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.strptime(value, timestamp_format).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
     return value, parsed
-
 
 def select_latest_pair(
     files: Iterable[RemoteFile], not_before_epoch: float | None
@@ -85,22 +84,23 @@ def select_latest_pair(
         step_file = artifacts["step"][0]
         session_log = artifacts["session_log"][0]
 
+        _, parsed_timestamp = parse_timestamp(step_file.name) or (None, None)
+        if parsed_timestamp is None:
+            continue
+
         if not_before_epoch is not None:
-            freshness_floor = not_before_epoch - 5
+            if parsed_timestamp.timestamp() < not_before_epoch:
+                continue
             modification_times = (
                 step_file.last_modified,
                 session_log.last_modified,
             )
             if any(value is None for value in modification_times):
                 continue
-            if any(value.timestamp() < freshness_floor for value in modification_times if value):
+            if any(value.timestamp() < not_before_epoch for value in modification_times if value):
                 continue
 
-        _, parsed_timestamp = parse_timestamp(step_file.name) or (None, None)
-        if parsed_timestamp is not None:
-            candidates.append(
-                (parsed_timestamp, timestamp, step_file, session_log)
-            )
+        candidates.append((parsed_timestamp, timestamp, step_file, session_log))
 
     if not candidates:
         freshness = " from the current workflow" if not_before_epoch is not None else ""
@@ -109,26 +109,31 @@ def select_latest_pair(
     _, timestamp, step_file, session_log = max(candidates, key=lambda item: item[0])
     return timestamp, step_file, session_log
 
-
 class WebDAVClient:
     def __init__(self, base_url: str, timeout: float, retries: int) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         self.timeout = timeout
         self.retries = retries
-        self.authorization = self._authorization_header()
+        self.authorization = self._authorization_header(self.base_url)
 
     @staticmethod
-    def _authorization_header() -> str | None:
-        token = os.environ.get("WEBDAV_AUTH_TOKEN")
-        if token:
-            return f"Bearer {token}"
-
+    def _authorization_header(base_url: str) -> str | None:
         username = os.environ.get("WEBDAV_USERNAME")
         password = os.environ.get("WEBDAV_PASSWORD")
-        if username is not None and password is not None:
-            encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
-            return f"Basic {encoded}"
-        return None
+        if username is None or password is None:
+            host = urllib.parse.urlparse(base_url).hostname
+            try:
+                credentials = netrc.netrc().authenticators(host) if host else None
+            except FileNotFoundError:
+                credentials = None
+            except netrc.NetrcParseError as error:
+                raise FetchError(f"invalid .netrc credentials: {error}") from error
+            if credentials:
+                username, _, password = credentials
+        if username is None or password is None:
+            return None
+        encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
+        return f"Basic {encoded}"
 
     def _request(self, url: str, method: str, headers: dict[str, str] | None = None) -> bytes:
         request_headers = dict(headers or {})
@@ -219,7 +224,6 @@ class WebDAVClient:
             ),
         }
 
-
 def fetch_inputs(args: argparse.Namespace) -> Path:
     spec_path = Path(args.spec).resolve()
     try:
@@ -238,30 +242,47 @@ def fetch_inputs(args: argparse.Namespace) -> Path:
     client = WebDAVClient(args.base_url, args.request_timeout, args.retries)
 
     deadline = time.monotonic() + args.poll_timeout
-    selected: dict[str, tuple[str, RemoteFile, RemoteFile]] = {}
-    errors: dict[str, str] = {}
+    downloaded: dict[str, dict] = {}
     while True:
-        selected.clear()
-        errors.clear()
-        for agent_name in args.agents:
-            try:
-                selected[agent_name] = select_latest_pair(
+        staged_paths: list[Path] = []
+        try:
+            selected = {
+                agent_name: select_latest_pair(
                     client.list_files(agent_name), args.not_before_epoch
                 )
-            except FetchError as error:
-                errors[agent_name] = str(error)
+                for agent_name in args.agents
+            }
+            for agent_name, (timestamp, step_file, session_log) in selected.items():
+                agent_dir = run_dir / agent_name
+                step_path = agent_dir / step_file.name
+                log_path = agent_dir / session_log.name
+                staged_paths.extend((step_path, log_path))
+                downloaded[agent_name] = {
+                    "timestamp": timestamp,
+                    "step_file": client.download(agent_name, step_file, step_path),
+                    "session_log": client.download(agent_name, session_log, log_path),
+                }
 
-        if not errors:
+            # A listing can expose a file while an upload is still completing.
+            # Retry if either selected file changed during retrieval.
+            for agent_name, (_, step_file, session_log) in selected.items():
+                latest = {item.name: item for item in client.list_files(agent_name)}
+                if latest.get(step_file.name) != step_file or latest.get(session_log.name) != session_log:
+                    raise FetchError(f"remote artifact changed during retrieval: {agent_name}")
             break
-        if time.monotonic() >= deadline:
-            details = "; ".join(f"{agent}: {error}" for agent, error in errors.items())
-            raise FetchError(f"timed out waiting for verifier artifacts: {details}")
-        time.sleep(args.poll_interval)
+        except FetchError as error:
+            for path in staged_paths:
+                path.unlink(missing_ok=True)
+            downloaded.clear()
+            if time.monotonic() >= deadline:
+                raise FetchError(f"timed out waiting for verifier artifacts: {error}") from error
+            time.sleep(min(args.poll_interval, max(0, deadline - time.monotonic())))
 
     manifest = {
         "schema_version": 1,
         "task_id": task_id,
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "not_before_epoch": args.not_before_epoch,
         "verifier_specification": spec_path.relative_to(project_root).as_posix(),
         "webdav_base_url": client.base_url,
         "agents": {},
@@ -276,16 +297,11 @@ def fetch_inputs(args: argparse.Namespace) -> Path:
             pass
         return record
 
-    for agent_name, (timestamp, step_file, session_log) in selected.items():
-        agent_dir = run_dir / agent_name
+    for agent_name, records in downloaded.items():
         manifest["agents"][agent_name] = {
-            "timestamp": timestamp,
-            "step_file": project_relative(
-                client.download(agent_name, step_file, agent_dir / step_file.name)
-            ),
-            "session_log": project_relative(
-                client.download(agent_name, session_log, agent_dir / session_log.name)
-            ),
+            "timestamp": records["timestamp"],
+            "step_file": project_relative(records["step_file"]),
+            "session_log": project_relative(records["session_log"]),
         }
 
     manifest_path = run_dir / "verifier_input.json"
@@ -298,22 +314,20 @@ def fetch_inputs(args: argparse.Namespace) -> Path:
     except ValueError:
         return manifest_path
 
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True, help="Verifier specification JSON")
     parser.add_argument("--output-dir", default="verifier_files")
     parser.add_argument("--base-url", default=os.environ.get("WEBDAV_URL", DEFAULT_BASE_URL))
     parser.add_argument("--agents", nargs="+", default=list(DEFAULT_AGENTS))
-    parser.add_argument("--not-before-epoch", type=float)
+    parser.add_argument("--not-before-epoch", type=float, required=True)
     parser.add_argument("--poll-timeout", type=float, default=60)
     parser.add_argument("--poll-interval", type=float, default=2)
     parser.add_argument("--request-timeout", type=float, default=15)
     parser.add_argument("--retries", type=int, default=2)
     return parser
 
-
-def main() -> int:
+def main():
     try:
         manifest_path = fetch_inputs(build_parser().parse_args())
     except (FetchError, ValueError) as error:
@@ -322,7 +336,6 @@ def main() -> int:
 
     print(manifest_path.as_posix())
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

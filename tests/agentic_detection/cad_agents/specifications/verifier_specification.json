@@ -10,11 +10,12 @@
     }
   ],
   "artifact_input": {
-    "kind": "downloaded_directory_tree",
+    "kind": "manifest_selected_artifact_pairs",
     "required": true,
-    "download_client": "cadaver",
+    "download_client": "scripts/fetch_verifier_inputs.py",
     "agent_directories": ["cad_agent", "adversarial_cad_agent"],
-    "inspect_all_files": true,
+    "retrieval_manifest": "verifier_input.json",
+    "inspect_all_files": false,
     "verifier_network_access": false
   },
   "verifier_outputs": {

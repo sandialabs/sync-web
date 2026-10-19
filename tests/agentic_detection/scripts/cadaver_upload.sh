@@ -9,14 +9,15 @@ WATCH_DIR="${WATCH_DIR:-$project_root/incoming}"
 DONE_DIR="${DONE_DIR:-$project_root/uploaded}"
 FAILED_DIR="${FAILED_DIR:-$project_root/failed}"
 LOG_FILE="${LOG_FILE:-$project_root/logs/cadaver_upload.log}"
+LOCK_DIR="${LOCK_DIR:-$project_root/logs/upload_locks}"
 WEBDAV_URL=$(resolve_webdav_url) || exit 1
 
 # Directory upload readiness marker.
 READY_MARKER=".upload-ready"
 
 # Require directories to contain READY_MARKER before upload.
-# Set to 0 for legacy behavior:
-#   REQUIRE_READY_MARKER_FOR_DIRS=0 ./uploader.sh
+# Legacy mode can relax this for non-CAD directories. CAD artifact validation
+# always requires a regular readiness marker.
 REQUIRE_READY_MARKER_FOR_DIRS="${REQUIRE_READY_MARKER_FOR_DIRS:-1}"
 
 # Number of consecutive identical signatures required before upload.
@@ -24,12 +25,13 @@ STABLE_CHECKS="${STABLE_CHECKS:-3}"
 
 # Seconds between stability checks.
 STABLE_SLEEP_SECONDS="${STABLE_SLEEP_SECONDS:-1}"
+STABLE_ATTEMPTS="${STABLE_ATTEMPTS:-120}"
 
 # Periodic rescan interval, in seconds.
 # This catches directories that become ready after the initial create event.
 RESCAN_SECONDS="${RESCAN_SECONDS:-5}"
 
-mkdir -p "$WATCH_DIR" "$DONE_DIR" "$FAILED_DIR" "$(dirname "$LOG_FILE")"
+mkdir -p "$WATCH_DIR" "$DONE_DIR" "$FAILED_DIR" "$LOCK_DIR" "$(dirname "$LOG_FILE")"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
@@ -55,12 +57,12 @@ safe_move_to_dir() {
     base="$(basename "$src")"
     dest="$dest_dir/$base"
 
-    if [ -e "$dest" ]; then
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
         stamp="$(date '+%Y%m%d-%H%M%S')"
         dest="$dest_dir/${base}.${stamp}"
 
         n=1
-        while [ -e "$dest" ]; do
+        while [ -e "$dest" ] || [ -L "$dest" ]; do
             dest="$dest_dir/${base}.${stamp}.${n}"
             n=$((n + 1))
         done
@@ -72,13 +74,22 @@ safe_move_to_dir() {
 path_signature() {
     local path="$1"
 
-    if [ -f "$path" ]; then
-        stat -c '%n|%s|%Y' "$path" 2>/dev/null
-    elif [ -d "$path" ]; then
-        find "$path" -mindepth 0 -printf '%p|%s|%T@\n' 2>/dev/null | sort
-    else
-        return 1
-    fi
+    python3 - "$path" <<'PY'
+import os
+import stat
+import sys
+
+
+def describe(path):
+    metadata = os.lstat(path)
+    print(f"{path}|{metadata.st_mode}|{metadata.st_size}|{metadata.st_mtime_ns}")
+    if stat.S_ISDIR(metadata.st_mode):
+        for entry in sorted(os.scandir(path), key=lambda item: item.name):
+            describe(entry.path)
+
+
+describe(sys.argv[1])
+PY
 }
 
 wait_until_stable() {
@@ -87,7 +98,7 @@ wait_until_stable() {
     local current=""
     local stable_count=0
 
-    for _ in $(seq 1 120); do
+    for _ in $(seq 1 "$STABLE_ATTEMPTS"); do
         [ -e "$path" ] || return 1
 
         current="$(path_signature "$path")" || return 1
@@ -106,8 +117,8 @@ wait_until_stable() {
         sleep "$STABLE_SLEEP_SECONDS"
     done
 
-    log "Timed out waiting for stability, proceeding anyway: $path"
-    return 0
+    log "Timed out waiting for stability: $path"
+    return 1
 }
 
 should_skip() {
@@ -132,7 +143,7 @@ directory_is_ready() {
         return 0
     fi
 
-    [ -f "$dir/$READY_MARKER" ]
+    [ -f "$dir/$READY_MARKER" ] && [ ! -L "$dir/$READY_MARKER" ]
 }
 
 validate_artifact_contract() {
@@ -140,9 +151,9 @@ validate_artifact_contract() {
     local base
     local item
     local relative
-    local nested_dir
     local step_count=0
     local jsonl_count=0
+    local marker_count=0
 
     base="$(basename "$dir")"
     case "$base" in
@@ -153,16 +164,15 @@ validate_artifact_contract() {
             ;;
     esac
 
-    nested_dir="$(find "$dir" -mindepth 1 -type d -print -quit)"
-    if [ -n "$nested_dir" ]; then
-        log "Artifact contract violation: nested directory is not allowed: $nested_dir"
-        return 1
-    fi
-
     while IFS= read -r -d '' item; do
+        if [ -L "$item" ] || [ ! -f "$item" ]; then
+            log "Artifact contract violation: non-regular directory entry: $item"
+            return 1
+        fi
         relative="${item#$dir/}"
         case "$relative" in
             "$READY_MARKER")
+                marker_count=$((marker_count + 1))
                 ;;
             *.step|*.stp)
                 step_count=$((step_count + 1))
@@ -175,10 +185,10 @@ validate_artifact_contract() {
                 return 1
                 ;;
         esac
-    done < <(find "$dir" -mindepth 1 -type f -print0)
+    done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0)
 
-    if [ "$step_count" -ne 1 ] || [ "$jsonl_count" -ne 1 ]; then
-        log "Artifact contract violation: $base requires exactly one STEP/STP file and one JSONL file; found STEP/STP=$step_count JSONL=$jsonl_count"
+    if [ "$step_count" -ne 1 ] || [ "$jsonl_count" -ne 1 ] || [ "$marker_count" -ne 1 ]; then
+        log "Artifact contract violation: $base requires one STEP/STP, one JSONL, and one regular $READY_MARKER; found STEP/STP=$step_count JSONL=$jsonl_count marker=$marker_count"
         return 1
     fi
 
@@ -232,13 +242,13 @@ generate_cadaver_commands_for_dir() {
     done < <(find "$dir" -type f -print0 | sort -z)
 }
 
-upload_path() {
+upload_claimed_path() {
     local path="$1"
     local base
     local cmdfile
     local status
 
-    [ -e "$path" ] || return 0
+    [ -e "$path" ] || [ -L "$path" ] || return 0
 
     base="$(basename "$path")"
 
@@ -247,21 +257,36 @@ upload_path() {
         return 0
     fi
 
+    if [ -L "$path" ] || { [ ! -f "$path" ] && [ ! -d "$path" ]; }; then
+        log "Unsupported upload entry; moving to failed: $path"
+        safe_move_to_dir "$path" "$FAILED_DIR" || log "Could not move failed upload entry: $path"
+        return 1
+    fi
+
+    if [ -d "$path" ] && { [ -L "$path/$READY_MARKER" ] || { [ -e "$path/$READY_MARKER" ] && [ ! -f "$path/$READY_MARKER" ]; }; }; then
+        log "Invalid readiness marker; moving to failed: $path"
+        safe_move_to_dir "$path" "$FAILED_DIR" || log "Could not move failed upload entry: $path"
+        return 1
+    fi
+
     if [ -d "$path" ] && ! directory_is_ready "$path"; then
         log "Directory is not ready yet; missing $READY_MARKER: $path"
         return 0
     fi
 
-    if [ -d "$path" ] && ! validate_artifact_contract "$path"; then
-        log "Moving invalid artifact directory to failed: $path"
-        safe_move_to_dir "$path" "$FAILED_DIR"
-        return 1
-    fi
-
     log "Waiting for item to become stable: $path"
 
     if ! wait_until_stable "$path"; then
-        log "Item disappeared or never became stable: $path"
+        log "Stability check failed: $path"
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            safe_move_to_dir "$path" "$FAILED_DIR" || log "Could not move failed upload entry: $path"
+        fi
+        return 1
+    fi
+
+    if [ -d "$path" ] && ! validate_artifact_contract "$path"; then
+        log "Moving invalid artifact directory to failed: $path"
+        safe_move_to_dir "$path" "$FAILED_DIR" || log "Could not move failed upload entry: $path"
         return 1
     fi
 
@@ -290,13 +315,30 @@ upload_path() {
 
     if [ "$status" -eq 0 ]; then
         log "Upload succeeded: $path"
-        safe_move_to_dir "$path" "$DONE_DIR"
-        return 0
+        if safe_move_to_dir "$path" "$DONE_DIR"; then
+            return 0
+        fi
+        log "Upload succeeded remotely, but could not move local entry to uploaded: $path"
+        return 1
     else
         log "Upload failed: $path"
-        safe_move_to_dir "$path" "$FAILED_DIR"
+        safe_move_to_dir "$path" "$FAILED_DIR" || log "Could not move failed upload entry: $path"
         return 1
     fi
+}
+
+upload_path() {
+    local path="$1"
+    local status
+
+    [ -e "$path" ] || [ -L "$path" ] || return 0
+    python3 "$script_dir/claim_upload.py" "$LOCK_DIR" "$script_dir/cadaver_upload.sh" "$path"
+    status=$?
+    if [ "$status" -eq 75 ]; then
+        log "Upload already claimed by another worker: $path"
+        return 0
+    fi
+    return "$status"
 }
 
 scan_watch_dir() {
@@ -334,6 +376,7 @@ run_watch_mode() {
     log "Require ready marker for directories: $REQUIRE_READY_MARKER_FOR_DIRS"
     log "Stability checks: $STABLE_CHECKS"
     log "Stability sleep seconds: $STABLE_SLEEP_SECONDS"
+    log "Stability attempts: $STABLE_ATTEMPTS"
     log "Rescan seconds: $RESCAN_SECONDS"
 
     if ! command -v inotifywait >/dev/null 2>&1; then
@@ -367,6 +410,15 @@ run_watch_mode() {
 
 main() {
     local path
+
+    if [ "${1:-}" = "--claimed" ]; then
+        if [ "$#" -ne 2 ]; then
+            echo "Usage: cadaver_upload.sh --claimed <path>" >&2
+            return 2
+        fi
+        upload_claimed_path "$2"
+        return $?
+    fi
 
     if [ $# -gt 0 ]; then
         if ! command -v cadaver >/dev/null 2>&1; then

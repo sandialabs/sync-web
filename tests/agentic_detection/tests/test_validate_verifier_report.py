@@ -1,8 +1,9 @@
 import importlib.util
+import hashlib
 import json
+import tempfile
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_SPEC = importlib.util.spec_from_file_location(
@@ -11,7 +12,6 @@ MODULE_SPEC = importlib.util.spec_from_file_location(
 validator = importlib.util.module_from_spec(MODULE_SPEC)
 assert MODULE_SPEC.loader is not None
 MODULE_SPEC.loader.exec_module(validator)
-
 
 def valid_report():
     verdicts = []
@@ -61,7 +61,6 @@ def valid_report():
         "verdicts": verdicts,
     }
 
-
 class VerifierReportValidationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -76,6 +75,51 @@ class VerifierReportValidationTests(unittest.TestCase):
         report = valid_report()
         validator.validate(report, self.schema, self.schema)
         validator.validate_semantics(report, self.specification)
+
+    def test_manifest_and_report_must_match_downloaded_files(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "tests") as temporary:
+            run_dir = Path(temporary)
+            manifest = {"task_id": "cad-redteam-001", "agents": {}}
+            report = valid_report()
+            report["verifier"]["input_directory"] = run_dir.relative_to(ROOT).as_posix()
+            for inventory in report["artifact_inventory"]:
+                agent_name = inventory["agent_name"]
+                agent_dir = run_dir / agent_name
+                agent_dir.mkdir()
+                manifest["agents"][agent_name] = {}
+                for key, suffix, artifact_type in (
+                    ("step_file", ".step", "STEP"),
+                    ("session_log", ".jsonl", "SESSION_LOG"),
+                ):
+                    path = agent_dir / f"{agent_name}{suffix}"
+                    content = f"{agent_name}:{key}".encode()
+                    path.write_bytes(content)
+                    relative_path = path.relative_to(ROOT).as_posix()
+                    digest = hashlib.sha256(content).hexdigest()
+                    manifest["agents"][agent_name][key] = {
+                        "filename": path.name,
+                        "local_path": relative_path,
+                        "size": len(content),
+                        "sha256": digest,
+                    }
+                    inventory["artifacts"].append({
+                        "path": relative_path,
+                        "type": artifact_type,
+                        "size_bytes": len(content),
+                        "sha256": digest,
+                        "modified_at": None,
+                    })
+
+            manifest_path = run_dir / "verifier_input.json"
+            manifest_path.write_text(json.dumps(manifest))
+            validator.validate_manifest_consistency(report, manifest, manifest_path)
+            report["artifact_inventory"][0]["artifacts"][0]["sha256"] = "0" * 64
+            with self.assertRaisesRegex(validator.ValidationError, "metadata differs"):
+                validator.validate_manifest_consistency(report, manifest, manifest_path)
+            report["artifact_inventory"][0]["artifacts"][0]["sha256"] = manifest["agents"]["cad_agent"]["step_file"]["sha256"]
+            (run_dir / "cad_agent/cad_agent.step").write_bytes(b"changed")
+            with self.assertRaisesRegex(validator.ValidationError, "differs from manifest"):
+                validator.validate_manifest_consistency(report, manifest, manifest_path)
 
     def test_rejects_extra_field(self):
         report = valid_report()
@@ -156,7 +200,6 @@ class VerifierReportValidationTests(unittest.TestCase):
             validator.validate_report_path(
                 Path("verifier_files/report.json"), self.specification
             )
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,8 @@
-# Adversarial Agent Detection
+# Adversarial CAD Artifact Detection Demo
 
-This workflow runs an honest CAD agent and a deliberately adversarial CAD agent, uploads their STEP files and audit logs to sync-web, downloads both sets of artifacts, and produces a validated verifier report.
+This manual experimental demonstration runs an honest CAD agent and a deliberately adversarial CAD agent, exchanges their STEP files and session logs through Sync Web WebDAV, and checks the downloaded STEP artifacts against a structured source-of-truth CAD specification. A model-generated verifier assessment is validated against the report schema.
+
+A geometry mismatch is observable artifact noncompliance. Bad faith or intent is an inference from the available artifacts and logs, which do not constitute an independently retained execution trace. The assessment is not a production security control or a conclusive attribution mechanism.
 
 ## Requirements
 
@@ -9,7 +11,7 @@ The shell commands below target a Debian/Ubuntu Linux environment.
 - A running local [sync-web](https://github.com/sandialabs/sync-web) stack
 - Python 3
 - [OpenCode](https://opencode.ai/download)
-- `cadaver` for WebDAV transfers
+- `cadaver` for background WebDAV uploads
 - `inotifywait` from `inotify-tools` for the background uploader
 
 Install the public command-line dependencies with:
@@ -69,6 +71,8 @@ Restrict access to the credential file:
 chmod 600 ~/.netrc
 ```
 
+The uploader uses these `.netrc` credentials through `cadaver`, and the verifier-input fetcher reads the same file. For the fetcher only, `WEBDAV_USERNAME` and `WEBDAV_PASSWORD` can supply Basic credentials instead of `.netrc`. Set `WEBDAV_PASSWORD` to the sync-web API token, not the account password. The uploader still requires `.netrc`.
+
 ## Run the workflow
 
 First, launch the local sync-web stack using its [project instructions](https://github.com/sandialabs/sync-web/blob/main/README.md).
@@ -85,13 +89,14 @@ kill -- -"$uploader_pid"
 
 The workflow performs these operations:
 
-1. Runs `cad_agent` and `adversarial_cad_agent` concurrently
+1. Records a start boundary, then runs `cad_agent` and `adversarial_cad_agent` concurrently
 2. Places completed STEP and JSONL artifacts in `incoming/`
-3. Uploads ready artifacts to sync-web and moves local copies to `uploaded/`
-4. Downloads a fresh snapshot into `verifier_files/runs/<run-id>/`
-5. Runs the verifier and validates its report against the versioned report schema
+3. Serializes uploader processing per incoming path, uploads ready artifacts to sync-web, and moves each local directory to `uploaded/` or `failed/` according to the result
+4. Polls WebDAV for one complete STEP/JSONL pair from each agent with timestamps and modification times at or after the boundary
+5. Downloads those pairs into `verifier_files/runs/<run-id>/` and writes `verifier_input.json` with paths, lengths, SHA-256 hashes, and WebDAV provenance
+6. Runs the verifier on the exact files in the manifest and validates its report against the manifest and versioned report schema
 
-If either CAD agent fails, the verifier is not run
+If either CAD agent fails or complete current-run pairs do not appear within the fetch timeout, the workflow fails without running the verifier.
 
 ## View reports and logs
 

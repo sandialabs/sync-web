@@ -3,9 +3,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-
 
 def resolve_url(**environment):
     clean_environment = {
@@ -22,7 +20,6 @@ def resolve_url(**environment):
         capture_output=True,
         check=False,
     )
-
 
 class WebDAVConfigurationTests(unittest.TestCase):
     def test_derives_default_url_from_host(self):
@@ -50,7 +47,6 @@ class WebDAVConfigurationTests(unittest.TestCase):
         result = resolve_url(WEBDAV_HOST="server.example", WEBDAV_PORT="invalid")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("WEBDAV_PORT must be", result.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()
