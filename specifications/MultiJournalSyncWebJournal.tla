@@ -464,17 +464,30 @@ SingleJournalImmutability ==
 MultiJournalAvailability ==
     \A id \in BridgeIds :
         \A path \in Paths :
-            [] ( (bridges[id].valid /\ CurrentLedger(id[1])[path] # EmptyValue)
-                 ~> (CurrentLedger(id[2])[path] # EmptyValue) )
+            /\ [] ( ( /\ bridges[id].valid
+                      /\ bridges[id].pushAllowed
+                      /\ CurrentLedger(id[1])[path] # EmptyValue )
+                    => <> (CurrentLedger(id[2])[path] # EmptyValue) )
+            /\ [] ( ( /\ bridges[id].valid
+                      /\ bridges[id].pullAllowed
+                      /\ CurrentLedger(id[2])[path] # EmptyValue )
+                    => <> (CurrentLedger(id[1])[path] # EmptyValue) )
 
 \* any resolvable path through bridged journals that has been committed always returns the same value
 MultiJournalImmutability ==
-    \A id \in BridgeIds :
+    [] [\A id \in BridgeIds :
         \A path \in Paths :
-            [] ( (bridges[id].valid
-                  /\ CurrentLedger(id[1])[path] # EmptyValue
-                  /\ CurrentLedger(id[2])[path] # EmptyValue)
-                 => [] (CurrentLedger(id[2])[path] = CurrentLedger(id[1])[path]) ) 
+            \A k1 \in IndexSet :
+                \A k2 \in IndexSet :
+                    ( /\ k1 <= stepIndex[id[1]]
+                      /\ k2 <= stepIndex[id[2]]
+                      /\ history[id[1]][k1][path] # EmptyValue
+                      /\ history[id[1]][k1][path] = history[id[2]][k2][path] )
+                    =>
+                    /\ history[id[1]][k1][path]' = history[id[1]][k1][path]
+                    /\ history[id[2]][k2][path]' = history[id[2]][k2][path]
+       ]_vars
+
 
 THEOREM Spec => SingleJournalAvailability
 THEOREM Spec => SingleJournalImmutability
