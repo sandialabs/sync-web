@@ -88,9 +88,9 @@ DecodeIdx(s) == \* index conversion
 
 ApplyEvent(evt) ==
     CASE evt.op = "stage_set" -> stage_set(evt.j, evt.path, evt.value)
-      [] evt.op = "stage_get" -> stage_get(evt.j, evt.path)
-      [] evt.op = "resolve" -> resolve(evt.j, DecodeIdx(evt.idx), evt.path, evt.pinnedOnly, evt.includeProof)
-      [] evt.op = "ledger_pin" -> ledger_pin(evt.j, DecodeIdx(evt.idx), evt.path)
+      [] evt.op = "stage_get" -> StageGetChecked(evt.j, evt.path, evt.checked, evt.expect)
+      [] evt.op = "resolve" -> ResolveChecked(evt.j, DecodeIdx(evt.idx), evt.path, evt.pinnedOnly, evt.includeProof, evt.checked, evt.expect)
+      [] evt.op = "ledger_pin" -> ledger_pin(evt.j, DecodeIdx(evt.idx), evt.path)      
       [] evt.op = "ledger_unpin" -> ledger_unpin(evt.j, DecodeIdx(evt.idx), evt.path)
       [] evt.op = "step" -> step(evt.j)
       [] evt.op = "bridge" /\ evt.mode = "fail" -> BridgeFailForced(evt.source, evt.target)
@@ -99,8 +99,6 @@ ApplyEvent(evt) ==
       [] evt.op = "bridgePushNoOp" -> bridgePushNoOp(evt.source, evt.target)
       [] evt.op = "bridgePull" -> bridgePull(evt.source, evt.target)
       [] evt.op = "bridgePullNoOp" -> bridgePullNoOp(evt.source, evt.target)
-      [] evt.op = "stage_get" -> StageGetChecked(evt.j, evt.path, evt.checked, evt.expect)
-      [] evt.op = "resolve" -> ResolveChecked(evt.j, DecodeIdx(evt.idx), evt.path, evt.pinnedOnly, evt.includeProof, evt.checked, evt.expect)
 
 TraceNext ==
     \/ /\ traceIndex <= TraceLen

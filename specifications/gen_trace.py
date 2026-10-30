@@ -4,6 +4,7 @@
 # Everything else that is not translated will be skipped.
 
 import argparse
+import collections
 import hashlib
 import json
 import sys
@@ -154,7 +155,7 @@ def parse_sexpr_line(line):
         raise SExprSyntaxError(f"Expected exactly one top-level form, got {len(exprs)}")
     return exprs[0]
 
-def read_content(value): # replaces extract_content's body
+def unwrap_content(value): # replaces extract_content's body
     if (isinstance(value, list) and len(value) >= 1 and
             isinstance(value[0], list) and len(value[0]) == 2 and
             value[0][0] == Symbol("content")):
@@ -163,12 +164,52 @@ def read_content(value): # replaces extract_content's body
 
 
 def extract_content(value):
-    return read_content(value)[1]
+    return unwrap_content(value)[1]
+
+def read_content(value):
+    wrapped, content = unwrap_content(value)
+    if isinstance(content, bool) or isinstance(content, Symbol):
+        return False, content
+    if isinstance(content, (str, int, float, ByteVector)):
+        return True, content
+    return False, content
 
 
-def read_expectation(symtab, value):
+def serialize_value(v): # properly store bytes
+    if isinstance(v, bool) or isinstance(v, Symbol):
+        return None
+    if isinstance(v, ByteVector):
+        return bytes(v.values)
+    if isinstance(v, int):
+        return str(v).encode()
+    if isinstance(v, str):
+        return ('"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"').encode("utf-8")
+    return None
+
+
+UNMODELED_READ_PATHS = {"*state*/*time*"}
+UNCHECKED_REASONS = collections.Counter()
+
+
+def read_expectation(symtab, value, path_atom, resolved=False):
+    def unchecked(why):
+        UNCHECKED_REASONS[why] += 1
+        return {"checked": False, "expect": ""}
+
+    if path_atom in UNMODELED_READ_PATHS:
+        return unchecked(f"{path_atom} is not modeled (model step writes \"0\")")
     found, content = read_content(value)
-    return {"checked": found, "expect": symtab.canon_value(content) if found else ""}
+    if not found:
+        return unchecked("result shape not recognised (not a bare string/number/bytes or (content X))")
+    if resolved and isinstance(content, ByteVector):
+        atoms = symtab.by_serialized.get(bytes(content.values), set())
+        if len(atoms) != 1:
+            return unchecked("resolve bytes match no single value written by set!")
+        return {"checked": True, "expect": next(iter(atoms))}
+    atom = symtab.canon_value(content)
+    if atom == "":
+        return unchecked("empty content can't be told apart from no value in the model")
+    return {"checked": True, "expect": atom}
 
 def load_events(log_path): # reads trace.log
     events = []
@@ -278,6 +319,12 @@ class SymbolTable: # renames configs
         self.path_map = {}
         self.value_map = {}
         self.journal_map = {}
+        self.by_serialized = {} # byte form of values written by set! and set-batch
+
+    def note_written(self, value, atom):
+        ser = serialize_value(value)
+        if ser is not None and atom != "":
+            self.by_serialized.setdefault(ser, set()).add(atom)
 
     def canon_journal(self, sym):
         name = str(sym)
@@ -453,6 +500,7 @@ def convert(events, symtab, traced_journals):
             value = "" if is_sentinel(raw_value) else raw_value
             path_atom = symtab.canon_path(segs)
             value_atom = symtab.canon_value(value)
+            symtab.note_written(value, value_atom)
             ops.append({"op": "stage_set", "j": j, "path": path_atom, "value": value_atom})
             sim.apply_stage_set(j, path_atom, value_atom)
 
@@ -467,6 +515,7 @@ def convert(events, symtab, traced_journals):
                 value = "" if is_sentinel(v) else v
                 path_atom = symtab.canon_path(segs)
                 value_atom = symtab.canon_value(value)
+                symtab.note_written(value, value_atom)
                 ops.append({"op": "stage_set", "j": j, "path": path_atom, "value": value_atom})
                 sim.apply_stage_set(j, path_atom, value_atom)
 
@@ -483,7 +532,8 @@ def convert(events, symtab, traced_journals):
             if isinstance(content, list) and len(content) > 0 and content[0] == "directory":
                 skipped.append((ev, "directory read not modeled"))
                 continue
-            ops.append({"op": "stage_get", "j": j, "path": symtab.canon_path(segs), **read_expectation(symtab, ev.value)})
+            path_atom = symtab.canon_path(segs)
+            ops.append({"op": "stage_get", "j": j, "path": path_atom, **read_expectation(symtab, ev.value, path_atom)})
 
         elif m == "resolve": # resolve
             ok, norm = normalize_path(a[0], allow_index=True)
@@ -504,14 +554,15 @@ def convert(events, symtab, traced_journals):
             if isinstance(content, list) and len(content) > 0 and content[0] == "directory":
                 skipped.append((ev, "directory resolve not modeled"))
                 continue
+            path_atom = symtab.canon_path(segs)
             ops.append({
                 "op": "resolve",
                 "j": j,
                 "idx": str(idx),
-                "path": symtab.canon_path(segs),
+                "path": path_atom,
                 "pinnedOnly": pinned_,
                 "includeProof": proof_,
-                **read_expectation(symtab, ev.value)
+                **read_expectation(symtab, ev.value, path_atom, resolved=True)
             })
 
         elif m == "pin!": # ledger_pin
@@ -769,7 +820,9 @@ def main():
     unchecked = [op for op in reads if not op["checked"]]
     print(f"Read results: {len(reads) - len(unchecked)} of {len(reads)} will have values checked.", file=sys.stderr)
     if unchecked:
-        print(f"  WARNING: {len(unchecked)} reads had no ((content X) ...) result. Replayed without value checking.", file=sys.stderr)
+        print(f"  WARNING: {len(unchecked)} read(s) are replayed without a value check:", file=sys.stderr)
+        for why, n in UNCHECKED_REASONS.most_common():
+            print(f"    [{n}x] {why}", file=sys.stderr)
 
 
     # skipped events
