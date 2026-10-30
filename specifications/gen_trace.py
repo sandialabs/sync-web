@@ -154,9 +154,21 @@ def parse_sexpr_line(line):
         raise SExprSyntaxError(f"Expected exactly one top-level form, got {len(exprs)}")
     return exprs[0]
 
+def read_content(value): # replaces extract_content's body
+    if (isinstance(value, list) and len(value) >= 1 and
+            isinstance(value[0], list) and len(value[0]) == 2 and
+            value[0][0] == Symbol("content")):
+        return True, value[0][1]
+    return False, value
 
 
+def extract_content(value):
+    return read_content(value)[1]
 
+
+def read_expectation(symtab, value):
+    found, content = read_content(value)
+    return {"checked": found, "expect": symtab.canon_value(content) if found else ""}
 
 def load_events(log_path): # reads trace.log
     events = []
@@ -471,7 +483,7 @@ def convert(events, symtab, traced_journals):
             if isinstance(content, list) and len(content) > 0 and content[0] == "directory":
                 skipped.append((ev, "directory read not modeled"))
                 continue
-            ops.append({"op": "stage_get", "j": j, "path": symtab.canon_path(segs)})
+            ops.append({"op": "stage_get", "j": j, "path": symtab.canon_path(segs), **read_expectation(symtab, ev.value)})
 
         elif m == "resolve": # resolve
             ok, norm = normalize_path(a[0], allow_index=True)
@@ -498,7 +510,8 @@ def convert(events, symtab, traced_journals):
                 "idx": str(idx),
                 "path": symtab.canon_path(segs),
                 "pinnedOnly": pinned_,
-                "includeProof": proof_
+                "includeProof": proof_,
+                **read_expectation(symtab, ev.value)
             })
 
         elif m == "pin!": # ledger_pin
@@ -680,6 +693,8 @@ def generate_cfg(journal_names, paths, values, max_window, max_index):
         "   SingleJournalImmutability",
         "   MultiJournalAvailability",
         "   MultiJournalImmutability",
+        #"",
+        #" CONSTRAINT StateConstraint", # Add if its taking too long, will shorten space search
     ]
     return "\n".join(lines)
 
@@ -721,6 +736,7 @@ def main():
     values = {op["value"] for op in ops if "value" in op and op["value"] != ""}
     values |= {op["interface"] for op in ops if "interface" in op and op["interface"] != ""}
     values |= {op["info"] for op in ops if "info" in op and op["info"] != ""}
+    values |= {op["expect"] for op in ops if op.get("checked") and op["expect"] != ""}
 
 
     # maxIndex calculation (# of step operations + 4)
@@ -749,6 +765,11 @@ def main():
     print(f"Wrote {args.output_dir / 'trace-symbols.json'}", file=sys.stderr)
 
 
+    reads = [op for op in ops if op["op"] in ("stage_get", "resolve")]
+    unchecked = [op for op in reads if not op["checked"]]
+    print(f"Read results: {len(reads) - len(unchecked)} of {len(reads)} will have values checked.", file=sys.stderr)
+    if unchecked:
+        print(f"  WARNING: {len(unchecked)} reads had no ((content X) ...) result. Replayed without value checking.", file=sys.stderr)
 
 
     # skipped events

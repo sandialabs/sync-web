@@ -54,6 +54,24 @@ BridgeFailForced(source, target) ==
             ELSE bridges[b]]
     /\ UNCHANGED <<history, stage, pins, config, timeCounter, stepIndex>>
 
+
+ModelResolveValue(j, idx, path) ==
+    LET k == ResolveIndex(j, idx) IN
+        IF k = stepIndex[j] /\ stage[j][path] # EmptyValue
+        THEN stage[j][path]
+        ELSE history[j][k][path]
+
+StageGetChecked(j, path, checked, expected) ==
+    /\ stage_get(j, path)
+    /\ checked => Assert(stage[j][path] = expected,
+                         <<"stage_get content mismatch", j, path, "model", stage[j][path], "trace", expected>>)
+
+ResolveChecked(j, idx, path, pinnedOnly, includeProof, checked, expected) ==
+    /\ resolve(j, idx, path, pinnedOnly, includeProof)
+    /\ checked => Assert(ModelResolveValue(j, idx, path) = expected,
+                         <<"resolve content mismatch", j, idx, path, "model", ModelResolveValue(j, idx, path), "trace", expected>>)
+
+
 DecodeIdx(s) == \* index conversion
     CASE s = "-5" -> -5
       [] s = "-4" -> -4
@@ -81,6 +99,8 @@ ApplyEvent(evt) ==
       [] evt.op = "bridgePushNoOp" -> bridgePushNoOp(evt.source, evt.target)
       [] evt.op = "bridgePull" -> bridgePull(evt.source, evt.target)
       [] evt.op = "bridgePullNoOp" -> bridgePullNoOp(evt.source, evt.target)
+      [] evt.op = "stage_get" -> StageGetChecked(evt.j, evt.path, evt.checked, evt.expect)
+      [] evt.op = "resolve" -> ResolveChecked(evt.j, DecodeIdx(evt.idx), evt.path, evt.pinnedOnly, evt.includeProof, evt.checked, evt.expect)
 
 TraceNext ==
     \/ /\ traceIndex <= TraceLen
